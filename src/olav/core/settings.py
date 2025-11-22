@@ -81,36 +81,47 @@ class EnvSettings(BaseSettings):
             self.environment = "docker"
         
         # Auto-build URIs if not provided
+        # Graceful import of config.settings with fallback stub for tests/minimal environments
+        try:  # pragma: no cover - defensive branch
+            from config.settings import InfrastructureConfig  # type: ignore
+        except Exception:  # pragma: no cover
+            class InfrastructureConfig:  # minimal fallback
+                POSTGRES_HOST_DOCKER = "postgres"
+                POSTGRES_PORT_DOCKER = 5432
+                POSTGRES_HOST_LOCAL = "localhost"
+                POSTGRES_PORT_LOCAL = 55432
+                OPENSEARCH_HOST_DOCKER = "opensearch"
+                OPENSEARCH_PORT_DOCKER = 9200
+                OPENSEARCH_HOST_LOCAL = "localhost"
+                OPENSEARCH_PORT_LOCAL = 9200
+                REDIS_HOST_DOCKER = "redis"
+                REDIS_PORT_DOCKER = 6379
+                REDIS_HOST_LOCAL = "localhost"
+                REDIS_PORT_LOCAL = 6379
+                POSTGRES_DB = "olav"
+                @classmethod
+                def get_postgres_uri(cls, host: str, port: int, user: str, password: str) -> str:
+                    return f"postgresql://{user}:{password}@{host}:{port}/{cls.POSTGRES_DB}"
+                @classmethod
+                def get_opensearch_url(cls, host: str, port: int) -> str:
+                    return f"http://{host}:{port}"
+                @classmethod
+                def get_redis_url(cls, host: str, port: int) -> str:
+                    return f"redis://{host}:{port}"
+
         if not self.postgres_uri:
-            from config.settings import InfrastructureConfig
-            if self.environment == "docker":
-                host = InfrastructureConfig.POSTGRES_HOST_DOCKER
-                port = InfrastructureConfig.POSTGRES_PORT_DOCKER
-            else:
-                host = InfrastructureConfig.POSTGRES_HOST_LOCAL
-                port = InfrastructureConfig.POSTGRES_PORT_LOCAL
-            self.postgres_uri = InfrastructureConfig.get_postgres_uri(
-                host, port, self.postgres_user, self.postgres_password
-            )
-        
+            host = InfrastructureConfig.POSTGRES_HOST_DOCKER if self.environment == "docker" else InfrastructureConfig.POSTGRES_HOST_LOCAL
+            port = InfrastructureConfig.POSTGRES_PORT_DOCKER if self.environment == "docker" else InfrastructureConfig.POSTGRES_PORT_LOCAL
+            self.postgres_uri = InfrastructureConfig.get_postgres_uri(host, port, self.postgres_user, self.postgres_password)
+
         if not self.opensearch_url:
-            from config.settings import InfrastructureConfig
-            if self.environment == "docker":
-                host = InfrastructureConfig.OPENSEARCH_HOST_DOCKER
-                port = InfrastructureConfig.OPENSEARCH_PORT_DOCKER
-            else:
-                host = InfrastructureConfig.OPENSEARCH_HOST_LOCAL
-                port = InfrastructureConfig.OPENSEARCH_PORT_LOCAL
+            host = InfrastructureConfig.OPENSEARCH_HOST_DOCKER if self.environment == "docker" else InfrastructureConfig.OPENSEARCH_HOST_LOCAL
+            port = InfrastructureConfig.OPENSEARCH_PORT_DOCKER if self.environment == "docker" else InfrastructureConfig.OPENSEARCH_PORT_LOCAL
             self.opensearch_url = InfrastructureConfig.get_opensearch_url(host, port)
-        
+
         if not self.redis_url:
-            from config.settings import InfrastructureConfig
-            if self.environment == "docker":
-                host = InfrastructureConfig.REDIS_HOST_DOCKER
-                port = InfrastructureConfig.REDIS_PORT_DOCKER
-            else:
-                host = InfrastructureConfig.REDIS_HOST_LOCAL
-                port = InfrastructureConfig.REDIS_PORT_LOCAL
+            host = InfrastructureConfig.REDIS_HOST_DOCKER if self.environment == "docker" else InfrastructureConfig.REDIS_HOST_LOCAL
+            port = InfrastructureConfig.REDIS_PORT_DOCKER if self.environment == "docker" else InfrastructureConfig.REDIS_PORT_LOCAL
             self.redis_url = InfrastructureConfig.get_redis_url(host, port)
 
 

@@ -71,7 +71,7 @@ class ChatUI:
         
         Args:
             content: Response content (supports Markdown)
-            metadata: Optional metadata (tools_used, data_source, etc.)
+            metadata: Optional metadata (tools_used, data_source, timings, etc.)
         """
         # Render content as Markdown
         md = Markdown(content)
@@ -101,6 +101,11 @@ class ChatUI:
                 padding=(1, 2),
             )
         )
+        
+        # Display timing information if available
+        if metadata and "timings" in metadata and metadata["timings"]:
+            self._show_timings(metadata["timings"])
+        
         self.console.print()
     
     def get_tool_display_name(self, tool_name: str) -> str:
@@ -183,3 +188,38 @@ class ChatUI:
             message: Info message to display
         """
         self.console.print(f"[cyan]ℹ️  {message}[/cyan]")
+    
+    def _show_timings(self, timings: list[dict[str, Any]]) -> None:
+        """Display tool execution timings in a compact table.
+        
+        Args:
+            timings: List of timing records with 'tool' and 'elapsed_sec'
+        """
+        from rich.table import Table
+        
+        table = Table(title="⏱️  [cyan]工具执行耗时[/cyan]", box=None, show_header=True, padding=(0, 1))
+        table.add_column("工具", style="yellow", no_wrap=True)
+        table.add_column("耗时", style="magenta", justify="right")
+        
+        for timing in timings:
+            tool_name = self.get_tool_display_name(timing.get("tool", "unknown"))
+            elapsed = timing.get("elapsed_sec", 0)
+            
+            # Format timing with appropriate precision
+            if elapsed < 0.001:
+                elapsed_str = f"{elapsed * 1000000:.0f}µs"
+            elif elapsed < 1:
+                elapsed_str = f"{elapsed * 1000:.1f}ms"
+            else:
+                elapsed_str = f"{elapsed:.3f}s"
+            
+            table.add_row(tool_name, elapsed_str)
+        
+        # Add total if multiple tools
+        if len(timings) > 1:
+            total = sum(t.get("elapsed_sec", 0) for t in timings)
+            table.add_section()
+            table.add_row("[bold]总计[/bold]", f"[bold]{total:.3f}s[/bold]")
+        
+        self.console.print(table)
+        self.console.print()

@@ -12,10 +12,13 @@ from olav.tools.opensearch_tool import search_episodic_memory, search_openconfig
 def create_rag_subagent() -> SubAgent:
     """Create the RAG SubAgent.
 
+    Provides a default 'priority' context variable to satisfy prompt templates
+    that may declare it. If the template does not require it, it is ignored.
+
     Returns:
         Configured SubAgent for retrieval tasks (read-only, no HITL needed).
     """
-    rag_prompt = prompt_manager.load_agent_prompt("rag_agent")
+    rag_prompt = prompt_manager.load_agent_prompt("rag_agent", priority="normal")
     
     return SubAgent(
         name="rag-searcher",
