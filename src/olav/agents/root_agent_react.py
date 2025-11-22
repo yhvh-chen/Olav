@@ -12,7 +12,7 @@ if sys.platform == "win32":
     import asyncio
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from langchain.agents import create_react_agent, AgentExecutor
+from deepagents import create_deep_agent
 from langchain_core.prompts import PromptTemplate
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -72,7 +72,6 @@ async def create_root_agent_react():
     ]
 
     # Load ReAct prompt template
-    # Note: PromptTemplate expects specific variables: tools, tool_names, agent_scratchpad, input
     react_prompt_str = prompt_manager.load_agent_prompt(
         "root_agent_react",
         user_name=os.getenv("USER", "operator"),
@@ -80,31 +79,22 @@ async def create_root_agent_react():
         max_iterations=AgentConfig.MAX_ITERATIONS,
     )
     
-    # Create PromptTemplate with required variables
-    # ReAct format requires: input, tools, tool_names, agent_scratchpad
-    prompt = PromptTemplate(
-        input_variables=["input", "tools", "tool_names", "agent_scratchpad"],
-        template=react_prompt_str,
-    )
-
-    # Create ReAct agent
-    agent = create_react_agent(
-        llm=model,
+    # Create ReAct agent using DeepAgents (without SubAgents for flat architecture)
+    # DeepAgents already implements ReAct pattern internally when tools are provided directly
+    agent = create_deep_agent(
+        model=model,
         tools=tools,
-        prompt=prompt,
+        system_prompt=react_prompt_str,
+        checkpointer=checkpointer,
+        subagents=[],  # Empty - this is the key difference from Legacy (flat vs hierarchical)
+        interrupt_on={
+            # HITL for write operations
+            "netconf_tool": True,
+            "cli_tool": True,
+        },
     )
 
-    # Wrap in AgentExecutor
-    executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        max_iterations=AgentConfig.MAX_ITERATIONS,
-        handle_parsing_errors=True,  # Handle LLM format errors gracefully
-        return_intermediate_steps=True,  # For debugging and UI display
-    )
-
-    return executor, checkpointer_manager
+    return agent, checkpointer_manager
 
 
 # Export both functions for backward compatibility
