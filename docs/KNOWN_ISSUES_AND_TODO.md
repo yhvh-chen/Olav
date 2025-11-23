@@ -764,8 +764,15 @@ uv run python -m olav.main chat "创建一个测试设备"  # 触发 netbox_api_
   3) 生成结构化 Markdown 巡检报告（支持按日归档）
   4) 用户可用 cron 或 Windows 计划任务定时执行，实现“每天巡检”
 
-**YAML 模板建议位置**
-- `config/prompts/inspection/*.yaml`
+**启用方式（更新）**
+- 通过设置变量 `INSPECTION_MODE_ENABLED=true` 激活（默认关闭）
+- 配置目录：`INSPECTION_CONFIG_DIR=config/prompts/inspection`
+- 报告目录：`INSPECTION_REPORT_DIR=reports/inspection`
+- 默认计划文件：`INSPECTION_DEFAULT_PLAN=daily_core_checks.yaml`
+- 并行上限：`INSPECTION_MAX_PARALLEL=5`
+
+**YAML 模板目录**
+- 所有计划：`config/prompts/inspection/*.yaml`
 
 **示例模板（草案）**
 ```yaml
@@ -836,6 +843,24 @@ uv run olav.py --mode inspection \
   --output reports/inspection/daily_core_checks-$(date +%F).md
 ```
 
+**容器化调度（新增）**
+```yaml
+services:
+  olav-inspection:
+    build: .
+    environment:
+      INSPECTION_MODE_ENABLED: "true"
+      INSPECTION_CONFIG_DIR: "config/prompts/inspection"
+      INSPECTION_REPORT_DIR: "reports/inspection"
+      INSPECTION_DEFAULT_PLAN: "daily_core_checks.yaml"
+      INSPECTION_MAX_PARALLEL: 5
+    volumes:
+      - ./reports/inspection:/app/reports/inspection
+      - ./config/prompts/inspection:/app/config/prompts/inspection:ro
+    profiles: [inspection]
+```
+容器内置 cron 每日 08:00 运行默认计划，避免宿主机差异。
+
 **Windows 计划任务（示例，仅文档）**
 ```powershell
 $workDir = "C:\Users\<you>\Documents\code\Olav"
@@ -855,10 +880,11 @@ schtasks /Create /SC DAILY /ST 08:00 /TN "OLAV Daily Inspection" /TR "$cmd"
 - 报告包含：统计总览、逐项结论、建议、关键证据（表格/字段列举）。
 - 失败/不确定项高亮，附带下一步建议（可选进入 HITL）。
 
-**开放问题**
+**开放问题（更新）**
 - `netconf_check` 等需要 HITL 的写/读敏感操作如何在计划任务中安全运行？
 - 巡检报告是否需要同时生成 JSON 以便机读？
 - 是否需要“阈值基线快照”的管理命令（导入/导出）？
+- 是否需要容器健康检查与报告生成失败重试策略？
 
 **后续动作（仅文档阶段）**
 - 新增 `docs/INSPECTION_MODE.md` 详细规格（本次已添加）。
