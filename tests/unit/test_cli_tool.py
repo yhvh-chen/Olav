@@ -47,7 +47,7 @@ def patch_sandbox(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_query_parsed_success(patch_sandbox):
-    result = await cli_tool(device="R1", command="show ip interface brief")
+    result = await cli_tool.ainvoke({"device": "R1", "command": "show ip interface brief"})
     assert result["success"] is True
     assert result["parsed"] is True
     assert isinstance(result["output"], list)
@@ -55,63 +55,63 @@ async def test_query_parsed_success(patch_sandbox):
 
 @pytest.mark.asyncio
 async def test_query_raw_fallback(patch_sandbox):
-    result = await cli_tool(device="R1", command="show version")
+    result = await cli_tool.ainvoke({"device": "R1", "command": "show version"})
     assert result["success"] is True
     assert result["parsed"] is False
     assert isinstance(result["output"], str)
 
 @pytest.mark.asyncio
 async def test_query_blacklist_block(patch_sandbox):
-    result = await cli_tool(device="R1", command="traceroute 8.8.8.8")
+    result = await cli_tool.ainvoke({"device": "R1", "command": "traceroute 8.8.8.8"})
     assert result["success"] is False
     assert "blacklisted" in result["error"].lower()
 
 @pytest.mark.asyncio
 async def test_query_blacklist_variants(patch_sandbox):
-    result1 = await cli_tool(device="R1", command="trace route 8.8.8.8")
-    result2 = await cli_tool(device="R1", command="trace-route 8.8.8.8")
+    result1 = await cli_tool.ainvoke({"device": "R1", "command": "trace route 8.8.8.8"})
+    result2 = await cli_tool.ainvoke({"device": "R1", "command": "trace-route 8.8.8.8"})
     assert result1["success"] is False and "blacklisted" in result1["error"].lower()
     assert result2["success"] is False and "blacklisted" in result2["error"].lower()
 
 @pytest.mark.asyncio
 async def test_query_custom_blacklist_reload(patch_sandbox):
-    result = await cli_tool(device="R1", command="reload in 5")
+    result = await cli_tool.ainvoke({"device": "R1", "command": "reload in 5"})
     assert result["success"] is False
     assert "blacklisted" in result["error"].lower()
 
 @pytest.mark.asyncio
 async def test_query_device_not_found(patch_sandbox):
-    result = await cli_tool(device="nonexistent", command="show ip interface brief")
+    result = await cli_tool.ainvoke({"device": "nonexistent", "command": "show ip interface brief"})
     assert result["success"] is False
     assert "not found" in result["error"].lower()
 
 @pytest.mark.asyncio
 async def test_config_command_success(patch_sandbox):
-    result = await cli_tool(device="R1", config_commands=["interface Gi0/0", "mtu 9000"])
+    result = await cli_tool.ainvoke({"device": "R1", "config_commands": ["interface Gi0/0", "mtu 9000"]})
     assert result["success"] is True
     assert "CONFIG_APPLIED" in result["output"]
 
 @pytest.mark.asyncio
 async def test_config_device_not_found(patch_sandbox):
-    result = await cli_tool(device="nonexistent", config_commands=["interface Gi0/0", "mtu 9000"])
+    result = await cli_tool.ainvoke({"device": "nonexistent", "config_commands": ["interface Gi0/0", "mtu 9000"]})
     assert result["success"] is False
     assert "not found" in result["error"].lower()
 
 @pytest.mark.asyncio
 async def test_config_hitl_reject(monkeypatch, patch_sandbox):
     patch_sandbox.approval_mode = "reject"
-    result = await cli_tool(device="R1", config_commands=["interface Gi0/0", "mtu 9000"])
+    result = await cli_tool.ainvoke({"device": "R1", "config_commands": ["interface Gi0/0", "mtu 9000"]})
     assert result["success"] is False
     assert "rejected" in result["error"].lower()
 
 @pytest.mark.asyncio
 async def test_invalid_params_both_provided(patch_sandbox):
-    result = await cli_tool(device="R1", command="show ip interface brief", config_commands=["interface Gi0/0"])
-    assert result["success"] is False or "error" in result
+    result = await cli_tool.ainvoke({"device": "R1", "command": "show ip interface brief", "config_commands": ["interface Gi0/0"]})
+    assert "error" in result
     assert "cannot provide" in result.get("error", "").lower()
 
 @pytest.mark.asyncio
 async def test_invalid_params_none_provided(patch_sandbox):
-    result = await cli_tool(device="R1")  # neither command nor config_commands
-    assert result["success"] is False or "error" in result
+    result = await cli_tool.ainvoke({"device": "R1"})  # neither command nor config_commands
+    assert "error" in result
     assert "must provide" in result.get("error", "").lower()

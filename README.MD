@@ -1,28 +1,79 @@
 # OLAV (Omni-Layer Autonomous Verifier)
 
-Enterprise Network Operations ChatOps Platform using LangGraph + DeepAgents.
+Enterprise Network Operations ChatOps Platform using LangGraph Workflows.
 
-## Agent Modes
+## Quick Start
 
-OLAV 现支持两种可选代理架构，通过 `--agent-mode` 选择：
+OLAV 使用**单一 Workflows Orchestrator 架构**，提供两种运行模式：
 
-| Mode | 架构 | 特点 | 适用场景 |
-|------|------|------|----------|
-| `react` (默认) | 单一 create_deep_agent + 直接工具调用 | 扁平、低延迟、推理链清晰 | 生产 & 日常运维 |
-| `legacy` | DeepAgents + 多 SubAgent 分层 | 结构化分工、历史兼容 | 回归测试/对照基准 |
+### Normal Mode（普通模式，默认）
 
-切换示例：
+标准网络运维场景，3 个专用工作流：
+
 ```powershell
-uv run python -m olav.main chat                         # 默认 ReAct
-uv run python -m olav.main chat --agent-mode legacy     # 使用旧架构
-uv run python -m olav.main chat "查询接口状态" -m react # 单次查询
+# Interactive mode
+uv run olav.py
+
+# Single query
+uv run olav.py "查询 R1 接口状态"
+uv run olav.py "为什么 BGP 没有建立邻居？"
+uv run olav.py "修改 R1 MTU 为 9000"
 ```
 
-## ReAct 架构概述
+**可用工作流**:
+- **QueryDiagnosticWorkflow**: 强制漏斗式排错（SuzieQ 宏观 → NETCONF 微观）
+- **DeviceExecutionWorkflow**: 配置变更（Planning → HITL 审批 → Execution → Validation）
+- **NetBoxManagementWorkflow**: 设备清单管理
 
-ReAct 模式使用单一 `create_deep_agent(model, tools=[...], subagents=[])`，直接暴露 8 个核心工具：
+### Expert Mode（专家模式）
+
+复杂多步任务，启用 Deep Dive Workflow：
+
+```powershell
+# Batch audits (30+ devices)
+uv run olav.py -e "审计所有边界路由器的 BGP 安全配置"
+
+# Cross-domain troubleshooting
+uv run olav.py --expert "为什么数据中心 A 无法访问数据中心 B？"
+
+# Recursive diagnostics
+uv run olav.py -e "深入分析 OSPF 邻居关系异常"
 ```
-SuzieQ: suzieq_query, suzieq_schema_search
+
+**Deep Dive 能力**:
+- 自动任务分解（LLM 生成 Todo List）
+- 递归深入诊断（最大 3 层）
+- 批量并行执行（asyncio.gather）
+- 进度追踪与恢复（PostgreSQL Checkpointer）
+
+---
+
+## Architecture Overview（架构概览）
+
+OLAV 采用 **Workflows Orchestrator** 单一架构（2025-11-23 简化）：
+
+```
+用户请求 → Orchestrator (Intent 分类)
+  ↓
+Workflow Selection (LLM 自动路由)
+  ↓
+├─ QueryDiagnosticWorkflow   (查询/诊断)
+├─ DeviceExecutionWorkflow    (配置变更)
+├─ NetBoxManagementWorkflow   (设备管理)
+└─ DeepDiveWorkflow           (复杂任务，需 -e 启用)
+```
+
+**已废弃架构**（2025-11-23 归档至 `archive/deprecated_agents/`）:
+- ❌ ReAct: 虽快（16s）但缺少显式流程控制
+- ❌ Legacy (SubAgent): 多层委托，性能差（72s）
+- ❌ Structured: 未完成
+- ❌ Simple: 功能重叠
+
+详见: `archive/deprecated_agents/README.md`
+
+---
+
+## Workflows Details（工作流详解）
 RAG   : search_episodic_memory, search_openconfig_schema
 NetCONF/CLI: netconf_tool, cli_tool (HITL 对写操作自动中断)
 NetBox: netbox_api_call, netbox_schema_search

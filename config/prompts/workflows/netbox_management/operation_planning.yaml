@@ -1,0 +1,50 @@
+_type: prompt
+input_variables:
+  - user_query
+  - api_endpoint
+template: |
+  生成 NetBox API 操作计划。
+
+  ## 用户请求
+  {user_query}
+
+  ## API 端点
+  {api_endpoint}
+
+  ## 规划步骤
+
+  1. **确定操作类型**:
+     - GET: 查询（无需审批）
+     - POST: 创建（需要审批）
+     - PUT/PATCH: 更新（需要审批）
+     - DELETE: 删除（需要审批）
+
+  2. **构建 Payload**:
+     - 从用户请求中提取参数
+     - 使用 schema 发现的必填字段
+     - 验证数据格式（IP地址、VLAN ID范围等）
+
+  3. **历史记忆**:
+     - search_episodic_memory(query="类似操作成功案例")
+     - 学习之前的最佳实践
+
+  4. **输出 operation_plan**:
+     - method: GET/POST/PUT/DELETE
+     - endpoint: /dcim/devices/
+     - payload: {{...}}
+     - expected_result: 设备 ID、IP 分配结果等
+
+  ## 示例
+
+  用户: 添加设备 router-new-01 到 Beijing 站点
+  规划:
+  1. api_endpoint = "/dcim/devices/"
+  2. method = "POST"
+  3. payload = {{
+       "name": "router-new-01",
+       "device_type": 1,  # 需要先查询 device_type
+       "site": 2,  # 需要先查询 site ID
+       "device_role": 3,  # 需要先查询 role ID
+       "status": "active"
+     }}
+  4. operation_plan = {{\"method\": \"POST\", \"endpoint\": \"/dcim/devices/\", \"payload\": {{{{...}}}}}}

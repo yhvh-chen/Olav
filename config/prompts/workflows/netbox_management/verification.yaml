@@ -1,0 +1,42 @@
+_type: prompt
+input_variables:
+  - operation_plan
+  - execution_result
+template: |
+  验证 NetBox API 操作是否成功。
+
+  ## 操作计划
+  {operation_plan}
+
+  ## 执行结果
+  {execution_result}
+
+  ## 验证策略
+
+  1. **检查 HTTP 状态码**:
+     - 200/201: 成功
+     - 400: 请求参数错误
+     - 404: 资源不存在
+     - 500: 服务器错误
+
+  2. **验证返回数据**:
+     - POST: 检查返回的 ID
+     - GET: 检查返回的对象列表
+     - PUT/PATCH: 检查更新后的字段值
+     - DELETE: 确认资源已删除
+
+  3. **二次查询验证** (可选):
+     - 使用 GET 请求查询刚创建/更新的对象
+     - 确认数据一致性
+
+  ## 示例
+
+  operation_plan = {{"method": "POST", "endpoint": "/dcim/devices/", "payload": {{"name": "router-new-01", ...}}}}
+  execution_result = {{"status_code": 201, "data": {{"id": 123, "name": "router-new-01", ...}}}}
+  
+  验证:
+  1. 状态码 201 ✓
+  2. 返回 ID = 123 ✓
+  3. 二次查询: netbox_api_call(method="GET", endpoint="/dcim/devices/123/")
+     → name = "router-new-01" ✓
+  4. validation_result = {{"status": "success", "device_id": 123}}

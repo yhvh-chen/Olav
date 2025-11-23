@@ -32,8 +32,8 @@ def main() -> None:
     # Create index
     index_name = "suzieq-schema"
     if client.indices.exists(index=index_name):
-        logger.info(f"Index {index_name} already exists, skipping...")
-        return
+        logger.info(f"Index {index_name} exists. Deleting...")
+        client.indices.delete(index=index_name)
 
     mapping = {
         "mappings": {
@@ -49,60 +49,61 @@ def main() -> None:
     client.indices.create(index=index_name, body=mapping)
     logger.info(f"✓ Created index: {index_name}")
 
-    # TODO: Parse actual SuzieQ Avro schemas from archive/suzieq/suzieq/config/schema/
-    # For now, create sample entries
-    sample_schemas = [
-        {
-            "table": "bgp",
-            "fields": [
-                "namespace",
-                "hostname",
-                "vrf",
-                "peer",
-                "asn",
-                "state",
-                "peerAsn",
-                "afi",
-            ],
-            "description": "BGP protocol information including peer state and configuration",
-            "methods": ["get", "summarize", "unique", "aver"],
-        },
-        {
-            "table": "interfaces",
-            "fields": [
-                "namespace",
-                "hostname",
-                "ifname",
-                "state",
-                "adminState",
-                "mtu",
-                "speed",
-                "type",
-            ],
-            "description": "Interface information including operational and admin state",
-            "methods": ["get", "summarize", "unique", "aver"],
-        },
-        {
-            "table": "routes",
-            "fields": [
-                "namespace",
-                "hostname",
-                "vrf",
-                "prefix",
-                "nexthopIp",
-                "protocol",
-                "metric",
-            ],
-            "description": "Routing table entries with next-hop and protocol information",
-            "methods": ["get", "summarize", "unique", "aver"],
-        },
-    ]
-
-    for schema in sample_schemas:
+    # Parse actual SuzieQ Avro schemas
+    schema_dir = Path("archive/suzieq/suzieq/config/schema")
+    if not schema_dir.exists():
+        logger.warning(f"Schema directory not found: {schema_dir}, using sample data")
+        schema_dir = None
+    
+    schemas = []
+    if schema_dir:
+        for avsc_file in schema_dir.glob("*.avsc"):
+            try:
+                with open(avsc_file, "r", encoding="utf-8") as f:
+                    avro_schema = json.load(f)
+                
+                table_name = avsc_file.stem  # filename without .avsc
+                fields = [field["name"] for field in avro_schema.get("fields", [])]
+                
+                # Extract description from Avro doc field
+                description = avro_schema.get("doc", f"{table_name} table")
+                
+                schemas.append({
+                    "table": table_name,
+                    "fields": fields,
+                    "description": description,
+                    "methods": ["get", "summarize", "unique", "aver"],
+                })
+            except Exception as e:
+                logger.warning(f"Failed to parse {avsc_file}: {e}")
+    
+    # Fallback to sample data if parsing failed
+    if not schemas:
+        schemas = [
+            {
+                "table": "bgp",
+                "fields": ["namespace", "hostname", "vrf", "peer", "asn", "state", "peerAsn", "afi"],
+                "description": "BGP protocol information including peer state and configuration",
+                "methods": ["get", "summarize", "unique", "aver"],
+            },
+            {
+                "table": "interfaces",
+                "fields": ["namespace", "hostname", "ifname", "state", "adminState", "mtu", "speed", "type"],
+                "description": "Interface information including operational and admin state",
+                "methods": ["get", "summarize", "unique", "aver"],
+            },
+            {
+                "table": "routes",
+                "fields": ["namespace", "hostname", "vrf", "prefix", "nexthopIp", "protocol", "metric"],
+                "description": "Routing table entries with next-hop and protocol information",
+                "methods": ["get", "summarize", "unique", "aver"],
+            },
+        ]
+    
+    for schema in schemas:
         client.index(index=index_name, body=schema)
 
-    logger.info(f"✓ Indexed {len(sample_schemas)} SuzieQ table schemas")
-    logger.info("  TODO: Implement full Avro schema parser")
+    logger.info(f"✓ Indexed {len(schemas)} SuzieQ table schemas")
 
 
 if __name__ == "__main__":

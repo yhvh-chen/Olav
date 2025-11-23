@@ -86,22 +86,52 @@ def main() -> None:
     parser.add_argument("--path", help="Path to OpenConfig YANG root (defaults OPENCONFIG_DIR)")
     args = parser.parse_args()
     yang_root = args.path or os.getenv("OPENCONFIG_DIR")
-    if not yang_root or not os.path.isdir(yang_root):
-        logger.error("Provide --path or set OPENCONFIG_DIR to a valid directory containing .yang files")
-        return
+    
     client = get_client()
-    if not client.indices.exists(index=INDEX):
-        logger.info(f"Creating index {INDEX}")
-        client.indices.create(index=INDEX, body={
-            "mappings": {
-                "properties": {
-                    "module": {"type": "keyword"},
-                    "leaf": {"type": "keyword"},
-                    "description": {"type": "text"},
-                    "source_file": {"type": "keyword"},
-                }
+    if client.indices.exists(index=INDEX):
+        logger.info(f"Index {INDEX} exists. Deleting...")
+        client.indices.delete(index=INDEX)
+    
+    logger.info(f"Creating index {INDEX}")
+    client.indices.create(index=INDEX, body={
+        "mappings": {
+            "properties": {
+                "module": {"type": "keyword"},
+                "leaf": {"type": "keyword"},
+                "description": {"type": "text"},
+                "source_file": {"type": "keyword"},
             }
-        })
+        }
+    })
+    
+    if not yang_root or not os.path.isdir(yang_root):
+        logger.warning(f"OPENCONFIG_DIR not set or invalid: {yang_root}, using stub data")
+        # Create comprehensive stub data covering common OpenConfig modules
+        stub_docs = [
+            # openconfig-interfaces
+            {"_index": INDEX, "_id": "openconfig-interfaces:enabled", "module": "openconfig-interfaces", "leaf": "enabled", "description": "Interface administrative state", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-interfaces:name", "module": "openconfig-interfaces", "leaf": "name", "description": "Interface name", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-interfaces:mtu", "module": "openconfig-interfaces", "leaf": "mtu", "description": "Maximum transmission unit", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-interfaces:description", "module": "openconfig-interfaces", "leaf": "description", "description": "Interface description", "source_file": "stub"},
+            # openconfig-bgp
+            {"_index": INDEX, "_id": "openconfig-bgp:as", "module": "openconfig-bgp", "leaf": "as", "description": "BGP autonomous system number", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-bgp:neighbor-address", "module": "openconfig-bgp", "leaf": "neighbor-address", "description": "BGP neighbor IP address", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-bgp:peer-as", "module": "openconfig-bgp", "leaf": "peer-as", "description": "BGP peer autonomous system", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-bgp:enabled", "module": "openconfig-bgp", "leaf": "enabled", "description": "BGP neighbor enabled state", "source_file": "stub"},
+            # openconfig-network-instance
+            {"_index": INDEX, "_id": "openconfig-network-instance:name", "module": "openconfig-network-instance", "leaf": "name", "description": "Network instance name (VRF)", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-network-instance:type", "module": "openconfig-network-instance", "leaf": "type", "description": "Network instance type", "source_file": "stub"},
+            # openconfig-local-routing
+            {"_index": INDEX, "_id": "openconfig-local-routing:prefix", "module": "openconfig-local-routing", "leaf": "prefix", "description": "Static route prefix", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-local-routing:next-hop", "module": "openconfig-local-routing", "leaf": "next-hop", "description": "Static route next-hop", "source_file": "stub"},
+            # openconfig-vlan
+            {"_index": INDEX, "_id": "openconfig-vlan:vlan-id", "module": "openconfig-vlan", "leaf": "vlan-id", "description": "VLAN identifier", "source_file": "stub"},
+            {"_index": INDEX, "_id": "openconfig-vlan:name", "module": "openconfig-vlan", "leaf": "name", "description": "VLAN name", "source_file": "stub"},
+        ]
+        helpers.bulk(client, stub_docs)
+        logger.info(f"Indexed {len(stub_docs)} stub OpenConfig schemas (YANG files not available)")
+        return
+    
     logger.info(f"Indexing YANG leaves from {yang_root}")
     helpers.bulk(client, generate(yang_root))
     logger.info("YANG ETL completed")

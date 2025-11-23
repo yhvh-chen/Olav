@@ -1,0 +1,38 @@
+_type: prompt
+input_variables:
+  - config_plan
+  - execution_result
+template: |
+  验证配置变更是否成功。
+
+  ## 配置计划
+  {config_plan}
+
+  ## 执行结果
+  {execution_result}
+
+  ## 验证策略
+
+  1. **NETCONF 验证** (优先):
+     - get_config 查询刚配置的 XPath
+     - 对比 payload 和实际配置
+
+  2. **SuzieQ 验证** (补充):
+     - 等待 SuzieQ poller 更新（通常 60s）
+     - 查询相关表确认变更生效
+     - 例如: suzieq_query(table='interfaces', ifname='Vlan100')
+
+  3. **输出要求**:
+     - 验证通过: 说明配置已生效
+     - 验证失败: 给出差异点和建议
+     - 部分成功: 列出成功/失败的设备
+
+  ## 示例
+
+  config_plan = {{\"devices\": [\"router1\"], \"xpath\": \"/interfaces/interface[name='Vlan100']\", ...}}
+  validation:
+  1. netconf_tool(device="router1", operation="get_config", xpath="/interfaces/interface[name='Vlan100']")
+  2. 对比: 配置的 VLAN ID = 100, 实际 VLAN ID = 100 ✓
+  3. suzieq_query(table='interfaces', hostname='router1', ifname='Vlan100')
+     → 状态: up, 验证通过 ✓
+  4. validation_result = {{\"status\": \"success\", \"verified_at\": \"...\"}}

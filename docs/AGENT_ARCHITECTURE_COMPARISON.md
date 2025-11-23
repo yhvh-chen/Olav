@@ -1,20 +1,113 @@
-# Agent 架构对比：ReAct vs Structured Workflow
+# Agent 架构对比：Workflows vs ReAct vs Structured
 
 ## 架构对比总览
 
-| 维度 | ReAct (Prompt-Driven) | Structured (StateGraph) | Legacy (SubAgent) |
-|------|----------------------|------------------------|-------------------|
-| **控制方式** | LLM 隐式推理 | 显式状态机 | SubAgent 委托 |
-| **流程透明度** | ⚠️ 中等（依赖 Prompt） | ✅ **高**（图可视化） | ⚠️ 低（多层嵌套） |
-| **可靠性** | ⚠️ 依赖触发词识别 | ✅ **确定性路由** | ⚠️ 委托开销大 |
-| **性能** | ✅ **快**（16s） | ⚠️ 中等（预计 25s） | ❌ 慢（72s） |
-| **灵活性** | ✅ **高** | ⚠️ 中等（固定流程） | ✅ 高（动态委托） |
-| **维护成本** | ⚠️ Prompt 调优 | ✅ **低**（结构清晰） | ❌ 高（多文件） |
-| **适用场景** | 日常运维（85%） | 复杂诊断（15%） | 对比基准 |
+| 维度 | Workflows (Modular) | ReAct (Prompt-Driven) | Structured (StateGraph) | Legacy (SubAgent) |
+|------|---------------------|----------------------|------------------------|-------------------|
+| **控制方式** | 意图分类 + 模块化工作流 | LLM 隐式推理 | 显式状态机 | SubAgent 委托 |
+| **流程透明度** | ✅ **高**（模块可视化） | ⚠️ 中等（依赖 Prompt） | ✅ **高**（图可视化） | ⚠️ 低（多层嵌套） |
+| **可靠性** | ✅ **确定性路由** | ⚠️ 依赖触发词识别 | ✅ **确定性路由** | ⚠️ 委托开销大 |
+| **性能** | ⚠️ 中等（分类+执行） | ✅ **快**（16s） | ⚠️ 中等（预计 25s） | ❌ 慢（72s） |
+| **灵活性** | ✅ **高**（可插拔工作流） | ✅ **高** | ⚠️ 中等（固定流程） | ✅ 高（动态委托） |
+| **维护成本** | ✅ **低**（模块隔离） | ⚠️ Prompt 调优 | ✅ **低**（结构清晰） | ❌ 高（多文件） |
+| **适用场景** | **生产推荐**（全场景） | 日常运维（85%） | 复杂诊断（15%） | 对比基准 |
 
 ## 核心差异
 
-### 1. ReAct 模式（Prompt-Driven）
+### 1. Workflows 模式（Modular Architecture）**【推荐生产环境使用】**
+
+**原理**：通过 LLM 意图分类将查询路由到专用工作流，每个工作流独立实现特定场景的最佳实践流程。
+
+**架构组件**：
+```python
+# src/olav/agents/root_agent_orchestrator.py
+WorkflowOrchestrator
+    ├── Intent Classification (LLM + keyword fallback)
+    │   └── 输出: QUERY_DIAGNOSTIC | DEVICE_EXECUTION | NETBOX_MANAGEMENT
+    ├── QueryDiagnosticWorkflow (网络查询与诊断)
+    │   ├── Macro Analysis (SuzieQ 历史数据)
+    │   ├── Micro Diagnostics (NETCONF/CLI 实时查询)
+    │   └── Root Cause Analysis (根因定位)
+    ├── DeviceExecutionWorkflow (配置变更)
+    │   ├── Config Planning (变更计划生成)
+    │   ├── HITL Approval (人工审批，interrupt point)
+    │   ├── Config Execution (NETCONF/CLI 执行)
+    │   └── Verification (变更验证)
+    └── NetBoxManagementWorkflow (清单管理)
+        ├── NetBox API Query
+        ├── HITL Approval (写操作审批)
+        └── NetBox API Write
+```
+
+**三大工作流特点**：
+
+1. **QueryDiagnosticWorkflow**（查询/诊断）
+   - 强制漏斗式排错：SuzieQ 宏观 → NETCONF 微观
+   - 多轮对话支持：动态调整诊断策略
+   - 适用场景：`"BGP为什么down?"`, `"查询接口状态"`, `"诊断路由问题"`
+
+2. **DeviceExecutionWorkflow**（配置变更）
+   - 自动生成回滚计划
+   - HITL 强制审批（LangGraph interrupt）
+   - 变更后自动验证配置生效
+   - 适用场景：`"修改BGP配置"`, `"添加VLAN 100"`, `"shutdown接口"`
+
+3. **NetBoxManagementWorkflow**（清单管理）
+   - 读操作免审批，写操作强制 HITL
+   - 与设备配置隔离（不触发 NETCONF）
+   - 适用场景：`"添加设备到NetBox"`, `"设备清单"`, `"IP地址分配"`
+
+**意图分类策略（双层）**：
+```python
+# 1. LLM-based classification (primary)
+response = llm.invoke("分类用户查询 → query_diagnostic|device_execution|netbox_management")
+
+# 2. Keyword fallback (secondary, 当LLM失败时)
+if "设备清单" in query or "ip分配" in query:
+    return WorkflowType.NETBOX_MANAGEMENT
+elif "配置" in query or "修改" in query:
+    return WorkflowType.DEVICE_EXECUTION
+else:
+    return WorkflowType.QUERY_DIAGNOSTIC  # 默认
+```
+
+**优势**：
+- ✅ **模块化隔离**：每个工作流独立演进，互不干扰
+- ✅ **确定性路由**：意图明确后按固定流程执行，无黑盒推理
+- ✅ **可扩展性强**：新增场景只需添加新工作流，不修改现有代码
+- ✅ **HITL 集成**：自然支持不同工作流的差异化审批策略
+- ✅ **测试友好**：每个工作流可独立单元测试
+- ✅ **Prompt 管理**：每个节点独立 prompt 文件（`config/prompts/workflows/`）
+
+**劣势**：
+- ⚠️ 分类开销：额外一次 LLM 调用用于意图分类（~2-3s）
+- ⚠️ 复杂度增加：需维护 3+ 个独立工作流图
+- ⚠️ 误分类风险：如果意图分类错误，需要依赖关键词 fallback
+
+**使用示例**：
+```bash
+# 默认模式（现在 workflows 是 default）
+uv run python -m olav.main chat "BGP为什么down?"
+
+# 执行流程：
+# [Orchestrator] Classify intent → QUERY_DIAGNOSTIC
+# [QueryDiagnosticWorkflow] Macro Analysis (SuzieQ)
+# [QueryDiagnosticWorkflow] Micro Diagnostics (NETCONF)
+# [QueryDiagnosticWorkflow] Root Cause Analysis
+
+# 配置变更（自动触发HITL审批）
+uv run python -m olav.main chat "修改R1的BGP AS号为65001"
+
+# 执行流程：
+# [Orchestrator] Classify intent → DEVICE_EXECUTION
+# [DeviceExecutionWorkflow] Config Planning
+# [DeviceExecutionWorkflow] HITL Approval (暂停，等待人工)
+#   ↓ 用户批准后
+# [DeviceExecutionWorkflow] Config Execution (NETCONF)
+# [DeviceExecutionWorkflow] Verification
+```
+
+### 2. ReAct 模式（Prompt-Driven）
 
 **原理**：通过精心设计的 System Prompt 引导 LLM 自主决策工具调用顺序。
 
@@ -42,7 +135,7 @@ template: |
 - ⚠️ 黑盒推理：难以预测 LLM 是否严格遵循 Prompt 指令
 - ⚠️ Prompt 膨胀：复杂场景需要更长的系统指令
 
-### 2. Structured 模式（Explicit StateGraph）
+### 3. Structured 模式（Explicit StateGraph）
 
 **原理**：使用 LangGraph StateGraph 定义显式工作流，通过条件边强制执行任务流程。
 
@@ -293,6 +386,29 @@ def route_after_evaluation(state: StructuredState) -> Literal["micro_diagnosis",
 
 ## 实际使用示例
 
+### Workflows 模式（推荐）
+```bash
+# 默认模式（自动分类路由）
+uv run python -m olav.main chat "查询 R1 的 BGP 为什么没建立"
+
+# 执行流程：
+# [Orchestrator] Intent Classification → QUERY_DIAGNOSTIC
+# [QueryDiagnosticWorkflow] Macro Analysis → SuzieQ查询
+# [QueryDiagnosticWorkflow] Micro Diagnostics → NETCONF实时查询
+# [QueryDiagnosticWorkflow] Root Cause Analysis → 综合根因分析
+
+# 配置变更（自动触发HITL）
+uv run python -m olav.main chat "修改 R1 的 BGP AS 号为 65001"
+
+# 执行流程：
+# [Orchestrator] Intent Classification → DEVICE_EXECUTION
+# [DeviceExecutionWorkflow] Config Planning → 生成变更计划+回滚策略
+# [DeviceExecutionWorkflow] HITL Approval → 暂停等待人工审批
+#   ↓ 用户批准后
+# [DeviceExecutionWorkflow] Config Execution → NETCONF edit-config
+# [DeviceExecutionWorkflow] Verification → 验证配置生效
+```
+
 ### ReAct 模式
 ```bash
 # 默认模式
@@ -331,10 +447,76 @@ uv run python -m olav.main chat -m structured "修改 R1 的 BGP AS 号为 65001
 # [Final Answer] → 返回执行结果
 ```
 
-## 总结
+## 总结与选择指南
 
-- **ReAct**：生产环境默认选择，性能优先，适合 85% 场景
-- **Structured**：复杂诊断/合规场景，可靠性优先，适合 15% 场景
-- **Hybrid**（未来）：根据查询复杂度动态路由到不同模式
+### 模式选择决策树
 
-当前建议：**先在 ReAct 基础上充分测试**，遇到确定性要求场景再切换 Structured。
+```
+用户查询 → 
+  ├─ 生产环境 → **Workflows**（推荐）
+  │   ├─ 优点：模块化、确定性路由、易维护
+  │   ├─ 适用：全场景覆盖（查询+配置+清单）
+  │   └─ 性能：中等（意图分类+工作流执行）
+  │
+  ├─ 性能敏感场景 → **ReAct**
+  │   ├─ 优点：最快（16s）、单次LLM调用
+  │   ├─ 适用：日常运维查询（85%）
+  │   └─ 缺点：依赖Prompt调优、黑盒推理
+  │
+  ├─ 复杂诊断/合规场景 → **Structured**
+  │   ├─ 优点：确定性最强、自我评估
+  │   ├─ 适用：多步骤复杂诊断（15%）
+  │   └─ 缺点：性能开销、灵活性低
+  │
+  └─ 对比基准/研究 → **Legacy**
+      └─ 仅用于性能对比，不推荐生产使用
+```
+
+### 关键差异对比
+
+| 特性 | Workflows | ReAct | Structured | Legacy |
+|------|-----------|-------|------------|--------|
+| **意图分类** | ✅ 显式分类 | ❌ 无分类 | ⚠️ 内置判断 | ❌ SubAgent委托 |
+| **工作流隔离** | ✅ 3个独立工作流 | ❌ 单一Agent | ⚠️ 2条路径 | ⚠️ 多层SubAgent |
+| **HITL集成** | ✅ 按工作流定制 | ⚠️ 全局配置 | ✅ 原生interrupt | ⚠️ 复杂实现 |
+| **可扩展性** | ✅ **最强** | ⚠️ Prompt膨胀 | ⚠️ 需修改图 | ❌ 多文件修改 |
+| **性能** | ⚠️ 中等 | ✅ **最快** | ⚠️ 中等 | ❌ 最慢 |
+| **代码维护** | ✅ **最易** | ⚠️ Prompt调优 | ✅ 结构清晰 | ❌ 最难 |
+
+### 当前建议
+
+- **默认使用 Workflows 模式**（已设为 CLI 默认值）
+  - 适合生产环境全场景部署
+  - 模块化架构易于团队协作
+  - 确定性路由减少意外行为
+
+- **性能敏感场景临时切换 ReAct**
+  ```bash
+  olav chat -m react "快速查询接口状态"
+  ```
+
+- **复杂诊断场景切换 Structured**（未来可按需激活）
+  ```bash
+  olav chat -m structured "深度诊断BGP+OSPF交互问题"
+  ```
+
+- **Legacy 模式仅用于对比测试**
+  ```bash
+  olav chat -m legacy "对比测试性能基准"
+  ```
+
+### 未来演进方向（Hybrid Mode）
+
+计划实现**智能路由**：
+```python
+async def auto_select_mode(query: str) -> AgentMode:
+    """根据查询复杂度自动选择最佳模式"""
+    complexity = analyze_query_complexity(query)
+    
+    if complexity == "simple":
+        return AgentMode.REACT  # 性能优先
+    elif complexity == "diagnostic":
+        return AgentMode.WORKFLOWS  # 模块化流程
+    elif complexity == "critical_config":
+        return AgentMode.STRUCTURED  # 确定性最高
+```

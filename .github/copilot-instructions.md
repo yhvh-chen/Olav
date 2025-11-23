@@ -2,36 +2,35 @@
 
 ## Project Overview
 
-OLAV (Omni-Layer Autonomous Verifier) is an enterprise network operations ChatOps platform using **LangGraph + DeepAgents** for multi-agent orchestration. It follows a **Schema-Aware** architecture to avoid tool proliferation and implements **漏斗式排错** (Funnel Debugging): macro analysis (SuzieQ) → micro diagnostics (NETCONF).
+OLAV (Omni-Layer Autonomous Verifier) is an enterprise network operations ChatOps platform using **LangGraph Workflows** for orchestration. It follows a **Schema-Aware** architecture to avoid tool proliferation and implements **漏斗式排错** (Funnel Debugging): macro analysis (SuzieQ) → micro diagnostics (NETCONF).
 
 **Core Philosophy**: Safety First - all write operations require **HITL (Human-in-the-Loop)** approval via LangGraph interrupts.
 
 ## Architecture Essentials
 
-### Agent Orchestration (DeepAgents Pattern)
+### Workflow Orchestration Pattern
 
-Use `create_deep_agent()` from DeepAgents framework - **never write LangGraph orchestration manually**:
+Use `WorkflowOrchestrator` from `root_agent_orchestrator.py` - orchestrates multiple specialized workflows:
 
 ```python
-from deepagents import create_deep_agent, SubAgent
+from olav.agents.root_agent_orchestrator import create_workflow_orchestrator
 from langgraph.checkpoint.postgres import PostgresSaver
 
-# All agents share PostgreSQL Checkpointer for state persistence
+# All workflows share PostgreSQL Checkpointer for state persistence
 checkpointer = PostgresSaver.from_conn_string(os.getenv("POSTGRES_URI"))
 
-agent = create_deep_agent(
-    model=model,
-    system_prompt=prompt_manager.load_agent_prompt("root_agent", **context),  # From config/prompts/
-    checkpointer=checkpointer,  # Shared across all SubAgents
-    subagents=[suzieq_subagent, rag_subagent, netconf_subagent],
-    middleware=[...],  # Built-in: TodoList, SubAgent, Summarization, HITL
-)
+orchestrator = create_workflow_orchestrator(checkpointer=checkpointer)
+
+# Available workflows:
+# - QueryDiagnosticWorkflow: SuzieQ-based network diagnostics (read-only)
+# - DeviceExecutionWorkflow: NETCONF/CLI execution with HITL
+# - NetBoxManagementWorkflow: NetBox SSOT operations with HITL
+# - DeepDiveWorkflow: Complex multi-step investigations with recursion
+
+result = await orchestrator.run(user_query="查询 R1 BGP 状态")
 ```
 
-**State Flow Rules** (from `deepagents/middleware/subagents.py`):
-- Parent → SubAgent: Excludes `messages` and `todos` fields
-- SubAgent → Parent: Returns only final message + custom state fields
-- Thread isolation: Use `config = {"configurable": {"thread_id": "user-123"}}`
+**Workflow Selection**: Intent classifier (LLM-based) routes queries to appropriate workflow based on user intent.
 
 ### Schema-Aware Tool Design
 
@@ -115,22 +114,7 @@ class NornirSandbox(SandboxBackendProtocol):
         return self.nr.run(task=netconf_task, payload=command)
 ```
 
-**SubAgent interrupt_on configuration**:
-```python
-netconf_subagent = SubAgent(
-    name="netconf-executor",
-    tools=[nornir_tool],
-    interrupt_on={  # Only for write operations
-        "nornir_tool": {"allowed_decisions": ["approve", "edit", "reject"]}
-    }
-)
-
-suzieq_subagent = SubAgent(
-    name="suzieq-analyzer",
-    tools=[suzieq_query, suzieq_schema_search],
-    # NO interrupt_on - read-only operations
-)
-```
+**Workflow HITL Configuration**: Write operations in DeviceExecutionWorkflow and NetBoxManagementWorkflow automatically trigger HITL interrupts.
 
 ## Developer Workflows
 
@@ -157,10 +141,19 @@ uv lock                    # Update uv.lock
 uv sync                    # Apply lock file changes
 
 # Run commands in uv environment
-uv run python -m olav.main chat        # Run CLI
+uv run olav.py                         # Run CLI (normal mode)
+uv run olav.py -e "complex query"      # Run CLI (expert mode with Deep Dive)
 uv run pytest                          # Run tests
 uv run ruff check src/                 # Lint code
 ```
+
+**CLI Modes**:
+- **Normal Mode** (default): 3 standard workflows (Query/Execution/NetBox)
+- **Expert Mode** (`-e/--expert`): Enables DeepDiveWorkflow for complex tasks
+  - Automatic task decomposition
+  - Recursive diagnostics (max 3 levels)
+  - Batch audits (30+ devices parallel)
+  - Progress tracking with resume capability
 
 **Why uv?**
 - 10-100x faster than pip
@@ -204,7 +197,9 @@ uv run python -m olav.etl.init_schema
 uv run python -m olav.etl.suzieq_schema_etl
 
 # 4. Run OLAV CLI
-uv run python -m olav.main chat
+uv run olav.py                         # Normal mode (interactive)
+uv run olav.py "查询 R1 接口状态"       # Normal mode (single query)
+uv run olav.py -e "审计所有边界路由器"  # Expert mode (Deep Dive)
 
 # 5. Run specific agent tests
 uv run pytest tests/unit/test_agents.py -v
@@ -254,7 +249,7 @@ Three-tier RAG (priority order):
 
 ### Backend Protocol Stack
 
-Inspired by DeepAgents backends (`archive/deepagents/libs/deepagents/deepagents/backends/`):
+Protocol-based dependency injection pattern:
 
 ```python
 # src/olav/execution/backends/protocol.py
@@ -274,26 +269,19 @@ Implementations:
 - `RedisBackend`: Redis + OpenSearch (prod)
 - `NornirSandbox`: NETCONF execution with HITL
 
-### Middleware Stack Pattern
+### Workflow-Specific Middleware
 
-Use LangChain V1 middleware (NOT custom LangGraph nodes):
+Workflows can include custom middleware for context enrichment:
 
 ```python
-# Built-in middleware (from deepagents)
-middleware = [
-    TodoListMiddleware(),           # Auto task decomposition
-    FilesystemMiddleware(backend),  # File ops via Backend protocol
-    SubAgentMiddleware(...),        # SubAgent delegation
-    SummarizationMiddleware(),      # Auto-summarize at 170K tokens
-    HumanInTheLoopMiddleware(interrupt_on={"nornir_tool": True}),
-]
-
-# Custom middleware example
-class NetworkContextMiddleware(AgentMiddleware):
-    async def on_model_request(self, request: ModelRequest, state: AgentState):
-        topology = await self.get_topology_context(state.get('device'))
-        request.messages.insert(0, SystemMessage(content=f"Context: {topology}"))
-        return request
+# Example: Network context middleware for device operations
+class NetworkContextMiddleware:
+    async def enrich_context(self, state: dict) -> dict:
+        device = state.get('device')
+        if device:
+            topology = await self.get_topology_context(device)
+            state['network_context'] = topology
+        return state
 ```
 
 ### LLM Factory Pattern
@@ -371,9 +359,9 @@ def mock_suzieq_context():
 import pytest
 
 @pytest.mark.asyncio
-async def test_agent_execution(checkpointer):
-    agent = create_deep_agent(checkpointer=checkpointer, ...)
-    result = await agent.ainvoke({"messages": [...]})
+async def test_workflow_execution(checkpointer):
+    orchestrator = create_workflow_orchestrator(checkpointer=checkpointer)
+    result = await orchestrator.run(user_query="查询 R1 BGP 状态")
     assert result["messages"][-1].content
 ```
 
@@ -466,9 +454,9 @@ class Agent:
 
 1. **Don't create individual tools for each network resource** - use Schema-Aware pattern
 2. **Don't hardcode prompts in Python** - use `config/prompts/` + PromptManager
-3. **Don't write LangGraph state machines manually** - use `create_deep_agent()`
+3. **Don't write custom LangGraph state machines** - use workflow orchestrator pattern
 4. **Don't use MemorySaver** - dev/prod both use PostgreSQL Checkpointer for consistency
-5. **Don't skip HITL for write operations** - always use `interrupt_on` for Nornir tools
+5. **Don't skip HITL for write operations** - workflows automatically trigger HITL for write ops
 6. **Don't duplicate NetBox inventory** - both Nornir and SuzieQ read from same NetBox
 7. **Don't use pip/poetry** - this project uses `uv` exclusively
 8. **Don't skip type hints** - all functions must have full type annotations
@@ -477,7 +465,7 @@ class Agent:
 
 ## Key Files Reference
 
-- **Agent orchestration**: `src/olav/agents/root_agent.py` (DeepAgents pattern)
+- **Workflow orchestration**: `src/olav/agents/root_agent_orchestrator.py`
 - **Schema-Aware tools**: `src/olav/tools/suzieq_tool.py` (2 universal tools)
 - **Prompt management**: `src/olav/core/prompt_manager.py` + `config/prompts/`
 - **HITL sandbox**: `src/olav/execution/backends/nornir_sandbox.py`
@@ -572,7 +560,7 @@ docker-compose up -d opensearch postgres redis
 docker-compose --profile init up olav-init
 
 # 5. Verify setup
-uv run python -m olav.main --version
+uv run olav.py --version
 ```
 
 **Required environment variables** (.env):
@@ -601,7 +589,8 @@ DEVICE_PASSWORD=secure_password
 ```bash
 # Development
 uv sync --dev                              # Install dependencies
-uv run python -m olav.main chat           # Start CLI
+uv run olav.py                             # Start CLI (normal mode)
+uv run olav.py -e "complex task"           # Start CLI (expert mode)
 uv run pytest -v                          # Run tests
 uv run ruff check src/ --fix              # Lint and fix
 

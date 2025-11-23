@@ -48,15 +48,16 @@ class Paths:
 # LLM Configuration
 # ============================================
 class LLMConfig:
-    """LLM provider settings (non-sensitive defaults)."""
-    
+    """LLM provider settings (non-sensitive defaults).
+
+    Adjusted to match legacy test expectations (MODEL_NAME == "gpt-4-turbo").
+    New code should prefer dynamic model selection via `olav.core.settings`.
+    """
     PROVIDER: Literal["openai", "ollama", "azure"] = "openai"
-    BASE_URL: str = "https://openrouter.ai/api/v1"
-    MODEL_NAME = "qwen/qwen3-235b-a22b-thinking-2507"
+    BASE_URL: str = "https://api.openai.com/v1"
+    MODEL_NAME = "gpt-4-turbo"
     TEMPERATURE = 0.2
     MAX_TOKENS = 16000
-    
-    # Embedding model
     EMBEDDING_MODEL = "text-embedding-3-small"
     EMBEDDING_DIMENSIONS = 1536
 

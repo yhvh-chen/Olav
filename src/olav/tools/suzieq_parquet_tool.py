@@ -119,19 +119,26 @@ async def suzieq_query(
     method: Literal["get", "summarize"] = "get",
     hostname: str | None = None,
     namespace: str | None = None,
-    **filters: Any,
+    max_age_hours: int = 24,
+    filters: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Query SuzieQ historical network data from Parquet files.
 
     This tool provides access to historical network state collected by SuzieQ.
     Use this for trend analysis, historical comparisons, and aggregated statistics.
+    
+    IMPORTANT: By default, only queries data from the last 24 hours to avoid stale/test data pollution.
+    Set max_age_hours=0 to query all historical data (use with caution).
 
     Args:
         table: Table name (use suzieq_schema_search to discover)
+        max_age_hours: Maximum age of data to query in hours (default: 24, set to 0 for all data)
         method: Query method - "get" for raw data, "summarize" for aggregated statistics
         hostname: Filter by specific hostname (optional)
         namespace: Filter by namespace (optional, default: "all")
-        **filters: Additional filters (e.g., state="up", ifname="GigabitEthernet1")
+        filters: Dictionary of additional filters (optional)
+        **kwargs: Additional filters passed as keyword arguments (e.g., state="up")
 
     Returns:
         Dictionary with query results:
@@ -151,11 +158,18 @@ async def suzieq_query(
     """
     parquet_dir = _get_parquet_dir()
     
+    # Combine explicit filters dict and kwargs
+    query_filters = filters.copy() if filters else {}
+    query_filters.update(kwargs)
+    
     # Check if table exists in schema
     if table not in SUZIEQ_SCHEMA:
         return {
             "error": f"Unknown table '{table}'. Use suzieq_schema_search to discover available tables.",
             "available_tables": list(SUZIEQ_SCHEMA.keys()),
+            "table": table,
+            "status": "SCHEMA_NOT_FOUND",
+            "warning": "⛔ DO NOT fabricate data. This table does not exist in SuzieQ schema.",
         }
 
     # SuzieQ uses Hive-style partitioning:
@@ -168,19 +182,39 @@ async def suzieq_query(
         table_dir = parquet_dir / table
 
     if not table_dir.exists():
+        # Return explicit NO_DATA_FOUND record to prevent hallucination
         return {
-            "error": f"No data found for table '{table}'",
-            "hint": "Data may not have been collected yet. Check SuzieQ poller status.",
-            "expected_path": str(table_dir),
+            "data": [
+                {
+                    "status": "NO_DATA_FOUND",
+                    "message": f"No data directory found for table '{table}'",
+                    "hint": "SuzieQ has not collected any data for this table. This is NOT an error.",
+                    "warning": "DO NOT fabricate data. Inform the user that no data is available.",
+                    "expected_path": str(table_dir),
+                }
+            ],
+            "count": 0,
+            "columns": ["status", "message", "hint", "warning", "expected_path"],
+            "table": table,
         }
 
     try:
         # Read all parquet files recursively (handles Hive partitioning)
         parquet_files = list(table_dir.rglob("*.parquet"))
         if not parquet_files:
+            # Return explicit NO_DATA_FOUND record to prevent hallucination
             return {
-                "error": f"No parquet files found in {table_dir}",
-                "hint": "SuzieQ may not have collected data for this table yet.",
+                "data": [
+                    {
+                        "status": "NO_DATA_FOUND",
+                        "message": f"No parquet files found for table '{table}' in {table_dir}",
+                        "hint": "SuzieQ has not collected data for this table yet. This is NOT an error - the table simply has no historical data.",
+                        "warning": "DO NOT fabricate data. Inform the user that no data is available.",
+                    }
+                ],
+                "count": 0,
+                "columns": ["status", "message", "hint", "warning"],
+                "table": table,
             }
 
         # Read and concat all parquet files
@@ -194,6 +228,15 @@ async def suzieq_query(
             dfs = [pd.read_parquet(f) for f in parquet_files]
             df = pd.concat(dfs, ignore_index=True)
 
+        # CRITICAL: Filter by time window to avoid stale/test data pollution
+        # Default: only last 24 hours (configurable via max_age_hours parameter)
+        if max_age_hours > 0 and "timestamp" in df.columns:
+            import time
+            current_time_ms = int(time.time() * 1000)
+            cutoff_time_ms = current_time_ms - (max_age_hours * 3600 * 1000)
+            df = df[df["timestamp"] >= cutoff_time_ms]
+            logger.info(f"Filtered to last {max_age_hours} hours: {len(df)} records remain")
+
         # Apply filters
         if hostname:
             df = df[df["hostname"] == hostname]
@@ -202,9 +245,35 @@ async def suzieq_query(
         if namespace and namespace != "all" and "namespace" in df.columns:
             df = df[df["namespace"] == namespace]
         
-        for field, value in filters.items():
+        for field, value in query_filters.items():
             if field in df.columns:
                 df = df[df[field] == value]
+
+        # CRITICAL: SuzieQ stores time-series data (multiple snapshots per peer)
+        # Deduplicate by taking the latest timestamp for each unique entity
+        # Priority: active=True records first
+        if "active" in df.columns:
+            # Filter to only active records first (current state)
+            df_active = df[df["active"] == True]
+            if len(df_active) > 0:
+                df = df_active
+        
+        # Deduplicate based on table type (take latest timestamp)
+        if "timestamp" in df.columns:
+            # Define unique key columns by table
+            unique_keys = {
+                "bgp": ["hostname", "peer", "afi", "safi"],  # Unique per peer+address-family
+                "interfaces": ["hostname", "ifname"],
+                "routes": ["hostname", "vrf", "prefix"],
+                "lldp": ["hostname", "ifname"],
+                "device": ["hostname"],
+            }
+            
+            key_cols = unique_keys.get(table, ["hostname"])  # Fallback to hostname only
+            
+            # Keep only latest record for each unique entity
+            if all(col in df.columns for col in key_cols):
+                df = df.sort_values("timestamp", ascending=False).drop_duplicates(subset=key_cols, keep="first")
 
         # Execute method
         if method == "get":
@@ -216,6 +285,8 @@ async def suzieq_query(
                 "columns": list(df.columns),
                 "table": table,
                 "truncated": len(df) > 100,
+                "data_type": "deduplicated_current_state",
+                "note": "SuzieQ stores time-series data. This result shows only the latest state for each unique entity (active records prioritized).",
             }
         
         elif method == "summarize":

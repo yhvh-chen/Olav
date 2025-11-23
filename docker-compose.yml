@@ -59,6 +59,7 @@ services:
     container_name: olav-suzieq
     env_file:
       - .env
+    user: "0:0"  # Run as root to avoid Windows bind-mount permission issues
     ports:
       - "8501:8501"  # GUI
     volumes:
@@ -84,6 +85,7 @@ services:
     container_name: olav-suzieq-poller
     env_file:
       - .env
+    user: "0:0"  # Run as root to avoid Windows bind-mount permission issues
     volumes:
       - ./data/suzieq-parquet:/suzieq/parquet
       - ./data/generated_configs:/suzieq/config:ro
@@ -183,10 +185,17 @@ services:
     container_name: olav-init
     env_file:
       - .env
+    environment:
+      # Override for Docker network (containers use service name, not localhost)
+      NETBOX_URL: http://netbox:8080
+      OPENSEARCH_URL: http://opensearch:9200
+      # Point to cloned OpenConfig YANG repos (if available)
+      OPENCONFIG_DIR: /app/archive/openconfig
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./scripts:/app/scripts:ro
+      - ./archive:/app/archive:ro  # SuzieQ Avro schemas and OpenConfig YANG files
     # Use uv run to ensure virtualenv & editable install are active
     command: >
       sh -c "
@@ -200,9 +209,10 @@ services:
         echo 'Running ETL pipeline via uv...' &&
         uv run python -m olav.etl.generate_configs &&
         uv run python -m olav.etl.init_postgres &&
-        uv run python -m olav.etl.init_schema &&
+        uv run python -m olav.etl.openconfig_full_yang_etl &&
         uv run python -m olav.etl.suzieq_schema_etl &&
         uv run python -m olav.etl.netbox_schema_etl &&
+        uv run python -m olav.etl.ntc_schema_etl &&
         touch data/bootstrap/init.ok &&
         echo 'ETL pipeline completed successfully'
       "

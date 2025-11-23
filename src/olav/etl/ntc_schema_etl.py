@@ -246,15 +246,19 @@ class NTCSchemaETL:
         logger.info("NTC Templates Schema ETL completed")
 
 
-async def main():
-    """CLI entry point."""
+async def async_main():
+    """Async entry point."""
     logging.basicConfig(level=logging.INFO)
 
     async with NTCSchemaETL() as etl:
         await etl.run()
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry point (sync wrapper for -m invocation)."""
     import asyncio
+    asyncio.run(async_main())
 
-    asyncio.run(main())
+
+if __name__ == "__main__":
+    main()

@@ -34,7 +34,8 @@ class PromptManager:
         """Load and render a prompt template.
 
         Args:
-            category: Prompt category (agents/tools/rag)
+            category: Prompt category (agents/tools/rag/workflows/orchestrator)
+                     Supports nested paths like "workflows/orchestrator"
             name: Prompt template name
             **kwargs: Variables to render in template
 
@@ -49,6 +50,7 @@ class PromptManager:
 
         # Load from cache or file
         if cache_key not in self._cache:
+            # Support nested directory paths (e.g., "workflows/orchestrator")
             prompt_path = self.prompts_dir / category / f"{name}.yaml"
             if not prompt_path.exists():
                 msg = f"Prompt file not found: {prompt_path}"

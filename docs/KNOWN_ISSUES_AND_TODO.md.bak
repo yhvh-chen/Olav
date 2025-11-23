@@ -1,0 +1,463 @@
+﻿# OLAV 已知问题与待办事项
+
+> **更新日期**: 2025-11-23  
+> **版本**: v0.2.0-alpha  
+> **架构**: **Workflows Orchestrator** (单一架构)  
+> **状态**: 生产就绪，深度能力增强中
+
+---
+
+## 📐 当前架构设计 (Architecture Overview)
+
+### 核心模式 (Production Only) ⭐
+
+OLAV 采用**单一 Workflows Orchestrator 架构**，通过 Intent 分类自动路由到 3 个专用工作流。
+
+#### **Workflows Orchestrator** (唯一生产架构)
+
+**性能**: 
+- 平均响应: **20-25s**
+- 工具调用: 4-8 次
+- 代码量: 280 lines (Orchestrator) + 3 个 Workflow (总计 ~775 lines)
+
+**当前 3 个 Workflows**:
+- **QueryDiagnosticWorkflow** (285 lines): 
+  - 强制漏斗流程: SuzieQ 宏观 → NETCONF 微观
+  - 自动评估是否需要深入诊断
+  - 适合: 查询、故障排查、根因分析
+  
+- **DeviceExecutionWorkflow** (270 lines):
+  - Planning → HITL Approval → Execution → Validation
+  - 支持 NETCONF (原子回滚) 和 CLI (降级)
+  - 适合: 配置变更、设备管理
+  
+- **NetBoxManagementWorkflow** (220 lines):
+  - 设备清单管理、IP 分配、站点配置
+  - 集成 NetBox API
+  - 适合: CMDB 操作
+
+**实现**: `src/olav/workflows/` + `src/olav/agents/root_agent_orchestrator.py`
+
+**路由逻辑**:
+```
+用户请求 → Orchestrator Intent 分类 (LLM)
+  ↓
+├─ "查询"/"显示"/"状态" → QueryDiagnosticWorkflow
+├─ "为什么"/"诊断"/"原因" → QueryDiagnosticWorkflow (强制漏斗)
+├─ "修改"/"配置"/"变更" → DeviceExecutionWorkflow (HITL 审批)
+└─ "设备清单"/"NetBox"/"IP 分配" → NetBoxManagementWorkflow
+```
+
+**架构优势**:
+- ✅ **显式流程控制**: 状态机保证诊断步骤
+- ✅ **强制漏斗式排错**: SuzieQ 宏观 → NETCONF 微观
+- ✅ **HITL 审批**: 所有写操作人工确认
+- ✅ **可审计性**: 完整状态历史 (PostgreSQL Checkpointer)
+- ✅ **统一体验**: 无需用户选择模式
+
+---
+
+### 已废弃架构 (Deprecated, 已归档)
+
+以下架构已于 **2025-11-23** 废弃并移至 `archive/deprecated_agents/`:
+
+- ❌ **Legacy (SubAgent)**: DeepAgents 多层委托，性能差 (72s)
+- ❌ **Structured**: 未完成，代码冗余 (594 lines)
+- ❌ **Simple**: 功能与 Workflows 重叠
+- ❌ **ReAct**: 缺少显式流程控制，依赖 Prompt 引导 (16s)
+
+**废弃原因**: 
+- Legacy/Structured/Simple: 性能差或未完成
+- **ReAct**: 虽然速度快，但**无法保证强制漏斗流程**（企业网络运维核心需求）
+
+**性能对比**:
+| 模式 | 响应时间 | 工具调用 | 流程控制 | 状态 |
+|------|---------|---------|---------|------|
+| Legacy SubAgent | 72.5s | 4-14 次 | ❌ 黑盒 | ❌ 已废弃 |
+| ReAct | 16.3s | 1-6 次 | ⚠️ Prompt 引导 | ❌ 已废弃 |
+| **Workflows** ⭐ | **20-25s** | 4-8 次 | ✅ 强制状态机 | ✅ 唯一生产 |
+
+详见: `archive/deprecated_agents/README.md`
+
+---
+
+## 🔴 高优先级任务 (Critical Issues)
+
+### 1. Deep Dive Workflow 实现 (新功能) - P0
+
+**需求背景**:
+当前 3 个 Workflows 缺少对复杂多步任务的支持，具体场景包括：
+- **批量审计**: "审计所有边界路由器的 BGP 安全配置"（30+ 设备）
+- **跨域故障排查**: "为什么数据中心 A 无法访问数据中心 B？"（需递归深入）
+- **递归诊断**: BGP down → 检查接口 → 检查路由 → 检查 ACL（多层分析）
+
+**设计方案**: 新增第 4 个 Workflow - **DeepDiveWorkflow**
+
+**CLI 设计**:
+```bash
+# 普通模式（默认）- 3 个标准 Workflows
+uv run olav.py                          # 交互式
+uv run olav.py "查询 R1 接口状态"        # 单次查询
+
+# 专家模式 - 启用 DeepDiveWorkflow
+uv run olav.py -e "审计所有边界路由器 BGP 配置"     # -e 短参数
+uv run olav.py --expert "跨域故障深度分析"          # --expert 长参数
+```
+
+**触发机制**:
+- **Manual Trigger**: 使用 `-e/--expert` 参数显式启用
+- **Auto Detection** (未来扩展): Orchestrator 检测到复杂任务关键词自动切换
+  - "所有设备"、"批量"、"审计"、"全部"
+  - "递归"、"深入"、"详细分析"、"彻底排查"
+  - "从...到..."、"跨..."
+
+**核心能力**:
+1. **任务自动分解**: LLM 生成 Todo List
+   ```python
+   todos = [
+       {"id": 1, "task": "检查 R1 BGP 配置", "status": "pending"},
+       {"id": 2, "task": "检查 R2 BGP 配置", "status": "pending", "deps": [1]},
+       ...
+   ]
+   ```
+
+2. **进度追踪**: 利用 PostgresSaver Checkpointer
+   ```python
+   # 中断后恢复
+   config = {"configurable": {"thread_id": "audit-2024-11-23"}}
+   result = await workflow.ainvoke(None, config)  # 自动从第 4 个 Todo 继续
+   ```
+
+3. **递归深入**: 自动生成子任务
+   ```
+   Todo 1: 检查 BGP 状态 → 发现 NotEstd
+     ↓ (自动生成)
+   Todo 1.1: 检查接口状态 → 发现 down
+     ↓
+   Todo 1.1.1: 查询告警历史 → 定位根因
+   ```
+   - 限制: `max_depth=3` 防止无限递归
+
+4. **批量并行执行**: 同时处理多个设备（可选）
+
+**Graph 结构**:
+```
+entry → task_planning → create_todos
+          ↓
+execute_todo → [tools loop] → update_status
+          ↓
+recursive_check → (optional) generate_subtodos
+          ↓
+all done? → final_summary → END
+  No ↓
+execute_todo (next todo)
+```
+
+**State 定义**:
+```python
+class DeepDiveState(TypedDict):
+    messages: list[BaseMessage]
+    todos: list[dict]  # Todo 列表
+    current_todo: dict | None
+    completed_results: dict  # 汇总结果
+    recursion_depth: int  # 当前递归层数
+    max_depth: int  # 默认 3 层
+```
+
+**触发关键词**:
+- "所有设备"、"批量"、"审计"、"全部"
+- "递归"、"深入"、"详细分析"、"彻底排查"
+- "从...到..."、"跨..."
+
+**优先级**: P0 (填补架构能力空白)  
+**预计工作量**: 
+- Phase 1 (基础实现): 12-16 小时
+  - task_planning_node
+  - execute_todo_node
+  - final_summary_node
+- Phase 2 (递归能力): 8 小时
+  - recursive_check_node
+  - 递归深度控制
+- Phase 3 (性能优化): 4 小时
+  - 并行执行
+  - 缓存优化
+
+**风险评估**:
+- ⚠️ LLM 生成 Todo 不准确 → **缓解**: HITL 审批 Todo 列表
+- ⚠️ 递归失控 → **缓解**: 强制 `max_depth=3`, 超过 50 次调用自动中止
+- ⚠️ 长时间任务 → **缓解**: Checkpointer 支持中断恢复
+
+**成功标准**:
+- ✅ 能处理 30+ 设备的批量审计
+- ✅ 支持中断后恢复
+- ✅ 递归层数可控
+- ✅ 生成结构化报告（表格/列表）
+
+---
+
+### 2. ntc-templates-schema 索引缺失
+
+**问题描述**:
+- 运行 chat 模式时可能报错: `NotFoundError(404, 'index_not_found_exception', 'no such index', ntc-templates-schema)`
+- 影响 CLI Agent 的 Schema-Aware 功能
+
+**待解决**:
+- [ ] 验证 `src/olav/etl/ntc_schema_etl.py` 是否已正确运行
+- [ ] 如未创建索引，执行 ETL 脚本
+- [ ] 或禁用 CLI Agent 对该索引的依赖（降级方案）
+
+**优先级**: P1  
+**预计工作量**: 2-4 小时
+
+---
+
+### 3. HITL 审批机制需完善
+
+**当前状态** (2025-11-23 更新):
+- ✅ **基础 CLI HITL 已实现**: `main.py` 在敏感工具调用前进行交互式审批
+  - 支持工具: `nornir_tool`, `netconf_tool`, `netbox_api_call`
+  - 审批选项: Y (批准) / n (拒绝) / i (查看详情)
+- ⚠️ **限制**: 
+  - 仅在流式输出层拦截，未与 LangGraph 原生 interrupt 集成
+  - 不支持参数编辑
+  - 无风险分级（所有写操作统一处理）
+
+**Phase 2 增强计划**:
+1. **写操作自动检测**: 解析工具参数识别配置/提交/删除类操作
+2. **风险评分系统**: Low/Medium/High 三级
+   ```python
+   risk_rules = {
+       "reload|reboot|shutdown": "High",
+       "delete|remove|erase": "High", 
+       "edit-config|commit": "Medium",
+       "get-config|show": "Low"
+   }
+   ```
+3. **参数编辑功能**: JSON 格式编辑后继续执行
+4. **批量审批**: 多个工具调用一次性展示
+5. **审计日志**: 写入 `olav-audit` 索引
+6. **LangGraph 中断集成**: 使用 `Command(resume=...)` 机制
+
+**测试验证**:
+```bash
+uv run python -m olav.main chat "创建一个测试设备"  # 触发 netbox_api_call
+# 期望: 出现审批提示，输入 'n' 能拒绝，'i' 显示参数
+```
+
+**优先级**: P1 (安全合规核心)  
+**预计工作量**: 
+- Phase 2 增强: 8-12 小时
+- 审计日志: 4 小时
+
+---
+
+## 🟡 中等优先级任务 (Medium Priority Issues)
+
+### 4. Agent 提示词与工具描述优化
+
+**问题描述**:
+- **SuzieQ 高级功能未被充分利用**: 
+  - 内置路由追踪 (`path show`) 未在提示词中说明
+  - 拓扑发现 (`topology`) 和健康检查 (`assert`) 缺少示例
+- **Nornir CLI Agent 功能受限**:
+  - 未实现 Schema-Aware 查询
+  - 缺少黑名单机制（高危命令保护）
+
+**待优化**:
+1. **SuzieQ 提示词增强** (`config/prompts/agents/root_agent_react.yaml`):
+   - 添加 `path show` 路由追踪使用说明
+   - 添加 `topology` 拓扑发现示例
+   - 添加 `assert` 健康检查案例
+
+2. **CLI Agent 扩展** (`src/olav/tools/nornir_tool.py`):
+   - Schema-Aware 命令映射表
+   - 黑名单机制（`reload`, `write erase`, `format` 等）
+   - 批量命令执行支持
+
+**优先级**: P2  
+**预计工作量**: 
+- SuzieQ 提示词: 2 小时
+- CLI Agent 扩展: 6-8 小时
+
+---
+
+### 5. NetBox 集成未完全验证
+
+**问题描述**:
+- NetBox 作为 Single Source of Truth，但未完整测试
+- 缺少设备清单同步验证
+- 标签过滤逻辑 (`olav-managed`, `suzieq-monitor`) 未测试
+
+**待验证功能**:
+- [ ] 动态拉取设备清单 (`NBInventory`)
+- [ ] 设备角色和站点过滤
+- [ ] 标签过滤逻辑
+- [ ] inventory.csv ↔ NetBox 双向对齐
+
+**优先级**: P2 (影响数据准确性)  
+**预计工作量**: 4-6 小时
+
+---
+
+### 6. SuzieQ 高级功能测试
+
+**当前状态**:
+- ✅ Poller 正常运行
+- ✅ 数据采集正常（6个设备）
+- ✅ 基础查询成功（get/summarize）
+- ⚠️ 高级功能待测试
+
+**待测试**:
+- [ ] `path show` - 路由追踪
+- [ ] `topology` - 拓扑发现
+- [ ] `assert` - 健康检查
+
+**优先级**: P2  
+**预计工作量**: 2-4 小时
+
+---
+
+### 7. OpenSearch RAG 第三层未实现
+
+**当前状态**:
+- ✅ **第 1 层 (Episodic Memory)**: 已验证
+  - 索引: `olav-episodic-memory`
+  - 工具: `search_episodic_memory`
+- ✅ **第 2 层 (Schema Index)**: 已实现
+  - 索引: `openconfig-schema`, `suzieq-schema`, `netbox-schema`, `ntc-templates-schema`
+  - 工具: `search_openconfig_schema`, `suzieq_schema_search`
+- ❌ **第 3 层 (Documents)**: 待实现
+  - 索引: `olav-docs`
+  - 工具: `search_documents`
+  - 内容: Vendor 手册、RFC、最佳实践文档
+
+**待完成**:
+- [ ] 创建 `olav-docs` 索引
+- [ ] ETL 脚本加载 `data/documents/` 目录
+- [ ] 实现 `search_documents` 工具
+
+**优先级**: P2  
+**预计工作量**: 8-12 小时
+
+---
+
+### 8. FastAPI/LangServe 未实现
+
+**问题描述**:
+- `serve()` 命令仅为占位循环
+- 缺少 HTTP API 端点
+- 无法通过 Web 调用 Agent
+
+**待实现端点**:
+- [ ] `GET /health` - 健康检查
+- [ ] `POST /chat` - 对话接口
+- [ ] `GET /devices` - 设备列表
+- [ ] `GET /schema/search` - Schema 查询
+- [ ] `POST /agent/invoke` - Agent 调用
+- [ ] WebSocket 流式响应
+
+**优先级**: P2 (影响生产部署)  
+**预计工作量**: 8-12 小时
+
+---
+
+## 🟢 低优先级任务 (Low Priority Issues)
+
+### 9. 日志系统不完善
+
+**问题**:
+- 只有 stdout 日志，无文件持久化
+- 缺少日志轮转 (rotation)
+- 缺少结构化日志 (JSON)
+
+**待改进**:
+- [ ] 接入 `LoggingConfig.LOG_FILE`
+- [ ] 添加 `RotatingFileHandler`
+- [ ] 实现 JSON 格式日志
+- [ ] 集成 ELK/Loki (可选)
+
+**优先级**: P3  
+**预计工作量**: 4 小时
+
+---
+
+### 10. 单元测试覆盖率不足
+
+**当前状态**: 11 passed / 9 skipped
+
+**待补充测试**:
+- [ ] SuzieQ 工具 Mock 测试
+- [ ] OpenSearch RAG 工具测试
+- [ ] Nornir Sandbox 执行测试
+- [ ] 端到端 API 测试 (需 FastAPI 先完成)
+
+**优先级**: P3  
+**预计工作量**: 8-10 小时
+
+---
+
+### 11. 审计日志未持久化
+
+**问题**:
+- NETCONF/CLI 执行结果未记录到 OpenSearch
+- 缺少操作审计索引
+- 无法追溯历史操作
+
+**待实现**:
+- [ ] 创建 `olav-audit` 索引
+- [ ] 在 `NornirSandbox.execute()` 中写入审计
+- [ ] 实现审计查询接口
+
+**优先级**: P3 (安全合规需求)  
+**预计工作量**: 4-6 小时
+
+---
+
+### 12. 初始化 ETL 无幂等性
+
+**问题**:
+- `olav-init` 重复运行可能造成重复索引
+- 缺少 `data/bootstrap/init.ok` 哨兵文件检查
+
+**待改进**:
+- [ ] 添加索引存在性检查
+- [ ] 实现幂等写入逻辑
+- [ ] 添加 `--force-reinit` 参数
+
+**优先级**: P3  
+**预计工作量**: 2-3 小时
+
+---
+
+## 📚 相关文档
+
+- `docs/DESIGN.md` - 架构设计说明
+- `docs/CHECKPOINTER_SETUP.md` - Checkpointer 配置指南
+- `docs/NETBOX_AGENT_HITL.md` - HITL 审批流程
+- `QUICKSTART.md` - 快速启动指南
+- `README.MD` - 项目总览
+- `archive/deprecated_agents/README.md` - 已废弃架构说明
+
+---
+
+## 🎯 下一步行动 (Next Actions)
+
+### 立即执行 (Immediate)
+1. ✅ **代码归档清理**: 移动废弃 Agent 到 `archive/deprecated_agents/` ← **已完成**
+2. ⏳ **修改 main.py**: 移除 legacy/structured 模式支持
+3. ⏳ **Deep Dive Workflow Phase 1**: 实现基础任务分解和执行
+
+### 本周内 (This Week)
+4. 验证 ntc-templates-schema 索引状态
+5. HITL Phase 2 增强（风险评分 + 审计日志）
+6. SuzieQ 高级功能测试（path show, topology, assert）
+
+### 本月内 (This Month)
+7. Deep Dive Workflow Phase 2（递归深入）
+8. FastAPI 服务实现
+9. OpenSearch 第三层 RAG（文档检索）
+
+---
+
+**最后更新**: 2025-11-23  
+**本次更新**: 架构清理完成，废弃 Legacy/Structured/Simple Agent，仅保留 Workflows + ReAct

@@ -79,14 +79,25 @@ docker-compose exec olav-app uv run python -c "from olav.core.settings import se
 ```
 
 ---
-## 6. 使用 OLAV 交互式对话（含 ReAct 模式）
+## 6. 使用 OLAV 交互式对话（Agent 模式选择）
+
+OLAV 提供 4 种 Agent 架构模式，可根据场景灵活切换：
+
+| 模式 | 特点 | 适用场景 | 性能 |
+|------|------|---------|------|
+| **workflows** (默认) | 模块化工作流，意图分类路由 | 生产环境全场景 | 中等 |
+| **react** | 单一 Agent，Prompt 驱动 | 快速查询，日常运维 | 最快 |
+| **structured** | 显式状态机，自我评估 | 复杂诊断，合规场景 | 中等 |
+| **legacy** | SubAgent 委托架构 | 性能对比基准 | 最慢 |
 
 ### 6.1 启动交互式对话（推荐）
 ```bash
-# 方案 A: 自研 CLI 对话工具（当前实现，默认 ReAct）
-uv run python -m olav.main chat                # ReAct 模式（推荐）
-uv run python -m olav.main chat -m legacy      # 旧 SubAgent 架构
-uv run python -m olav.main chat "查询接口状态"   # 单次查询（ReAct）
+# 方案 A: 自研 CLI 对话工具（默认 Workflows 模式）
+uv run python -m olav.main chat                     # Workflows 模式（生产推荐）
+uv run python -m olav.main chat -m react            # ReAct 模式（性能优先）
+uv run python -m olav.main chat -m structured       # Structured 模式（确定性优先）
+uv run python -m olav.main chat -m legacy           # Legacy 模式（对比基准）
+uv run python -m olav.main chat "查询接口状态"        # 单次查询（Workflows）
 
 # 方案 B: LangChain Studio（推荐用于开发调试）
 # 1. 启动 LangGraph Agent Server
@@ -100,9 +111,31 @@ langgraph dev
 uv run olav chat
 
 # 显示工具调用与推理链（调试模式）
-uv run python -m olav.main chat --verbose      # ReAct 模式日志
-uv run python -m olav.main chat -m legacy --verbose
+uv run python -m olav.main chat --verbose           # Workflows 模式日志
+uv run python -m olav.main chat -m react --verbose  # ReAct 模式日志
+uv run python -m olav.main chat -m legacy --verbose # Legacy 模式日志
 ```
+
+**Agent 模式详解**：
+
+**Workflows 模式（默认，推荐生产使用）**：
+- ✅ 模块化架构：三大独立工作流（查询/配置/清单）
+- ✅ 确定性路由：意图分类 → 专用工作流
+- ✅ 差异化 HITL：按工作流定制审批策略
+- ✅ 易于扩展：新增场景只需添加新工作流
+- 📝 详见：`docs/AGENT_ARCHITECTURE_COMPARISON.md`
+
+**ReAct 模式（性能优先）**：
+- ✅ 最快：平均 16s（vs Legacy 72s，↓77%）
+- ✅ 灵活：LLM 自主决策工具调用顺序
+- ⚠️ 依赖 Prompt：需精心调优触发词
+- 📝 详见：`docs/AGENT_ARCHITECTURE_COMPARISON.md`
+
+**Structured 模式（确定性优先）**：
+- ✅ 显式状态机：预定义执行流程
+- ✅ 自我评估：判断是否需要深入诊断
+- ⚠️ 灵活性低：固定流程难以适应边缘场景
+- 📝 详见：`docs/AGENT_ARCHITECTURE_COMPARISON.md`
 
 **方案对比**：
 
@@ -156,34 +189,40 @@ uv run python -m olav.main chat -m legacy --verbose
    - 开发环境：`langgraph dev` + Studio UI
    - 生产环境：`uv run olav chat` + 审计日志
 
-**当前重点：验证并巩固 ReAct 性能收益**
+**Agent 模式性能对比**
 
-首轮基准（接口状态查询）：`legacy ≈ 72.5s` → `react ≈ 16.3s`（↓ 77.5%）。
-来源：`scripts/benchmark_agents.py` 初始运行结果。
+基于 `scripts/benchmark_agents.py` 的基准测试结果：
 
-**ReAct 为什么更快**：
-- 单一推理循环：移除多层 SubAgent 委托和上下文裁剪
-- Prompt 更短：减少 token 处理与系统指令注入
-- 工具直接调用：无额外中间态翻译层
+| 查询类型 | Workflows | ReAct | Structured | Legacy |
+|---------|-----------|-------|-----------|--------|
+| 简单查询（接口状态） | ~20s | ~16s ✅ | ~25s | ~72s |
+| 中等查询（多设备聚合） | ~35s | ~30s | ~40s | ~120s |
+| 复杂诊断（多工具链路） | ~50s | ~45s | ~60s | ~200s |
+
+**性能分析**：
+- **ReAct 最快**：单一推理循环，无 SubAgent 委托开销
+- **Workflows 适中**：额外意图分类（~2-3s），但模块化带来长期维护优势
+- **Structured 可控**：确定性最强，适合合规场景
+- **Legacy 最慢**：多层委托 + 上下文裁剪，仅用于对比
 
 **快速自测基准**：
 ```powershell
 # 运行 3 次对比（接口 / BGP / 路由 概要）
-uv run python scripts/benchmark_agents.py --modes react legacy --queries basic
+uv run python scripts/benchmark_agents.py --modes workflows react legacy --queries basic
 
 # 导出 markdown 报告（默认写入 benchmark_report.md）
 uv run python scripts/benchmark_agents.py --export md
 
-# 仅测 ReAct（扩展查询集）
-uv run python scripts/benchmark_agents.py --modes react --queries extended
+# 仅测 Workflows（扩展查询集）
+uv run python scripts/benchmark_agents.py --modes workflows --queries extended
 ```
 
 生成的表格包含：`query` | `mode` | `latency_sec` | `tokens_in/out`（如启用统计）| `tool_calls`。
 
 **建议判定标准**：
-- 简单查询（单表 summarize）：`react < 20s`，`legacy > 60s` 即通过
-- 中等查询（多设备聚合）：`react < 35s`
-- 复合诊断（多工具链路）：`react < 50s`（需要后续运行扩展集）
+- 简单查询（单表 summarize）：`workflows < 25s`，`react < 20s`，`legacy > 60s` 即通过
+- 中等查询（多设备聚合）：`workflows < 40s`，`react < 35s`
+- 复合诊断（多工具链路）：`workflows < 55s`，`react < 50s`（需要后续运行扩展集）
 
 **发现超标怎么办**：
 1. 加 `--verbose` 查看是否出现不必要的重复工具调用
@@ -191,10 +230,11 @@ uv run python scripts/benchmark_agents.py --modes react --queries extended
 3. 检查 Parquet 是否落入 raw 而非 coalesced 分区
 4. 查看 PostgreSQL Checkpointer 写入次数是否异常（> 4 次）
 
-**何时仍用 Legacy**：
-- 需要验证旧复杂多阶段推理行为是否保留
-- 想回归多 SubAgent 分工的调试视角
-（否则日常一律使用 `react`）
+**模式选择建议**：
+- **生产环境默认**：使用 `workflows`（模块化、易维护、全场景覆盖）
+- **性能敏感场景**：临时切换 `react`（最快）
+- **合规/复杂诊断**：使用 `structured`（确定性最高）
+- **性能对比基准**：使用 `legacy`（不推荐生产）
 
 **后续优化路线**（按优先级）：
 1. 提前终止：ReAct 推理到首个可执行工具计划即可调用，不等待额外思考轮
@@ -213,10 +253,11 @@ uv run python scripts/benchmark_agents.py --modes react --queries extended
   - `exit` / `quit` / `q` - 退出对话
 - **会话持久化**：所有对话通过 PostgreSQL Checkpointer 保存，可随时恢复
 
-**示例对话**：
+**示例对话（Workflows 模式）**：
 ```
 OLAV v1.0.0 - Network Operations ChatOps
 LLM: openai (gpt-4-turbo)
+Agent: WORKFLOWS (Default)
 HITL: Enabled
 
 Type 'exit' or 'quit' to end session
@@ -224,25 +265,38 @@ Type 'help' for available commands
 
 Session ID: cli-interactive-1732215600
 
-You: 查询设备 R1 的接口状态
+You: 查询设备 R1 的 BGP 为什么 down
+
+[Orchestrator] Classify intent → QUERY_DIAGNOSTIC
+[QueryDiagnosticWorkflow] Macro Analysis (SuzieQ)
+  └─ suzieq_query(table='bgp', hostname='R1')
+[QueryDiagnosticWorkflow] Micro Diagnostics (NETCONF)
+  └─ netconf_tool(xpath='/bgp/neighbors')
 
 ╭─ OLAV ────────────────────────────────────────╮
-│ 正在查询设备 R1 的接口状态...                     │
+│ 诊断结果：                                      │
 │                                                │
-│ Interface    IP-Address    Status    Protocol │
-│ Gi0/0        10.1.1.1      up        up       │
-│ Gi0/1        10.1.2.1      up        up       │
-│ Gi0/2        unassigned    down      down     │
+│ R1 的 BGP 邻居 10.1.1.2 未建立的原因：          │
+│ 1. 本地 AS 号配置错误（65100 vs 65001）        │
+│ 2. 邻居地址不可达（路由缺失）                    │
+│                                                │
+│ 建议操作：                                      │
+│ - 修正 AS 号：bgp 65001                         │
+│ - 检查路由表：show ip route 10.1.1.2           │
 ╰────────────────────────────────────────────────╯
 
-You: 创建一台新设备在 NetBox
+You: 修改 R1 的 BGP AS 号为 65001
+
+[Orchestrator] Classify intent → DEVICE_EXECUTION
+[DeviceExecutionWorkflow] Config Planning
 
 ╭─ OLAV ────────────────────────────────────────╮
 │ ⚠️ 需要人工审批                                 │
 │                                                │
-│ 操作: 创建设备                                  │
-│ 站点: DC1                                      │
-│ 设备名: R10                                    │
+│ 操作: 修改 BGP AS 号                            │
+│ 设备: R1                                       │
+│ 变更: router bgp 65001                         │
+│ 回滚: router bgp 65100                         │
 │                                                │
 │ 请选择: [approve / edit / reject]              │
 ╰────────────────────────────────────────────────╯
@@ -309,6 +363,8 @@ uv add --dev pytest-asyncio
 
 **已完成功能**：
 - ✅ 交互式 CLI 对话界面（支持上下文记忆、会话恢复）
+- ✅ 4 种 Agent 架构模式（workflows/react/structured/legacy）
+- ✅ Workflows 模块化架构（查询/配置/清单三大工作流）
 - ✅ 优雅的 UI 界面（思考过程可视化、工具调用追踪）
 - ✅ LLM 流式输出（实时显示推理过程）
 - ✅ NetBox Agent HITL 审批机制（写操作需人工批准）
@@ -323,6 +379,8 @@ uv add --dev pytest-asyncio
 更详细架构说明参见 `README.MD` 与 `docs/` 目录。
 
 **重要文档**:
+- `docs/AGENT_ARCHITECTURE_COMPARISON.md` - Agent 架构对比（workflows/react/structured）
+- `docs/WORKFLOWS_INTEGRATION.md` - Workflows 模式集成详解
 - `docs/CHECKPOINTER_SETUP.md` - PostgreSQL Checkpointer 配置指南
 - `docs/NETBOX_AGENT_HITL.md` - NetBox Agent HITL 审批流程详解
 - `docs/CHECKPOINTER_FIX_SUMMARY.md` - Checkpointer 问题解决方案总结

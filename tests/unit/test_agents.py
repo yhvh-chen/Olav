@@ -1,19 +1,19 @@
-"""Unit tests for agents."""
+"""Unit tests for workflow orchestrator."""
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_root_agent_creation(checkpointer):
-    """Test root agent initialization."""
-    from olav.agents.root_agent import create_root_agent
+async def test_workflow_orchestrator_creation(checkpointer):
+    """Test workflow orchestrator initialization."""
+    from olav.agents.root_agent_orchestrator import create_workflow_orchestrator
     
     # TODO: Mock LLM to avoid API calls
     pytest.skip("Requires LLM mocking")
 
 
 @pytest.mark.asyncio
-async def test_agent_workflow(checkpointer):
-    """Test complete agent workflow: SuzieQ → RAG → NETCONF."""
+async def test_workflow_execution(checkpointer):
+    """Test complete workflow execution: Query → Execution → NetBox."""
     # TODO: Implement end-to-end workflow test
     pytest.skip("Integration test - requires full stack")

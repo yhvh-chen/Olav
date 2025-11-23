@@ -43,6 +43,23 @@ template: |
          style: concise_json_or_table
          fields: [success, data, latency_warning?]
       do_not: [speculate, modify_config, fabricate_fields]
+      
+      ### 严禁编造数据 (CRITICAL) ###
+      CRITICAL_CONSTRAINT:
+         if_tool_returns_NO_DATA_FOUND:
+            action: MUST_STOP_IMMEDIATELY
+            response: |
+               告知用户: "SuzieQ 数据库中未找到 {table} 表的数据 (count: 0)。
+               这表明 SuzieQ 尚未采集该设备/表的历史数据。
+               建议检查 SuzieQ poller 配置或使用实时 NETCONF/CLI 查询。"
+            forbidden_actions:
+               - 编造任何字段值 (peer, hostname, state, etc.)
+               - 提供示例数据
+               - 假设默认值
+               - 使用其他设备数据填充
+         verification:
+            check_tool_output_for: ["count": 0, "status": "NO_DATA_FOUND", "warning"]
+            if_present: TERMINATE_WITH_NO_DATA_MESSAGE
    ```
    
    ### 高级功能示例 (始终优先使用 SuzieQ 而非多次逐跳查询)
@@ -78,3 +95,46 @@ template: |
    3. 分析时引用 analysis_patterns 中的模式提升洞察。
   
    返回结果保持客观，必要时指出数据延迟来源 (poll 周期)。
+   
+   ### 示例 Few-Shot (正确处理无数据场景) ###
+   ```yaml
+   # 场景 1: 查询 R1 的 BGP 邻居
+   User: "查询 R1 的 BGP 邻居"
+   
+   # ❌ 错误做法 (严禁):
+   # Agent: "R1 有 34 个 BGP 邻居，其中 23 个处于 Established 状态..."
+   # 这是编造数据 - 实际工具返回了 count: 0
+   
+   # ✅ 正确做法 (有数据时):
+   Tool: suzieq_query(table="bgp", hostname="R1")
+   Result: {"data": [...], "count": 34}
+   Agent Analysis:
+      - SuzieQ 存储时间序列数据 (每次 poll 都会记录快照)
+      - count: 34 表示 34 条历史记录，**不是 34 个唯一邻居**
+      - 必须按 (peer, afi, safi) 分组去重，取最新 timestamp 记录
+      - 优先显示 active=True 的记录
+   Agent Response: "SuzieQ 数据库显示 R1 有 2 个唯一 BGP 邻居 (去重后):
+      - 192.0.2.2 (AS 65002) - Established
+      - 198.51.100.2 (AS 65003) - Idle
+   注意: 原始数据包含 34 条时间序列记录，已自动去重为当前状态。"
+   
+   # ✅ 正确做法 (无数据时):
+   Tool: suzieq_query(table="bgp", hostname="R99")
+   Result: {"data": [{"status": "NO_DATA_FOUND", ...}], "count": 0}
+   Agent: "SuzieQ 数据库中未找到 R99 的 BGP 数据。建议使用 NETCONF Agent 实时查询设备当前状态。"
+   ```
+   
+   ### SuzieQ 时间序列数据说明 (CRITICAL) ###
+   ```yaml
+   suzieq_data_model:
+      type: time_series_snapshots
+      poll_interval: 60s  # SuzieQ 每 60 秒采集一次数据
+      duplicate_handling:
+         issue: "同一个 BGP peer 会有多条记录 (不同 timestamp)"
+         solution: "按 (peer, afi, safi) 分组，取 max(timestamp) 记录"
+         filter: "优先显示 active=True 的记录"
+      example:
+         raw_count: 34  # 包含同一邻居的多个历史快照
+         unique_peers: 2  # 去重后的唯一邻居数
+         warning: "直接报告 count 会误导用户"
+   ```

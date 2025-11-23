@@ -18,7 +18,7 @@ from rich.panel import Panel
 
 from olav import __version__
 # Agent imports moved to runtime (dynamic import based on --agent-mode)
-from olav.tools.suzieq_tool import suzieq_query  # Direct tool access for one-shot timing
+from olav.tools.suzieq_parquet_tool import suzieq_query  # Direct tool access for one-shot timing
 from olav.core.settings import settings
 from olav.core.logging_config import setup_logging
 from olav.ui import ChatUI
@@ -54,39 +54,56 @@ app = typer.Typer(
 @app.command()
 def chat(
     query: str | None = typer.Argument(None, help="Single query to execute (non-interactive mode)"),
+    expert: bool = typer.Option(False, "--expert", "-e", help="Enable Expert Mode (Deep Dive Workflow)"),
     thread_id: str | None = typer.Option(None, help="Conversation thread ID (for resuming sessions)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs and timestamps"),
-    agent_mode: str = typer.Option("react", "--agent-mode", "-m", help="Agent architecture: 'react' (fast, prompt-driven) | 'structured' (explicit workflow) | 'legacy' (DeepAgents SubAgent)"),
 ) -> None:
     """Start interactive chat session with OLAV agent.
     
-    Agent Modes:
-        react: ReAct architecture (Prompt-driven, 64% faster than legacy)
-        structured: Explicit StateGraph workflow (Deterministic routing, self-evaluation loop)
-        legacy: Original DeepAgents SubAgent architecture (for comparison)
+    Architecture: Workflows Orchestrator (Modular multi-workflow system)
+    
+    Mode Selection:
+        - Normal Mode (default): 3 workflows for standard operations
+          • QueryDiagnosticWorkflow: Macro (SuzieQ) → Micro (NETCONF) funnel analysis
+          • DeviceExecutionWorkflow: Config changes with HITL approval
+          • NetBoxManagementWorkflow: Device inventory management
+        
+        - Expert Mode (-e/--expert): Enables DeepDiveWorkflow for complex tasks
+          • Automatic task decomposition (Todo List generation)
+          • Recursive diagnostics (max 3 levels)
+          • Batch audits (30+ devices parallel execution)
+          • Progress tracking with Checkpointer (resume on interruption)
     
     Examples:
-        # Interactive mode (ReAct)
-        olav chat
+        # Normal mode - Interactive
+        uv run olav.py
         
-        # Single query mode (ReAct)
-        olav chat "查询设备 R1 的接口状态"
+        # Normal mode - Single query
+        uv run olav.py "查询设备 R1 的接口状态"
         
-        # Use legacy architecture
-        olav chat --agent-mode legacy
+        # Expert mode - Complex diagnostics
+        uv run olav.py -e "审计所有边界路由器的 BGP 安全配置"
+        uv run olav.py --expert "为什么数据中心 A 无法访问数据中心 B？"
         
         # Verbose mode (show detailed logs)
-        olav chat "查询 R1" --verbose
+        uv run olav.py "查询 R1" --verbose
         
         # Resume previous conversation
-        olav chat --thread-id "session-123"
+        uv run olav.py --thread-id "session-123"
+    
+    Note: ReAct, Legacy, Structured, and Simple agent modes have been deprecated (2025-11-23).
+          See archive/deprecated_agents/README.md for migration details.
     """
     # Setup logging first
     setup_logging(verbose)
     
+    # Determine mode
+    mode_name = "Expert Mode (Deep Dive)" if expert else "Normal Mode"
+    
     console.print(f"[bold green]OLAV v{__version__}[/bold green] - Network Operations ChatOps")
     console.print(f"LLM: {settings.llm_provider} ({settings.llm_model_name})")
-    console.print(f"Agent: {agent_mode.upper()} {'(new)' if agent_mode == 'react' else '(legacy)'}")
+    console.print(f"Architecture: Workflows Orchestrator")
+    console.print(f"Mode: {mode_name}")
     console.print(f"HITL: {'Enabled' if AgentConfig.ENABLE_HITL else 'Disabled'}")
     
     # Windows: Use SelectorEventLoop for psycopg async compatibility
@@ -95,37 +112,30 @@ def chat(
     
     if query:
         # Single query mode (non-interactive)
-        asyncio.run(_run_single_query(query, thread_id, agent_mode))
+        asyncio.run(_run_single_query(query, expert, thread_id))
     else:
         # Interactive chat mode
         console.print("\nType 'exit' or 'quit' to end session")
         console.print("Type 'help' for available commands\n")
-        asyncio.run(_run_interactive_chat(thread_id, agent_mode))
+        asyncio.run(_run_interactive_chat(expert, thread_id))
 
 
-async def _run_single_query(query: str, thread_id: str | None = None, agent_mode: str = "react") -> None:
+async def _run_single_query(query: str, expert: bool = False, thread_id: str | None = None) -> None:
     """Execute single query and exit.
     
     Args:
         query: User query to execute
+        expert: Enable Expert Mode (Deep Dive Workflow)
         thread_id: Optional thread ID for conversation context
-        agent_mode: Agent architecture ('react', 'structured', or 'legacy')
     """
     ui = ChatUI(console)
     
     try:
-        # Import appropriate agent based on mode
-        if agent_mode == "react":
-            from olav.agents.root_agent_react import create_root_agent_react
-            agent, checkpointer_ctx = await create_root_agent_react()
-        elif agent_mode == "structured":
-            from olav.agents.root_agent_structured import create_root_agent_structured
-            agent, checkpointer_ctx = await create_root_agent_structured()
-        else:  # legacy
-            from olav.agents.root_agent_legacy import create_root_agent
-            agent, checkpointer_ctx = await create_root_agent()
+        # Import Workflows Orchestrator
+        from olav.agents.root_agent_orchestrator import create_workflow_orchestrator
+        orchestrator, agent, checkpointer_ctx = await create_workflow_orchestrator(expert_mode=expert)
         
-        logger.debug(f"Root agent ({agent_mode}) initialized successfully")
+        logger.debug(f"Workflows Orchestrator initialized successfully (expert_mode={expert})")
         
         # Generate thread ID if not provided
         if not thread_id:
@@ -138,26 +148,156 @@ async def _run_single_query(query: str, thread_id: str | None = None, agent_mode
         console.print()
         ui.show_user_message(query)
         
-        # Stream response with thinking visualization
-        result = await _stream_agent_response(
-            agent=agent,
-            query=query,
-            config=config,
-            ui=ui,
-        )
+        # First, route via orchestrator directly to obtain structured plan (needed for task descriptions)
+        route_result = await orchestrator.route(query, thread_id)
         
-        # Display final response
-        if result["content"]:
-            ui.show_agent_response(
-                result["content"],
-                metadata={
-                    "tools_used": result.get("tools_used", []),
-                    "data_source": result.get("data_source"),
-                    "timings": result.get("timings", []),
-                }
-            )
+        # If interrupted, use route_result directly (contains execution_plan & todos)
+        if route_result.get("interrupted"):
+            console.print("\n[bold yellow]⏸️  执行已暂停，等待用户审批[/bold yellow]")
+            execution_plan = route_result.get("execution_plan", {})
+            todos = route_result.get("todos", [])
+            # Build a mapping from id -> task text for display
+            task_map = {t.get("id"): t.get("task") for t in todos if isinstance(t, dict)}
+            
+            # Display execution plan
+            console.print("\n" + "="*60)
+            console.print("[bold cyan]📋 执行计划（Schema 调研结果）[/bold cyan]")
+            console.print("="*60)
+            
+            feasible = execution_plan.get("feasible_tasks", [])
+            uncertain = execution_plan.get("uncertain_tasks", [])
+            infeasible = execution_plan.get("infeasible_tasks", [])
+            
+            if feasible:
+                console.print(f"\n[green]✅ 可执行任务 ({len(feasible)} 个):[/green]")
+                for task_id in feasible:
+                    desc = task_map.get(task_id, "(描述缺失)")
+                    console.print(f"  - 任务 {task_id}: {desc}")
+            
+            if uncertain:
+                console.print(f"\n[yellow]⚠️  不确定任务 ({len(uncertain)} 个):[/yellow]")
+                for task_id in uncertain:
+                    desc = task_map.get(task_id, "(描述缺失)")
+                    console.print(f"  - 任务 {task_id}: {desc}")
+                    recs = execution_plan.get("recommendations", {})
+                    if task_id in recs:
+                        console.print(f"    建议: {recs[task_id]}")
+            
+            if infeasible:
+                console.print(f"\n[red]❌ 无法执行任务 ({len(infeasible)} 个):[/red]")
+                for task_id in infeasible:
+                    desc = task_map.get(task_id, "(描述缺失)")
+                    console.print(f"  - 任务 {task_id}: {desc}")
+            
+            console.print("\n" + "="*60)
+            console.print("[bold]请选择操作:[/bold]")
+            console.print("  [green]Y[/green] - 批准执行可行任务")
+            console.print("  [red]N[/red] - 中止执行")
+            console.print("  [cyan]其他[/cyan] - 输入修改请求（例如：'跳过任务2，使用bgp表执行任务5'）")
+            console.print("="*60)
+            
+            # Enter approval loop
+            while True:
+                user_input = input("\n您的决定: ").strip()
+                
+                if not user_input:
+                    console.print("[yellow]请输入有效选择 (Y/N/修改请求)[/yellow]")
+                    continue
+                
+                # Resume execution with user input
+                console.print(f"\n[dim]处理用户输入: {user_input}[/dim]")
+                
+                # Convert workflow_type string to enum
+                from olav.workflows.base import WorkflowType
+                workflow_enum = WorkflowType[route_result["workflow_type"].upper()]
+                
+                resume_result = await orchestrator.resume(
+                    thread_id=thread_id,
+                    user_input=user_input,
+                    workflow_type=workflow_enum
+                )
+                
+                # Check if resume resulted in another interrupt (modified plan needs re-approval)
+                if resume_result.get("interrupted"):
+                    console.print("\n[yellow]⏸️  计划已修改，需要重新审批[/yellow]")
+                    execution_plan = resume_result.get("execution_plan", {})
+                    todos = resume_result.get("todos", todos)
+                    task_map = {t.get("id"): t.get("task") for t in todos if isinstance(t, dict)}
+                    # Re-display updated execution plan for re-approval
+                    feasible = execution_plan.get("feasible_tasks", [])
+                    uncertain = execution_plan.get("uncertain_tasks", [])
+                    infeasible = execution_plan.get("infeasible_tasks", [])
+
+                    console.print("\n" + "="*60)
+                    console.print("[bold]🗂️ 更新后的执行计划[/bold]")
+                    console.print("="*60)
+                    summary = execution_plan.get("summary") or execution_plan.get("plan_summary")
+                    if summary:
+                        console.print(summary)
+                        console.print("-"*60)
+
+                    if feasible:
+                        console.print(f"[green]✅ 可执行任务 ({len(feasible)} 个):[/green]")
+                        for task_id in feasible:
+                            desc = task_map.get(task_id, "(描述缺失)")
+                            console.print(f"  - 任务 {task_id}: {desc}")
+                            recs = execution_plan.get("recommendations", {})
+                            if task_id in recs:
+                                console.print(f"    建议: {recs[task_id]}")
+
+                    if uncertain:
+                        console.print(f"\n[yellow]⚠️  需进一步确认的任务 ({len(uncertain)} 个):[/yellow]")
+                        for task_id in uncertain:
+                            desc = task_map.get(task_id, "(描述缺失)")
+                            console.print(f"  - 任务 {task_id}: {desc}")
+                            recs = execution_plan.get("recommendations", {})
+                            if task_id in recs:
+                                console.print(f"    建议: {recs[task_id]}")
+
+                    if infeasible:
+                        console.print(f"\n[red]❌ 无法执行任务 ({len(infeasible)} 个):[/red]")
+                        for task_id in infeasible:
+                            desc = task_map.get(task_id, "(描述缺失)")
+                            console.print(f"  - 任务 {task_id}: {desc}")
+
+                    console.print("\n" + "="*60)
+                    console.print("[bold]请选择操作:[/bold]")
+                    console.print("  [green]Y[/green] - 批准执行可行任务")
+                    console.print("  [red]N[/red] - 中止执行")
+                    console.print("  [cyan]其他[/cyan] - 输入进一步修改请求")
+                    console.print("="*60)
+                    continue
+                
+                # Execution completed or aborted
+                if resume_result.get("content"):
+                    ui.show_agent_response(
+                        resume_result["content"],
+                        metadata={
+                            "tools_used": resume_result.get("tools_used", []),
+                            "data_source": resume_result.get("data_source"),
+                        }
+                    )
+                break
+        
         else:
-            ui.show_warning("未收到 Agent 响应")
+            # Fallback to streaming standard response if no interrupt
+            stream_result = await _stream_agent_response(
+                agent=agent,
+                query=query,
+                config=config,
+                ui=ui,
+            )
+            if stream_result.get("content"):
+                ui.show_agent_response(
+                    stream_result["content"],
+                    metadata={
+                        "tools_used": stream_result.get("tools_used", []),
+                        "data_source": stream_result.get("data_source"),
+                        "timings": stream_result.get("timings", []),
+                    }
+                )
+            else:
+                ui.show_warning("未收到 Agent 响应")
         
         # Cleanup checkpointer
         await checkpointer_ctx.__aexit__(None, None, None)
@@ -355,36 +495,37 @@ async def _stream_agent_response(
     elif any("cli" in t for t in tools_used):
         data_source = "CLI 命令执行"
     
+    # Check for HITL interrupt in final state
+    interrupted = chunk.get("interrupted", False) if isinstance(chunk, dict) else False
+    execution_plan = chunk.get("execution_plan") if isinstance(chunk, dict) else None
+    workflow_type = chunk.get("workflow_type") if isinstance(chunk, dict) else None
+    
     return {
         "content": response_content,
         "tools_used": list(set(tools_used)),  # Remove duplicates
         "data_source": data_source,
         "timings": tool_timings,
+        "interrupted": interrupted,
+        "execution_plan": execution_plan,
+        "workflow_type": workflow_type,
     }
 
 
-async def _run_interactive_chat(thread_id: str | None = None, agent_mode: str = "react") -> None:
+async def _run_interactive_chat(expert: bool = False, thread_id: str | None = None) -> None:
     """Run interactive chat loop.
     
     Args:
+        expert: Enable Expert Mode (Deep Dive Workflow)
         thread_id: Optional thread ID for conversation context
-        agent_mode: Agent architecture ('react', 'structured', or 'legacy')
     """
     ui = ChatUI(console)
     
     try:
-        # Import appropriate agent based on mode
-        if agent_mode == "react":
-            from olav.agents.root_agent_react import create_root_agent_react
-            agent, checkpointer_ctx = await create_root_agent_react()
-        elif agent_mode == "structured":
-            from olav.agents.root_agent_structured import create_root_agent_structured
-            agent, checkpointer_ctx = await create_root_agent_structured()
-        else:  # legacy
-            from olav.agents.root_agent_legacy import create_root_agent
-            agent, checkpointer_ctx = await create_root_agent()
+        # Import Workflows Orchestrator
+        from olav.agents.root_agent_orchestrator import create_workflow_orchestrator
+        orchestrator, agent, checkpointer_ctx = await create_workflow_orchestrator(expert_mode=expert)
         
-        logger.debug(f"Root agent ({agent_mode}) initialized successfully")
+        logger.debug(f"Workflows Orchestrator initialized successfully (expert_mode={expert})")
         
         # Generate thread ID if not provided
         if not thread_id:

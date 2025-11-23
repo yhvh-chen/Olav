@@ -1,7 +1,29 @@
-"""Pytest configuration and shared fixtures."""
+"""Pytest configuration and shared fixtures.
 
+Adds `src/` to `sys.path` so tests can import the project package
+without requiring installation. This avoids `ModuleNotFoundError`
+for `olav.*` modules when running tests directly from the repo.
+"""
+
+import os
+import sys
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
+
+# Ensure both `src` and project root are on the import path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+# Add project root for config.settings imports
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# If a top-level module file (olav.py) was imported before the package,
+# remove it so the package directory `olav/` can be imported.
+import importlib
+if 'olav' in sys.modules and not hasattr(sys.modules['olav'], '__path__'):
+    del sys.modules['olav']
 
 # Safe/import-tolerant fallbacks to avoid hard failures in minimal test contexts
 try:  # pragma: no cover - defensive import
