@@ -40,14 +40,33 @@ SW1,access,cisco-2960,cisco_ios,Branch,active,Vlan1,192.168.100.105/24
 
 ---
 ## 3. 一次性整体启动（含 NetBox 闸门）
-现在推荐直接启动全栈，`olav-init` 会在真正执行 ETL 前自动检测 NetBox 连接与 Token，有问题直接失败并阻止其它服务继续。
+
+OLAV 强制要求 NetBox 集成（作为 Source of Truth），但你可以选择是部署内置 NetBox 容器还是连接外部 NetBox。
+
+### 选项 A: 部署内置 NetBox (推荐)
+使用 `netbox` profile 启动所有服务：
 ```bash
-# 启动全栈（含 netbox profile）
 docker-compose --profile netbox up -d
 ```
-行为说明：
-- `olav-init` 首先运行 `scripts/check_netbox.py` 校验 `NETBOX_URL` 与 `NETBOX_TOKEN`。
-- 校验失败：`olav-init` 退出，`olav-app` / `suzieq` / `olav-embedder` 不会进入 healthy。
+- 自动部署 NetBox, Postgres, Redis
+- `olav-init` 会自动连接到容器内的 NetBox (http://netbox:8080)
+
+### 选项 B: 连接外部 NetBox
+不使用 profile 启动，并在 `.env` 中配置外部地址：
+```bash
+# 1. 编辑 .env
+# NETBOX_URL=http://your-external-netbox:8000
+# NETBOX_TOKEN=your-token
+
+# 2. 启动 (不带 netbox profile)
+docker-compose up -d
+```
+
+### 启动行为说明
+无论哪种方式，`olav-init` 都会执行以下检查：
+1. 运行 `scripts/check_netbox.py` 校验 `NETBOX_URL` 与 `NETBOX_TOKEN`。
+2. 校验失败：`olav-init` 退出，阻止其他服务启动。
+3. 校验成功：执行 Schema ETL 和 Inventory Bootstrap。
 - 校验成功：继续执行 Postgres 表初始化与 Schema 索引生成，完成后写入 `data/bootstrap/init.ok` 哨兵文件。
 
 快速查看状态：
