@@ -3,6 +3,25 @@
 面向首次部署，按顺序执行，避免遗漏。保持 `.env` 只存敏感变量，其它应用配置在 `config/settings.py`。
 
 ---
+## 环境变量与配置（强制原则）
+
+- `.env`：仅放置敏感信息与环境特定变量（Secrets + Docker 必需变量）
+  - 保留：`LLM_API_KEY`、`NETBOX_TOKEN`、`DEVICE_USERNAME`、`DEVICE_PASSWORD`
+  - 需要时：`NETBOX_URL`（外部 NetBox 时）、`POSTGRES_URI`/`OPENSEARCH_URL`/`REDIS_URL`（自定义主机时）
+  - 不必放：`LLM_PROVIDER`、`LLM_MODEL_NAME`、默认端口/主机等非敏感项（这些在 `config/settings.py`）
+- `config/settings.py`：非敏感默认值与应用级开关（LLM/工具/索引/日志等）
+- 参照：`.env.example` 为最小示例，优先使用 settings 默认，必要时再在 `.env` 覆盖。
+
+快速开始：
+```bash
+cp .env.example .env
+# 编辑 .env 仅填写密钥与必要端点
+# 必填：LLM_API_KEY、（使用 NetBox 时）NETBOX_TOKEN
+```
+
+注意：`src/olav/core/settings.py` 会基于 `config/settings.py` 的 `InfrastructureConfig` 自动判断本地/容器环境并生成默认端点，未设置的 URI 会自动推导，无需在 .env 冗余填写。
+
+---
 ## 1. 安装与准备
 ```bash
 # 安装 uv（Linux/Mac）
@@ -22,26 +41,51 @@ cp .env.example .env
 ```
 
 ---
-## 2. 准备设备清单
+## 2. 准备设备清单 (NetBox Bootstrap)
 编辑 `config/inventory.csv`（示例字段）：
+```csv
+name,device_role,device_type,platform,site,status,mgmt_interface,mgmt_address
+R1,core,cisco-catalyst-9300,cisco_ios,HQ,active,GigabitEthernet0/0,192.168.100.101/24
+R2,core,cisco-catalyst-9300,cisco_ios,HQ,active,GigabitEthernet0/0,192.168.100.102/24
+SW1,access,cisco-2960,cisco_ios,Branch,active,Vlan1,192.168.100.105/24
 ```
-name,mgmt_ip,platform,role
-R1,192.168.100.101,cisco_ios,core
-R2,192.168.100.102,cisco_ios,core
-SW1,192.168.100.105,cisco_ios,access
-```
+
+**重要说明**:
+- **首次部署**: 如果 NetBox 为空，`scripts/netbox_ingest.py` 会自动导入此 CSV 作为初始设备清单（**Bootstrap Mode**）
+- **已有 NetBox**: 如果 NetBox 已有设备，脚本会自动跳过导入（**Skip Mode**），避免重复
+- **强制导入**: 设置环境变量 `NETBOX_INGEST_FORCE=true` 可强制导入（**Force Mode**）
+
 保证列名一致，IP 可 ping。
 
 ---
 ## 3. 一次性整体启动（含 NetBox 闸门）
-现在推荐直接启动全栈，`olav-init` 会在真正执行 ETL 前自动检测 NetBox 连接与 Token，有问题直接失败并阻止其它服务继续。
+
+OLAV 强制要求 NetBox 集成（作为 Source of Truth），但你可以选择是部署内置 NetBox 容器还是连接外部 NetBox。
+
+### 选项 A: 部署内置 NetBox (推荐)
+使用 `netbox` profile 启动所有服务：
 ```bash
-# 启动全栈（含 netbox profile）
 docker-compose --profile netbox up -d
 ```
-行为说明：
-- `olav-init` 首先运行 `scripts/check_netbox.py` 校验 `NETBOX_URL` 与 `NETBOX_TOKEN`。
-- 校验失败：`olav-init` 退出，`olav-app` / `suzieq` / `olav-embedder` 不会进入 healthy。
+- 自动部署 NetBox, Postgres, Redis
+- `olav-init` 会自动连接到容器内的 NetBox (http://netbox:8080)
+
+### 选项 B: 连接外部 NetBox
+不使用 profile 启动，并在 `.env` 中配置外部地址：
+```bash
+# 1. 编辑 .env
+# NETBOX_URL=http://your-external-netbox:8000
+# NETBOX_TOKEN=your-token
+
+# 2. 启动 (不带 netbox profile)
+docker-compose up -d
+```
+
+### 启动行为说明
+无论哪种方式，`olav-init` 都会执行以下检查：
+1. 运行 `scripts/check_netbox.py` 校验 `NETBOX_URL` 与 `NETBOX_TOKEN`。
+2. 校验失败：`olav-init` 退出，阻止其他服务启动。
+3. 校验成功：执行 Schema ETL 和 Inventory Bootstrap。
 - 校验成功：继续执行 Postgres 表初始化与 Schema 索引生成，完成后写入 `data/bootstrap/init.ok` 哨兵文件。
 
 快速查看状态：

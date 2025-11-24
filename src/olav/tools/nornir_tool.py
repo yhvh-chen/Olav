@@ -169,57 +169,6 @@ async def cli_tool(
     if command and config_commands:
         return {"error": "Cannot provide both command and config_commands", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
 
-    # 加载外部黑名单（仅一次）
-    global _CLI_BLACKLIST
-    try:
-        _CLI_BLACKLIST
-    except NameError:
-        _CLI_BLACKLIST = set()
-        blacklist_path = CONFIG_DIR / "cli_blacklist.yaml"
-        if blacklist_path.exists():
-            try:
-                data = yaml.safe_load(blacklist_path.read_text()) or {}
-                items = data.get("blacklist") or data.get("commands") or data.get("patterns") or []
-                for item in items:
-                    _CLI_BLACKLIST.add(item.lower())
-            except Exception:
-                pass
-        if not _CLI_BLACKLIST:
-            # 默认兜底（若文件缺失）
-            _CLI_BLACKLIST.update({
-                "traceroute", "trace route", "trace-route",
-                "reload", "reboot", "write erase", "format", "delete flash:"
-            })
-
-    # 黑名单检测函数
-    def _is_blacklisted(line: str) -> str | None:
-        low = line.lower()
-        for pat in _CLI_BLACKLIST:
-            if pat in low:
-                return pat
-        return None
-
-    # 读命令黑名单检测
-    if command:
-        blk = _is_blacklisted(command)
-        if blk:
-            return {
-                "success": False,
-                "error": f"Command contains blacklisted pattern: '{blk}'",
-                "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
-            }
-
-    # 配置命令黑名单检测
-    if config_commands:
-        for cfg in config_commands:
-            blk = _is_blacklisted(cfg)
-            if blk:
-                return {
-                    "success": False,
-                    "error": f"Configuration contains blacklisted pattern: '{blk}'",
-                    "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
-                }
-
     # 判断是否为配置操作
     is_config = config_commands is not None
     requires_approval = is_config

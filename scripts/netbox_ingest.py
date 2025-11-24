@@ -9,12 +9,18 @@ Reads config/inventory.csv and idempotently ensures baseline objects and devices
 - Devices (with status)
 - Optional management IP (creates interface 'Mgmt' + IP address, assigns primary_ip4)
 
+Modes:
+- Bootstrap Mode: Auto-run if NetBox has 0 devices (first-time setup)
+- Skip Mode: Skip if NetBox has devices (set NETBOX_INGEST_FORCE=true to override)
+- Force Mode: Always import (NETBOX_INGEST_FORCE=true)
+
 Exit codes:
 0 success
 1 env missing
 2 connectivity/auth failure
 3 CSV parse error
 4 partial failures (some rows failed)
+99 skipped (NetBox already initialized)
 
 This script is SAFE to re-run; existing objects are not duplicated.
 """
@@ -230,6 +236,36 @@ def _ensure_mgmt(base: str, device_id: int, row: Dict[str,str], created: bool=Fa
 
 def main() -> None:
     base = env()
+    
+    # Mode detection: Check if NetBox already has devices
+    force_mode = os.getenv("NETBOX_INGEST_FORCE", "false").lower() == "true"
+    
+    try:
+        device_check = get(base, API["devices"], {"limit": 1})
+        device_count = device_check.json().get("count", 0)
+        
+        if device_count > 0 and not force_mode:
+            print({
+                "success": True,
+                "code": 99,
+                "mode": "skip",
+                "message": f"NetBox already has {device_count} devices. Skipping import. Set NETBOX_INGEST_FORCE=true to override.",
+                "devices": []
+            })
+            _write_sentinel("inventory.ok", {"mode": "skip", "skipped": True})
+            sys.exit(0)
+        
+        mode = "force" if device_count > 0 else "bootstrap"
+        if mode == "force":
+            print(f"Force mode enabled. NetBox has {device_count} devices but importing anyway.")
+        else:
+            print(f"Bootstrap mode: NetBox is empty. Importing devices from CSV.")
+            
+    except Exception as e:
+        # If we can't check, assume bootstrap mode (safer for init containers)
+        print(f"Warning: Could not check NetBox device count ({e}). Proceeding with import.")
+        mode = "bootstrap"
+    
     rows = parse_csv("config/inventory.csv")
     ids = ensure_baseline(base, rows)
     results: List[Dict[str,Any]] = []
@@ -239,7 +275,7 @@ def main() -> None:
         results.append(res)
         if res.get("status") == "error":
             errors += 1
-    summary = {"success": errors == 0, "code": 0 if errors == 0 else 4, "devices": results}
+    summary = {"success": errors == 0, "code": 0 if errors == 0 else 4, "mode": mode, "devices": results}
     print(summary)
     # Sentinel writing for observability by init container and external monitors
     if errors == 0:

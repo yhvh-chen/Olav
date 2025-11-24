@@ -187,10 +187,11 @@ services:
       - .env
     environment:
       # Override for Docker network (containers use service name, not localhost)
-      NETBOX_URL: http://netbox:8080
+      NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
       OPENSEARCH_URL: http://opensearch:9200
       # Point to cloned OpenConfig YANG repos (if available)
       OPENCONFIG_DIR: /app/archive/openconfig
+      NETBOX_INGEST_FORCE: ${NETBOX_INGEST_FORCE:-false}
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data
@@ -206,13 +207,13 @@ services:
         uv run python scripts/netbox_ingest.py || { echo '[FATAL] NetBox inventory ingestion failed.'; touch data/bootstrap/inventory.error; exit 1; } &&
         [ -f data/bootstrap/inventory.ok ] || { echo '[FATAL] inventory.ok sentinel missing after ingestion.'; exit 1; } &&
         echo '[OK] Inventory ingestion complete.' &&
+        echo 'Running NetBox Schema ETL...' &&
+        uv run python -m olav.etl.netbox_schema_etl &&
         echo 'Running ETL pipeline via uv...' &&
         uv run python -m olav.etl.generate_configs &&
         uv run python -m olav.etl.init_postgres &&
         uv run python -m olav.etl.openconfig_full_yang_etl &&
         uv run python -m olav.etl.suzieq_schema_etl &&
-        uv run python -m olav.etl.netbox_schema_etl &&
-        uv run python -m olav.etl.ntc_schema_etl &&
         touch data/bootstrap/init.ok &&
         echo 'ETL pipeline completed successfully'
       "
