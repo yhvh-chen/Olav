@@ -22,14 +22,20 @@ cp .env.example .env
 ```
 
 ---
-## 2. 准备设备清单
+## 2. 准备设备清单 (NetBox Bootstrap)
 编辑 `config/inventory.csv`（示例字段）：
+```csv
+name,device_role,device_type,platform,site,status,mgmt_interface,mgmt_address
+R1,core,cisco-catalyst-9300,cisco_ios,HQ,active,GigabitEthernet0/0,192.168.100.101/24
+R2,core,cisco-catalyst-9300,cisco_ios,HQ,active,GigabitEthernet0/0,192.168.100.102/24
+SW1,access,cisco-2960,cisco_ios,Branch,active,Vlan1,192.168.100.105/24
 ```
-name,mgmt_ip,platform,role
-R1,192.168.100.101,cisco_ios,core
-R2,192.168.100.102,cisco_ios,core
-SW1,192.168.100.105,cisco_ios,access
-```
+
+**重要说明**:
+- **首次部署**: 如果 NetBox 为空，`scripts/netbox_ingest.py` 会自动导入此 CSV 作为初始设备清单（**Bootstrap Mode**）
+- **已有 NetBox**: 如果 NetBox 已有设备，脚本会自动跳过导入（**Skip Mode**），避免重复
+- **强制导入**: 设置环境变量 `NETBOX_INGEST_FORCE=true` 可强制导入（**Force Mode**）
+
 保证列名一致，IP 可 ping。
 
 ---

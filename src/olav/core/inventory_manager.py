@@ -1,7 +1,18 @@
+"""Inventory Manager - Bootstrap NetBox from CSV inventory.
+
+Two modes:
+1. Bootstrap Mode: Import devices from CSV if NetBox is empty (first-time setup)
+2. Skip Mode: Skip import if NetBox already has devices (existing deployment)
+
+Usage:
+    manager = InventoryManager()
+    result = manager.import_from_csv(csv_content, force=False)  # Auto-detect mode
+    result = manager.import_from_csv(csv_content, force=True)   # Force import
+"""
 import csv
 import io
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from olav.tools.netbox_tool import netbox_api_call, netbox_schema_search
 from olav.core.settings import settings
 
@@ -9,23 +20,67 @@ logger = logging.getLogger(__name__)
 
 class InventoryManager:
     def __init__(self):
-        pass
+        self.dry_run = False
+    
+    def is_netbox_empty(self) -> bool:
+        """Check if NetBox has any devices (used to determine bootstrap mode)."""
+        try:
+            resp = netbox_api_call("/dcim/devices/", "GET", params={"limit": 1})
+            device_count = resp.get("count", 0)
+            logger.info(f"NetBox device count: {device_count}")
+            return device_count == 0
+        except Exception as e:
+            logger.error(f"Failed to check NetBox status: {e}")
+            return True  # Assume empty on error (allow bootstrap)
 
     def parse_csv(self, csv_content: str) -> List[Dict[str, str]]:
         """Parse CSV content into a list of dictionaries."""
         reader = csv.DictReader(io.StringIO(csv_content))
         return list(reader)
 
-    def import_from_csv(self, csv_content: str) -> Dict[str, Any]:
+    def import_from_csv(self, csv_content: str, force: bool = False) -> Dict[str, Any]:
         """Import devices from CSV to NetBox.
-
+        
+        Args:
+            csv_content: CSV string with device inventory
+            force: If False (default), skip import if NetBox has devices.
+                   If True, force import regardless of NetBox state.
+        
+        Returns:
+            Dict with keys: mode, success, failed, errors, skipped
+        
         Expected CSV headers (minimum):
             name, device_role, device_type, site, status, ip_address, platform
 
         Optional future fields can be ignored safely.
         """
+        # Mode detection
+        is_empty = self.is_netbox_empty()
+        mode = "bootstrap" if is_empty else "skip"
+        
+        if not force and not is_empty:
+            logger.info("NetBox already has devices. Skipping import (use force=True to override)")
+            return {
+                "mode": "skip",
+                "success": 0,
+                "failed": 0,
+                "errors": [],
+                "skipped": True,
+                "message": "NetBox already initialized. Use force=True to import anyway."
+            }
+        
+        if force and not is_empty:
+            logger.warning("Force mode enabled. Importing devices into non-empty NetBox.")
+            mode = "force"
+        
         devices = self.parse_csv(csv_content)
-        results = {"success": 0, "failed": 0, "errors": []}
+        results = {
+            "mode": mode,
+            "success": 0,
+            "failed": 0,
+            "errors": [],
+            "skipped": False
+        }
 
         for device in devices:
             try:
