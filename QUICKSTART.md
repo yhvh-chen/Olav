@@ -3,6 +3,25 @@
 面向首次部署，按顺序执行，避免遗漏。保持 `.env` 只存敏感变量，其它应用配置在 `config/settings.py`。
 
 ---
+## 环境变量与配置（强制原则）
+
+- `.env`：仅放置敏感信息与环境特定变量（Secrets + Docker 必需变量）
+  - 保留：`LLM_API_KEY`、`NETBOX_TOKEN`、`DEVICE_USERNAME`、`DEVICE_PASSWORD`
+  - 需要时：`NETBOX_URL`（外部 NetBox 时）、`POSTGRES_URI`/`OPENSEARCH_URL`/`REDIS_URL`（自定义主机时）
+  - 不必放：`LLM_PROVIDER`、`LLM_MODEL_NAME`、默认端口/主机等非敏感项（这些在 `config/settings.py`）
+- `config/settings.py`：非敏感默认值与应用级开关（LLM/工具/索引/日志等）
+- 参照：`.env.example` 为最小示例，优先使用 settings 默认，必要时再在 `.env` 覆盖。
+
+快速开始：
+```bash
+cp .env.example .env
+# 编辑 .env 仅填写密钥与必要端点
+# 必填：LLM_API_KEY、（使用 NetBox 时）NETBOX_TOKEN
+```
+
+注意：`src/olav/core/settings.py` 会基于 `config/settings.py` 的 `InfrastructureConfig` 自动判断本地/容器环境并生成默认端点，未设置的 URI 会自动推导，无需在 .env 冗余填写。
+
+---
 ## 1. 安装与准备
 ```bash
 # 安装 uv（Linux/Mac）

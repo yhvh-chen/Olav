@@ -1,0 +1,8 @@
+traceroute
+trace route
+trace-route
+reload
+reboot
+write erase
+format
+delete flash:

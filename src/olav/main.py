@@ -27,23 +27,6 @@ from config.settings import AgentConfig
 logger = logging.getLogger("olav.main")
 console = Console()
 
-# Whitelist file path (persist approved write operations/commands)
-WHITELIST_PATH = Path(__file__).resolve().parents[2] / "config" / "cli_whitelist.yaml"
-
-def _load_whitelist() -> set[str]:
-    if not WHITELIST_PATH.exists():
-        return set()
-    try:
-        data = json.loads(WHITELIST_PATH.read_text(encoding="utf-8"))
-        items = data.get("approved", []) if isinstance(data, dict) else []
-        return {str(i) for i in items}
-    except Exception:
-        return set()
-
-def _persist_whitelist(items: set[str]) -> None:
-    payload = {"approved": sorted(items)}
-    WHITELIST_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-
 app = typer.Typer(
     name="olav",
     help="OLAV - Omni-Layer Autonomous Verifier: Enterprise Network Operations ChatOps Platform",
@@ -337,7 +320,6 @@ async def _stream_agent_response(
     hitl_enabled = AgentConfig.ENABLE_HITL
     # Tools requiring HITL approval before execution (write/sensitive ops)
     hitl_required_tools = {"cli_tool", "netconf_tool", "nornir_tool", "netbox_api_call"}
-    whitelist = _load_whitelist()
 
     with ui.create_thinking_context() as live:
         seen_tool_ids = set()  # Track processed tool calls
@@ -402,18 +384,11 @@ async def _stream_agent_response(
                                 requires_gate = True
                                 risk_note = "netbox-write"
 
-                            # Whitelist bypass
-                            signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, ensure_ascii=False)}"
-                            if signature in whitelist:
-                                requires_gate = False
-                                risk_note += " (whitelisted)"
-
                             if hitl_enabled and tool_name in hitl_required_tools and requires_gate:
                                 console.print("\n[bold yellow]🔔 HITL 审批请求[/bold yellow]")
                                 console.print(f"工具: [cyan]{tool_name}[/cyan]")
                                 console.print(f"风险类型: [magenta]{risk_note}[/magenta]")
                                 console.print(f"参数: [dim]{tool_args}[/dim]")
-                                console.print("策略: 批准将此签名加入白名单 (后续免审批)")
                                 decision = input("批准此操作? [Y/n/i(详情)]: ").strip().lower()
                                 if decision == "i":
                                     console.print("\n[bold]详细参数 (JSON):[/bold]")
@@ -431,12 +406,7 @@ async def _stream_agent_response(
                                         "timings": tool_timings,
                                     }
                                 else:
-                                    console.print("[green]✅ 已批准，加入白名单并继续...[/green]")
-                                    whitelist.add(signature)
-                                    try:
-                                        _persist_whitelist(whitelist)
-                                    except Exception as pw_err:
-                                        logger.warning(f"Failed to persist whitelist: {pw_err}")
+                                    console.print("[green]✅ 已批准，继续执行...[/green]")
 
                             # Add tool node after approval
                             node = ui.add_tool_call(thinking_tree, display_tool_name, tool_args)
