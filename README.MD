@@ -42,9 +42,9 @@ uv run olav.py -e "深入分析 OSPF 邻居关系异常"
 
 **Deep Dive 能力**:
 - 自动任务分解（LLM 生成 Todo List）
-- 递归深入诊断（最大 3 层）
-- 批量并行执行（asyncio.gather）
-- 进度追踪与恢复（PostgreSQL Checkpointer）
+- 递归深入诊断（最大 3 层，已实现）
+- 批量并行执行（asyncio.gather，已实现并通过全部测试）
+- 进度追踪与恢复（PostgreSQL Checkpointer，支持断点续传）
 
 ---
 
@@ -69,7 +69,12 @@ Workflow Selection (LLM 自动路由)
 - ❌ Structured: 未完成
 - ❌ Simple: 功能重叠
 
-详见: `archive/deprecated_agents/README.md`
+当前主线架构已实现：
+- Deep Dive Workflow 递归与并行批量执行（详见 DESIGN.md）
+- 所有相关测试已通过（21/21）
+- 文档与 TODO 已同步更新
+
+详见: `archive/deprecated_agents/README.md` 与 `docs/DESIGN.md`
 
 ---
 
@@ -170,7 +175,11 @@ git log --oneline -n 5
 - 审计日志包含：时间戳、设备、操作类型、结果
 - 推荐在生产启用 OpenSearch 索引生命周期管理（ILM）
 
+
 ## 后续路线
+- 多失败递归增强（Deep Dive 多点失败处理）
+- Checkpointer 恢复与断点续传测试
+- 性能基准与批量任务调优
 - 完整 100 查询基准测试覆盖
 - 引入 Prompt 结果缓存减少 token
 - 复杂任务早停 (early stopping) 策略

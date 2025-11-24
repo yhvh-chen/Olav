@@ -29,6 +29,7 @@ dependencies = [
     "napalm>=5.0.0",
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",
+    "ntc-templates>=3.0.0",
 ]
 
 [project.optional-dependencies]

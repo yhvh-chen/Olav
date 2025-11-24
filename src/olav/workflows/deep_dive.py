@@ -85,6 +85,8 @@ class DeepDiveState(TypedDict):
     recursion_depth: int
     max_depth: int
     expert_mode: bool
+    # Recursion control flag (Phase 3): set True by recursive_check_node to trigger re-planning
+    trigger_recursion: bool | None
 
 
 class DeepDiveWorkflow(BaseWorkflow):
@@ -203,6 +205,7 @@ class DeepDiveWorkflow(BaseWorkflow):
             "completed_results": {},
             "recursion_depth": state.get("recursion_depth", 0),
             "max_depth": state.get("max_depth", 3),
+            "trigger_recursion": False,
         }
     
     async def schema_investigation_node(self, state: DeepDiveState) -> dict:
@@ -355,13 +358,113 @@ class DeepDiveWorkflow(BaseWorkflow):
         3. Distinguish SCHEMA_NOT_FOUND vs NO_DATA_FOUND vs OK
         4. Fallback to LLM-driven execution prompt if mapping fails or table unsupported
         """
+        import asyncio  # Local import to avoid global side-effects
+
         todos = state["todos"]
         completed_results = state.get("completed_results", {})
 
-        # Locate next pending todo honoring dependencies
+        # ------------------------------------------------------------------
+        # Parallel batch execution (Phase 3.2)
+        # Strategy: Identify all ready & dependency-satisfied todos without deps.
+        # Run up to parallel_batch_size concurrently. Falls back to serial path
+        # when <=1 independent ready todo.
+        # ------------------------------------------------------------------
+        parallel_batch_size = state.get("parallel_batch_size", 5)
+
+        ready: list[TodoItem] = []
+        for todo in todos:
+            if todo["status"] == "pending":
+                deps_ok = all(
+                    any(t["id"] == dep_id and t["status"] in {"completed", "failed"} for t in todos)
+                    for dep_id in todo["deps"]
+                )
+                if deps_ok:
+                    ready.append(todo)
+
+        independent = [t for t in ready if not t["deps"]]
+
+        if len(independent) > 1:
+            batch = independent[:parallel_batch_size]
+            # Mark batch in-progress
+            for t in batch:
+                t["status"] = "in-progress"
+
+            async def _execute_single(todo: TodoItem) -> tuple[TodoItem, list[BaseMessage]]:
+                task_text = todo["task"].strip()
+                mapping = self._map_task_to_table(task_text)
+                tool_result: Optional[dict] = None
+                messages: list[BaseMessage] = []
+                if mapping:
+                    table, method, extra_filters = mapping
+                    tool_input = {"table": table, "method": method, **extra_filters}
+                    try:
+                        from olav.tools.suzieq_parquet_tool import suzieq_query, suzieq_schema_search  # type: ignore
+                        schema = await suzieq_schema_search.ainvoke({"query": table})
+                        available_tables = schema.get("tables", [])
+                        if table in available_tables:
+                            tool_result = await suzieq_query.ainvoke(tool_input)
+                        else:
+                            tool_result = {
+                                "status": "SCHEMA_NOT_FOUND",
+                                "table": table,
+                                "message": f"Table '{table}' not present in discovered schema tables.",
+                                "available_tables": available_tables,
+                            }
+                    except Exception as e:  # noqa: BLE001
+                        tool_result = {"status": "TOOL_ERROR", "error": str(e), "table": table, "method": method, "input": tool_input}
+
+                if tool_result:
+                    classified = self._classify_tool_result(tool_result)
+                    # Failure statuses propagate directly
+                    if classified["status"] in {"SCHEMA_NOT_FOUND", "NO_DATA_FOUND", "DATA_NOT_RELEVANT", "TOOL_ERROR"}:
+                        todo["status"] = "failed"
+                        todo["result"] = f"⚠️ 批量任务失败: {classified['status']} table={classified['table']}"
+                        completed_results[todo["id"]] = todo["result"]
+                        return todo, [AIMessage(content=todo["result"])]
+
+                    raw_trunc = str(tool_result.get("data", tool_result))[:400]
+                    todo["status"] = "completed"
+                    todo["result"] = f"✅ 并行任务完成 table={classified['table']} count={classified['count']}\n{raw_trunc}"
+                    messages.append(AIMessage(content=f"Parallel task {todo['id']} completed on {classified['table']}"))
+                else:
+                    # Fallback LLM path
+                    prompt = prompt_manager.load_prompt(
+                        category="workflows/deep_dive",
+                        name="execute_todo",
+                        task=task_text,
+                        available_tools="suzieq_query, netconf_tool, search_openconfig_schema",
+                    )
+                    llm_resp = await self.llm.ainvoke([SystemMessage(content=prompt), HumanMessage(content=f"Execute task: {task_text}")])
+                    todo["status"] = "completed"
+                    todo["result"] = llm_resp.content
+                    messages.append(AIMessage(content=f"Parallel task {todo['id']} completed via LLM fallback"))
+
+                completed_results[todo["id"]] = todo["result"]
+                return todo, messages
+
+            results = await asyncio.gather(*[_execute_single(t) for t in batch], return_exceptions=True)
+            aggregated_messages: list[BaseMessage] = []
+            for res in results:
+                if isinstance(res, Exception):  # Defensive: unexpected batch error
+                    aggregated_messages.append(AIMessage(content=f"批量执行出现未捕获异常: {res}"))
+                else:
+                    _todo, msgs = res
+                    aggregated_messages.extend(msgs)
+
+            # Decide next step message
+            aggregated_messages.append(AIMessage(content=f"并行批次完成: {len(batch)} 个任务."))
+            return {
+                "todos": todos,
+                "current_todo_id": batch[-1]["id"],
+                "completed_results": completed_results,
+                "messages": aggregated_messages,
+            }
+
+        # ------------------------------------------------------------------
+        # Serial execution fallback (original logic) when 0 or 1 independent
+        # ------------------------------------------------------------------
         next_todo: Optional[TodoItem] = None
         for todo in todos:
-            # Only consider pending todos (skip completed and failed)
             if todo["status"] == "pending":
                 deps_ok = all(
                     any(t["id"] == dep_id and t["status"] in {"completed", "failed"} for t in todos)
@@ -372,7 +475,6 @@ class DeepDiveWorkflow(BaseWorkflow):
                     break
 
         if not next_todo:
-            # No more pending todos
             return {"messages": [AIMessage(content="All pending tasks processed.")]}
 
         # Mark in-progress
@@ -653,36 +755,70 @@ class DeepDiveWorkflow(BaseWorkflow):
     async def recursive_check_node(self, state: DeepDiveState) -> dict:
         """Check if recursive deep dive is needed.
         
+        Phase 3.4 Enhancement: Handles multiple failures in parallel, not just the first one.
+        Creates focused sub-tasks for each failed todo (up to max_failures_per_recursion).
+        
         Args:
             state: Current workflow state
             
         Returns:
-            Updated state with potential new sub-todos
+            Updated state with potential new sub-todos for all failures
         """
         recursion_depth = state.get("recursion_depth", 0)
         max_depth = state.get("max_depth", 3)
+        max_failures_per_recursion = 3  # Limit parallel failure investigation to avoid prompt explosion
         
-        # Check depth limit
+        # Depth guard
         if recursion_depth >= max_depth:
-            return {"messages": [AIMessage(content=f"Max recursion depth ({max_depth}) reached. Moving to summary.")]}
+            return {
+                "messages": [AIMessage(content=f"Max recursion depth ({max_depth}) reached. Moving to summary.")],
+                "trigger_recursion": False,
+            }
+
+        todos = state.get("todos", [])
+        failed_todos = [t for t in todos if t.get("status") == "failed"]
+
+        if not failed_todos:
+            return {
+                "messages": [AIMessage(content="No deeper analysis needed.")],
+                "trigger_recursion": False,
+            }
+
+        # PHASE 3.4: Handle multiple failures (not just first one)
+        # Limit to top N failures to avoid overwhelming prompt/planning
+        failures_to_analyze = failed_todos[:max_failures_per_recursion]
         
-        # Analyze completed results to determine if deeper analysis needed
-        completed_results = state.get("completed_results", {})
+        # Build recursive prompt for ALL selected failures
+        failure_summaries = []
+        for failed in failures_to_analyze:
+            parent_task_id = failed["id"]
+            parent_task_text = failed["task"]
+            parent_result = (failed.get("result") or "")[:400]  # Truncate per failure to fit multiple
+            parent_reason = failed.get("failure_reason", "Unknown")
+            
+            failure_summaries.append(
+                f"  • 失败任务 {parent_task_id}: {parent_task_text}\n"
+                f"    失败原因: {parent_reason}\n"
+                f"    输出摘要: {parent_result}\n"
+            )
         
-        # Simple heuristic: Check for failure indicators
-        needs_deeper_analysis = any(
-            "failed" in str(result).lower() or "error" in str(result).lower() or "down" in str(result).lower()
-            for result in completed_results.values()
+        recursive_prompt = (
+            f"递归深入分析: 检测到 {len(failures_to_analyze)} 个失败任务，需要生成更细粒度的子任务。\n\n"
+            "失败任务列表:\n" + "\n".join(failure_summaries) + "\n\n"
+            "请遵循要求: \n"
+            f"1) 为每个失败任务生成 1-2 个更具体的子任务（总共 {len(failures_to_analyze)*2} 个左右）。\n"
+            "2) 子任务需更具体，例如聚焦某协议实例、邻居、接口或字段。\n"
+            "3) 避免与父任务完全重复。\n"
+            "4) 使用 JSON 输出: {\n  \"todos\": [ {\"id\": <int>, \"task\": <str>, \"deps\": [] } ]\n}。\n"
+            "5) ID 从现有最大 ID + 1 开始递增。\n"
+            "6) 在 task 文本中包含父任务引用: '(parent:<id>)'，例如 '检查 R1 BGP 配置 (parent:3)'。\n"
+            "7) 如果某失败任务无法进一步细化，生成一个验证性任务，例如 '验证采集是否缺失 (parent:<id>)'。\n"
         )
-        
-        if not needs_deeper_analysis:
-            return {"messages": [AIMessage(content="No deeper analysis needed.")]}
-        
-        # Generate sub-todos (recursive call to task_planning)
-        # For now, skip actual recursion and move to summary
+
         return {
-            "messages": [AIMessage(content="Recursive analysis skipped in Phase 1.")],
+            "messages": [HumanMessage(content=recursive_prompt)],
             "recursion_depth": recursion_depth + 1,
+            "trigger_recursion": True,
         }
     
     async def should_recurse(self, state: DeepDiveState) -> Literal["final_summary", "task_planning"]:
@@ -694,7 +830,8 @@ class DeepDiveWorkflow(BaseWorkflow):
         Returns:
             Next node to execute
         """
-        # For Phase 1, always go to summary
+        if state.get("trigger_recursion"):
+            return "task_planning"
         return "final_summary"
     
     async def final_summary_node(self, state: DeepDiveState) -> dict:

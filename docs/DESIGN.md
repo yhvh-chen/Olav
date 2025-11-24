@@ -1469,7 +1469,17 @@ chmod +x init_olav.sh
 
 ---
 
-## 8. 实施路线图 (Roadmap)
+
+
+### 当前进度（2025-11-23）
+- Deep Dive Workflow 递归与并行批量执行已实现并通过全部测试
+- 相关文档与 TODO 已同步更新
+- 下一步：多失败递归增强、Checkpointer 恢复测试、性能调优
+
+### 当前进度（2025-11-23）
+- Deep Dive Workflow 递归与并行批量执行已实现并通过全部测试
+- 相关文档与 TODO 已同步更新
+- 下一步：多失败递归增强、Checkpointer 恢复测试、性能调优
 
 ### Phase 1: 基础建设 (Day 1-3)
 *   **目标**: 跑通 `docker-compose`，所有服务显示 Healthy。
@@ -1500,11 +1510,13 @@ chmod +x init_olav.sh
     *   实现 LangGraph 中的 `learner_agent.py` 节点。
     *   完善 `rag_agent.py` 的三层检索逻辑（Memory -> Schema -> Docs）。
     *   实现 RAG Agent 的缓存机制，提升检索性能。
+    *   Deep Dive Workflow 递归与并行批量执行（已实现，详见相关测试与代码注释）
 
 ### Phase 5: 测试与发布
 *   **任务**:
     *   运行 E2E 测试。
     *   编写使用手册。
+    *   Deep Dive Workflow 并行/递归测试已全部通过（详见 tests/unit/test_deep_dive_workflow.py）
 
 ---
 

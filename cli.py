@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OLAV CLI Entry Point.
+"""OLAV CLI Entry Point (cli.py).
 
 This is the main entry point for OLAV CLI. It simply imports and runs
 the Typer app from src/olav/main.py.
