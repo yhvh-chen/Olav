@@ -72,5 +72,6 @@ docker-compose.override.yml
 .python-version
 uv.lock
 
-# Archive
+# Archive (code only, keep docs/archive)
 archive/
+!docs/archive/
