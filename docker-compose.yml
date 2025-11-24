@@ -212,7 +212,6 @@ services:
         uv run python -m olav.etl.openconfig_full_yang_etl &&
         uv run python -m olav.etl.suzieq_schema_etl &&
         uv run python -m olav.etl.netbox_schema_etl &&
-        uv run python -m olav.etl.ntc_schema_etl &&
         touch data/bootstrap/init.ok &&
         echo 'ETL pipeline completed successfully'
       "

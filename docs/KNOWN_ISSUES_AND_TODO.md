@@ -92,12 +92,12 @@
 ### Critical Cleanup (P0)
 
 #### 0. Legacy Code Removal
--   **现状**: 存在已废弃的脚本和模块，可能导致混淆或测试失败。
--   **待办**:
-    -   [ ] **Scripts**: 移除/归档 `scripts/benchmark_agents.py` (依赖旧 API), `scripts/test_ntc_schema.py` (依赖已删除的 ntc_tool)。
-    -   **ETL**: 移除/归档 `src/olav/etl/ntc_schema_etl.py` (NTC 支持已移除)。
-    -   **Core**: 审查 `src/olav/core/inventory_manager.py` (CSV 导入逻辑，确认是否保留)。
-    -   **UI**: 标记 `src/olav/ui/chat_ui.py` 为 Legacy，计划在 Phase 3 替换。
+-   **现状**: ✅ **已完成清理** (2025-11-24)
+-   **已完成**:
+    -   [x] **Scripts**: 已删除 `scripts/benchmark_agents.py` 和 `scripts/test_ntc_schema.py`。
+    -   [x] **ETL**: 已删除 `src/olav/etl/ntc_schema_etl.py`，并从 docker-compose.yml 中移除引用。
+    -   [x] **Core**: 已将 `src/olav/core/inventory_manager.py` 归档到 `archive/deprecated_agents/`。
+    -   [x] **UI**: `src/olav/ui/chat_ui.py` 保留，已标记为 Legacy，计划在 Phase 3 替换。
 
 ### High Priority (P1)
 
