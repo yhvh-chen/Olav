@@ -4,6 +4,7 @@ Unit tests for DynamicIntentRouter.
 Tests semantic pre-filtering, LLM classification, trigger matching, and routing decisions.
 """
 
+import numpy as np
 import pytest
 from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,17 +32,17 @@ def mock_embeddings():
     """Create mock embeddings model."""
     embeddings = MagicMock(spec=Embeddings)
     
-    # Mock embed_documents to return predictable vectors
-    def embed_documents(texts: List[str]):
+    # Mock aembed_documents to return predictable vectors (async version)
+    async def aembed_documents(texts: List[str]):
         # Simple mock: length-based vectors for predictability
         return [[0.1 * len(t), 0.2 * len(t)] for t in texts]
     
-    # Mock embed_query to return query vector
-    def embed_query(text: str):
+    # Mock aembed_query to return query vector (async version)
+    async def aembed_query(text: str):
         return [0.1 * len(text), 0.2 * len(text)]
     
-    embeddings.embed_documents = MagicMock(side_effect=embed_documents)
-    embeddings.embed_query = MagicMock(side_effect=embed_query)
+    embeddings.aembed_documents = AsyncMock(side_effect=aembed_documents)
+    embeddings.aembed_query = AsyncMock(side_effect=aembed_query)
     
     return embeddings
 
@@ -116,8 +117,9 @@ def sample_workflows():
 
 
 @pytest.fixture
-async def router(mock_embeddings, mock_llm):
+async def router(mock_embeddings, mock_llm, sample_workflows):
     """Create DynamicIntentRouter with mocked dependencies."""
+    # sample_workflows ensures workflows are registered before build_index
     router = DynamicIntentRouter(
         embeddings=mock_embeddings,
         llm=mock_llm,
@@ -139,43 +141,54 @@ async def test_router_initialization(mock_embeddings, mock_llm, sample_workflows
     assert router.top_k == 3  # default
     
     # Index should be empty before build
-    assert router._workflow_vectors == []
+    assert router.example_vectors == {}
     
     # Build index
     await router.build_index()
     
     # Should have vectors for all workflows
-    assert len(router._workflow_vectors) == 3
+    assert len(router.example_vectors) == 3
     
     # Each workflow should have embedded examples
-    for workflow_name, vectors in router._workflow_vectors:
-        workflow = WorkflowRegistry.get_workflow(workflow_name)
-        assert len(vectors) == len(workflow.examples)
+    for workflow_name in ["QueryWorkflow", "ExecutionWorkflow", "DeepDiveWorkflow"]:
+        assert workflow_name in router.example_vectors
+        vector = router.example_vectors[workflow_name]
+        assert isinstance(vector, np.ndarray)
+        assert len(vector) > 0  # Verify vector is not empty
 
 
 @pytest.mark.asyncio
 async def test_rebuild_index_on_new_workflows(mock_embeddings, mock_llm):
     """Test index can be rebuilt when new workflows are registered."""
+    # Register initial workflows
+    @WorkflowRegistry.register(
+        name="InitialWorkflow",
+        description="Initial test workflow",
+        examples=["initial example"],
+        triggers=["initial"]
+    )
+    class InitialWorkflowClass:
+        pass
+    
     router = DynamicIntentRouter(embeddings=mock_embeddings, llm=mock_llm)
     await router.build_index()
     
-    initial_count = len(router._workflow_vectors)
+    initial_count = len(router.example_vectors)
     
     # Register new workflow
     @WorkflowRegistry.register(
         name="NewWorkflow",
         description="New test workflow",
-        category="diagnostic",
         examples=["new example"],
         triggers=["new"]
     )
-    def create_new_workflow(checkpointer, **kwargs):
-        return None
+    class NewWorkflowClass:
+        pass
     
     # Rebuild index
     await router.build_index()
     
-    assert len(router._workflow_vectors) == initial_count + 1
+    assert len(router.example_vectors) == initial_count + 1
 
 
 # Trigger fast-path tests
