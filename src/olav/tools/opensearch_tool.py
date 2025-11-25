@@ -60,13 +60,11 @@ class OpenSearchRAGTool:
             },
         }
 
-        results = self.memory.search_schema(
+        return self.memory.search_schema(
             index="openconfig-schema",
             query=query,
             size=5,
         )
-
-        return results
 
     def search_episodic_memory(
         self,
@@ -103,17 +101,16 @@ class OpenSearchRAGTool:
             },
         }
 
-        results = self.memory.search_schema(
+        return self.memory.search_schema(
             index="olav-episodic-memory",
             query=query,
             size=3,
         )
 
-        return results
-
 
 # Create global instance
 _opensearch_rag_tool = OpenSearchRAGTool()
+
 
 # Wrap methods with @tool decorator to expose to LLM
 @tool
@@ -155,13 +152,11 @@ async def search_openconfig_schema(
         },
     }
 
-    results = await _opensearch_rag_tool.memory.search_schema(
+    return await _opensearch_rag_tool.memory.search_schema(
         index="openconfig-schema",
         query=query,
         size=5,
     )
-
-    return results
 
 
 @tool
@@ -199,10 +194,8 @@ async def search_episodic_memory(
         },
     }
 
-    results = await _opensearch_rag_tool.memory.search_schema(
+    return await _opensearch_rag_tool.memory.search_schema(
         index="olav-episodic-memory",
         query=query,
         size=3,
     )
-
-    return results

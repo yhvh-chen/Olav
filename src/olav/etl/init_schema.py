@@ -1,7 +1,6 @@
 """Initialize OpenConfig schema index from YANG models."""
 
 import logging
-from pathlib import Path
 
 from opensearchpy import OpenSearch
 

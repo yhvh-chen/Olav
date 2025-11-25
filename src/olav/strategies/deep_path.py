@@ -23,10 +23,10 @@ Key Difference from Fast Path:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
 from olav.tools.base import ToolOutput, ToolRegistry
@@ -37,78 +37,75 @@ logger = logging.getLogger(__name__)
 class Hypothesis(BaseModel):
     """
     A hypothesis about the root cause of a problem.
-    
+
     LLM generates hypotheses based on observed data.
     """
+
     description: str = Field(description="What this hypothesis proposes")
     reasoning: str = Field(description="Why this hypothesis is plausible")
     verification_plan: str = Field(
         description="What tool to use and what to check to verify/reject this hypothesis"
     )
-    confidence: float = Field(
-        description="Confidence in this hypothesis (0.0-1.0)",
-        ge=0.0,
-        le=1.0
-    )
+    confidence: float = Field(description="Confidence in this hypothesis (0.0-1.0)", ge=0.0, le=1.0)
 
 
 class ObservationStep(BaseModel):
     """
     A single observation step in the reasoning loop.
-    
+
     Contains the tool used, data collected, and LLM's interpretation.
     """
+
     step_number: int
     tool: str
-    parameters: Dict[str, Any]
-    tool_output: Optional[ToolOutput] = None
-    interpretation: str = Field(
-        description="LLM's interpretation of what the data means"
-    )
+    parameters: dict[str, Any]
+    tool_output: ToolOutput | None = None
+    interpretation: str = Field(description="LLM's interpretation of what the data means")
 
 
 class ReasoningState(BaseModel):
     """
     State of the deep path reasoning process.
-    
+
     Tracks observations, hypotheses, and current understanding.
     """
+
     original_query: str
-    observations: List[ObservationStep] = Field(default_factory=list)
-    hypotheses: List[Hypothesis] = Field(default_factory=list)
-    current_hypothesis: Optional[Hypothesis] = None
+    observations: list[ObservationStep] = Field(default_factory=list)
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
+    current_hypothesis: Hypothesis | None = None
     iteration: int = 0
-    conclusion: Optional[str] = None
+    conclusion: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class DeepPathStrategy:
     """
     Deep Path execution strategy for complex, multi-step diagnostics.
-    
+
     Implements hypothesis-driven reasoning:
     1. Collect initial observations
     2. Generate hypotheses about root cause
     3. Verify hypothesis with targeted tool calls
     4. Refine understanding and iterate
-    
+
     Attributes:
         llm: Language model for reasoning
         tool_registry: Registry of available tools
         max_iterations: Maximum reasoning loops (default: 5)
         confidence_threshold: Min confidence to conclude (default: 0.8)
     """
-    
+
     def __init__(
         self,
         llm: BaseChatModel,
         tool_registry: "ToolRegistry",
         max_iterations: int = 5,
-        confidence_threshold: float = 0.8
-    ):
+        confidence_threshold: float = 0.8,
+    ) -> None:
         """
         Initialize Deep Path strategy.
-        
+
         Args:
             llm: Language model for reasoning
             tool_registry: ToolRegistry instance (required for tool discovery)
@@ -119,61 +116,60 @@ class DeepPathStrategy:
         self.tool_registry = tool_registry
         self.max_iterations = max_iterations
         self.confidence_threshold = confidence_threshold
-        
+
         # Validate tool registry
         if not self.tool_registry:
-            raise ValueError("ToolRegistry is required for DeepPathStrategy")
-        
+            msg = "ToolRegistry is required for DeepPathStrategy"
+            raise ValueError(msg)
+
         logger.info(
             f"DeepPathStrategy initialized with max_iterations={max_iterations}, "
             f"confidence_threshold={confidence_threshold}, "
             f"available tools: {len(self.tool_registry.list_tools())}"
         )
-    
+
     async def execute(
-        self,
-        user_query: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, user_query: str, context: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """
         Execute Deep Path strategy for a complex query.
-        
+
         Args:
             user_query: User's diagnostic question
             context: Optional context (network topology, device info, etc.)
-            
+
         Returns:
             Dict with 'success', 'conclusion', 'reasoning_trace', 'metadata'
         """
         state = ReasoningState(original_query=user_query)
-        
+
         try:
             # Step 1: Initial observation collection
             logger.info(f"Deep Path iteration {state.iteration}: Initial observation")
             await self._collect_initial_observations(state, context)
-            
+
             # Reasoning loop
             while state.iteration < self.max_iterations:
                 state.iteration += 1
                 logger.info(f"Deep Path iteration {state.iteration}/{self.max_iterations}")
-                
+
                 # Step 2: Generate hypotheses
                 await self._generate_hypotheses(state)
-                
+
                 if not state.hypotheses:
                     logger.warning("No hypotheses generated, concluding with current data")
                     break
-                
+
                 # Step 3: Select and verify best hypothesis
                 state.current_hypothesis = state.hypotheses[0]  # Highest confidence
-                
+
                 logger.info(
                     f"Testing hypothesis: {state.current_hypothesis.description} "
                     f"(confidence: {state.current_hypothesis.confidence:.2f})"
                 )
-                
+
                 await self._verify_hypothesis(state)
-                
+
                 # Step 4: Check if we can conclude
                 if state.current_hypothesis.confidence >= self.confidence_threshold:
                     logger.info(
@@ -181,12 +177,12 @@ class DeepPathStrategy:
                         f"exceeds threshold {self.confidence_threshold}, concluding"
                     )
                     break
-                
+
                 # Step 5: Refine understanding (implicit in next iteration)
-            
+
             # Synthesize final conclusion
             await self._synthesize_conclusion(state)
-            
+
             return {
                 "success": True,
                 "conclusion": state.conclusion,
@@ -194,7 +190,7 @@ class DeepPathStrategy:
                     {
                         "step": obs.step_number,
                         "tool": obs.tool,
-                        "interpretation": obs.interpretation
+                        "interpretation": obs.interpretation,
                     }
                     for obs in state.observations
                 ],
@@ -202,7 +198,7 @@ class DeepPathStrategy:
                     {
                         "description": h.description,
                         "confidence": h.confidence,
-                        "reasoning": h.reasoning
+                        "reasoning": h.reasoning,
                     }
                     for h in state.hypotheses
                 ],
@@ -210,10 +206,10 @@ class DeepPathStrategy:
                     "strategy": "deep_path",
                     "iterations": state.iteration,
                     "final_confidence": state.confidence,
-                    "total_observations": len(state.observations)
-                }
+                    "total_observations": len(state.observations),
+                },
             }
-        
+
         except Exception as e:
             logger.exception(f"Deep Path execution failed: {e}")
             return {
@@ -223,23 +219,21 @@ class DeepPathStrategy:
                 "reasoning_trace": [
                     {"step": obs.step_number, "interpretation": obs.interpretation}
                     for obs in state.observations
-                ]
+                ],
             }
-    
+
     async def _collect_initial_observations(
-        self,
-        state: ReasoningState,
-        context: Optional[Dict[str, Any]] = None
-    ):
+        self, state: ReasoningState, context: dict[str, Any] | None = None
+    ) -> None:
         """
         Collect initial observations to understand the problem.
-        
+
         LLM decides what tools to call based on the query.
         """
         context_str = ""
         if context:
             context_str = f"\n\n可用上下文: {context}"
-        
+
         prompt = f"""你是 OLAV 网络诊断专家。用户提出了复杂的诊断问题，需要多步推理。
 
 ## 用户问题
@@ -260,30 +254,28 @@ class DeepPathStrategy:
   {{"tool": "suzieq_query", "parameters": {{"table": "bgp", "hostname": "R1"}}, "reasoning": "检查 BGP 状态"}}
 ]
 """
-        
+
         response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        
+
         try:
             import json
+
             tool_calls = json.loads(response.content)
-            
-            for i, call in enumerate(tool_calls):
+
+            for _i, call in enumerate(tool_calls):
                 observation = ObservationStep(
                     step_number=len(state.observations) + 1,
                     tool=call["tool"],
                     parameters=call["parameters"],
-                    interpretation=call.get("reasoning", "")
+                    interpretation=call.get("reasoning", ""),
                 )
-                
+
                 # Execute tool
-                tool_output = await self._execute_tool(
-                    call["tool"],
-                    call["parameters"]
-                )
+                tool_output = await self._execute_tool(call["tool"], call["parameters"])
                 observation.tool_output = tool_output
-                
+
                 state.observations.append(observation)
-        
+
         except Exception as e:
             logger.error(f"Failed to parse initial observation plan: {e}")
             # Fallback: use default observation
@@ -291,23 +283,25 @@ class DeepPathStrategy:
                 step_number=1,
                 tool="suzieq_query",
                 parameters={"table": "devices"},
-                interpretation="Fallback: check device status"
+                interpretation="Fallback: check device status",
             )
             state.observations.append(observation)
-    
-    async def _generate_hypotheses(self, state: ReasoningState):
+
+    async def _generate_hypotheses(self, state: ReasoningState) -> None:
         """
         Generate hypotheses based on observations.
-        
+
         LLM analyzes collected data and proposes possible root causes.
         """
         # Serialize observations
-        observations_text = "\n\n".join([
-            f"**观察 {obs.step_number}**: {obs.tool} → {obs.interpretation}\n"
-            f"数据: {obs.tool_output.data[:3] if obs.tool_output and obs.tool_output.data else 'No data'}"
-            for obs in state.observations
-        ])
-        
+        observations_text = "\n\n".join(
+            [
+                f"**观察 {obs.step_number}**: {obs.tool} → {obs.interpretation}\n"
+                f"数据: {obs.tool_output.data[:3] if obs.tool_output and obs.tool_output.data else 'No data'}"
+                for obs in state.observations
+            ]
+        )
+
         prompt = f"""你是 OLAV 网络诊断专家。基于观察到的数据，提出可能的根本原因假设。
 
 ## 原始问题
@@ -329,20 +323,19 @@ class DeepPathStrategy:
   }}
 ]
 """
-        
+
         response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        
+
         try:
             import json
+
             hypotheses_data = json.loads(response.content)
-            
-            state.hypotheses = [
-                Hypothesis(**h) for h in hypotheses_data
-            ]
-            
+
+            state.hypotheses = [Hypothesis(**h) for h in hypotheses_data]
+
             # Sort by confidence
             state.hypotheses.sort(key=lambda h: h.confidence, reverse=True)
-        
+
         except Exception as e:
             logger.error(f"Failed to parse hypotheses: {e}")
             # Fallback hypothesis
@@ -351,19 +344,19 @@ class DeepPathStrategy:
                     description="需要更多数据来确定根本原因",
                     reasoning="当前观察不足以形成确定性假设",
                     verification_plan="收集更多诊断数据",
-                    confidence=0.3
+                    confidence=0.3,
                 )
             ]
-    
-    async def _verify_hypothesis(self, state: ReasoningState):
+
+    async def _verify_hypothesis(self, state: ReasoningState) -> None:
         """
         Verify the current hypothesis by executing verification plan.
-        
+
         Calls tools suggested in hypothesis.verification_plan.
         """
         if not state.current_hypothesis:
             return
-        
+
         prompt = f"""你是 OLAV 网络诊断专家。现在需要验证一个假设。
 
 ## 假设
@@ -382,46 +375,44 @@ class DeepPathStrategy:
   "reasoning": "验证 BGP 邻居状态"
 }}
 """
-        
+
         response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        
+
         try:
             import json
+
             verification = json.loads(response.content)
-            
+
             observation = ObservationStep(
                 step_number=len(state.observations) + 1,
                 tool=verification["tool"],
                 parameters=verification["parameters"],
-                interpretation=verification.get("reasoning", "")
+                interpretation=verification.get("reasoning", ""),
             )
-            
+
             # Execute tool
-            tool_output = await self._execute_tool(
-                verification["tool"],
-                verification["parameters"]
-            )
+            tool_output = await self._execute_tool(verification["tool"], verification["parameters"])
             observation.tool_output = tool_output
-            
+
             state.observations.append(observation)
-            
+
             # Update hypothesis confidence based on results
             await self._update_hypothesis_confidence(state)
-        
+
         except Exception as e:
             logger.error(f"Failed to verify hypothesis: {e}")
-    
-    async def _update_hypothesis_confidence(self, state: ReasoningState):
+
+    async def _update_hypothesis_confidence(self, state: ReasoningState) -> None:
         """
         Update hypothesis confidence based on verification results.
-        
+
         LLM analyzes whether verification supports or refutes hypothesis.
         """
         if not state.current_hypothesis:
             return
-        
+
         latest_obs = state.observations[-1]
-        
+
         prompt = f"""你是 OLAV 网络诊断专家。评估验证结果是否支持假设。
 
 ## 假设
@@ -429,7 +420,7 @@ class DeepPathStrategy:
 
 ## 验证结果
 工具: {latest_obs.tool}
-数据: {latest_obs.tool_output.data[:5] if latest_obs.tool_output and latest_obs.tool_output.data else 'No data'}
+数据: {latest_obs.tool_output.data[:5] if latest_obs.tool_output and latest_obs.tool_output.data else "No data"}
 
 ## 任务
 分析验证结果是否支持假设。更新置信度。
@@ -441,41 +432,40 @@ class DeepPathStrategy:
   "reasoning": "验证结果与假设一致，增加置信度"
 }}
 """
-        
+
         response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        
+
         try:
             import json
+
             update = json.loads(response.content)
-            
+
             if update.get("supports_hypothesis"):
                 state.current_hypothesis.confidence = update["updated_confidence"]
             else:
                 state.current_hypothesis.confidence *= 0.5  # Reduce confidence
-            
+
             logger.info(
                 f"Updated hypothesis confidence to {state.current_hypothesis.confidence:.2f}"
             )
-        
+
         except Exception as e:
             logger.error(f"Failed to update hypothesis confidence: {e}")
-    
-    async def _synthesize_conclusion(self, state: ReasoningState):
+
+    async def _synthesize_conclusion(self, state: ReasoningState) -> None:
         """
         Synthesize final conclusion from reasoning process.
-        
+
         LLM creates human-readable answer based on all observations and hypotheses.
         """
-        observations_text = "\n".join([
-            f"{obs.step_number}. {obs.tool}: {obs.interpretation}"
-            for obs in state.observations
-        ])
-        
-        hypotheses_text = "\n".join([
-            f"- {h.description} (置信度: {h.confidence:.2f})"
-            for h in state.hypotheses
-        ])
-        
+        observations_text = "\n".join(
+            [f"{obs.step_number}. {obs.tool}: {obs.interpretation}" for obs in state.observations]
+        )
+
+        hypotheses_text = "\n".join(
+            [f"- {h.description} (置信度: {h.confidence:.2f})" for h in state.hypotheses]
+        )
+
         prompt = f"""你是 OLAV 网络诊断专家。基于推理过程，回答用户的问题。
 
 ## 原始问题
@@ -499,33 +489,30 @@ class DeepPathStrategy:
   "confidence": 0.9
 }}
 """
-        
+
         response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        
+
         try:
             import json
+
             result = json.loads(response.content)
-            
+
             state.conclusion = result["conclusion"]
             state.confidence = result["confidence"]
-        
+
         except Exception as e:
             logger.error(f"Failed to synthesize conclusion: {e}")
             state.conclusion = f"基于 {len(state.observations)} 次观察，问题分析尚未完成。"
             state.confidence = 0.5
-    
-    async def _execute_tool(
-        self,
-        tool_name: str,
-        parameters: Dict[str, Any]
-    ) -> ToolOutput:
+
+    async def _execute_tool(self, tool_name: str, parameters: dict[str, Any]) -> ToolOutput:
         """
         Execute a tool and return standardized output.
-        
+
         Args:
             tool_name: Tool identifier (must be registered in ToolRegistry)
             parameters: Tool parameters
-            
+
         Returns:
             ToolOutput from tool execution
         """
@@ -535,9 +522,9 @@ class DeepPathStrategy:
                 source=tool_name,
                 device="unknown",
                 data=[],
-                error="ToolRegistry not configured - cannot execute tools"
+                error="ToolRegistry not configured - cannot execute tools",
             )
-        
+
         # Get tool from registry
         tool = self.tool_registry.get_tool(tool_name)
         if not tool:
@@ -547,20 +534,20 @@ class DeepPathStrategy:
                 source=tool_name,
                 device="unknown",
                 data=[],
-                error=f"Tool '{tool_name}' not registered. Available: {', '.join(available_tools)}"
+                error=f"Tool '{tool_name}' not registered. Available: {', '.join(available_tools)}",
             )
-        
+
         # Execute tool
         logger.debug(f"Executing tool '{tool_name}' with parameters: {parameters}")
         return await tool.execute(**parameters)
-    
+
     def is_suitable(self, user_query: str) -> bool:
         """
         Check if query is suitable for Deep Path strategy.
-        
+
         Args:
             user_query: User's query
-            
+
         Returns:
             True if suitable for Deep Path, False otherwise
         """
@@ -568,11 +555,19 @@ class DeepPathStrategy:
         # - "Why" questions (为什么)
         # - Diagnostic queries (诊断, troubleshoot)
         # - Multi-step analysis
-        
+
         suitable_patterns = [
-            "为什么", "why", "诊断", "diagnose", "排查", "troubleshoot",
-            "分析", "analyze", "investigate", "调查"
+            "为什么",
+            "why",
+            "诊断",
+            "diagnose",
+            "排查",
+            "troubleshoot",
+            "分析",
+            "analyze",
+            "investigate",
+            "调查",
         ]
-        
+
         query_lower = user_query.lower()
         return any(pattern in query_lower for pattern in suitable_patterns)

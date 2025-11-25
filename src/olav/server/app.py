@@ -10,8 +10,9 @@ This module provides the main FastAPI application with:
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 # Set Windows event loop policy for async compatibility
 if os.name == "nt":
@@ -26,7 +27,6 @@ from langserve import add_routes
 from pydantic import BaseModel, ConfigDict, Field
 
 from olav.agents.root_agent_orchestrator import create_workflow_orchestrator
-from olav.core.llm import LLMFactory
 from olav.core.settings import EnvSettings
 
 from .auth import (
@@ -53,6 +53,7 @@ checkpointer: PostgresSaver | None = None
 _orchestrator_lock = asyncio.Lock()
 _routes_mounted = False
 
+
 async def ensure_orchestrator_initialized(app: FastAPI) -> None:
     """Lazy initialization of orchestrator for cases where startup lifecycle races tests.
 
@@ -69,10 +70,12 @@ async def ensure_orchestrator_initialized(app: FastAPI) -> None:
             logger.debug("Lazy init double-check: already initialized inside lock")
             return
         try:
-            logger.info("[LazyInit] Starting orchestrator initialization (expert_mode/env flags)...")
+            logger.info(
+                "[LazyInit] Starting orchestrator initialization (expert_mode/env flags)..."
+            )
             expert_mode = os.getenv("OLAV_EXPERT_MODE", "false").lower() == "true"
             result = await create_workflow_orchestrator(expert_mode=expert_mode)
-            orch_obj, stateful_graph, stateless_graph, checkpointer_manager = result
+            orch_obj, _stateful_graph, stateless_graph, checkpointer_manager = result
             # Use stateless graph for LangServe streaming (no thread_id requirement)
             # For stateful operations, use app.state.orchestrator_obj directly
             orchestrator = stateless_graph
@@ -90,8 +93,12 @@ async def ensure_orchestrator_initialized(app: FastAPI) -> None:
                 _routes_mounted = True
                 logger.info("✅ LangServe routes added: /orchestrator/invoke, /orchestrator/stream")
             else:
-                logger.warning("LangServe routes already mounted, skipping duplicate add_routes call")
-            logger.info(f"✅ LazyInit success: graph={type(orchestrator).__name__}, checkpointer={type(checkpointer).__name__}, expert_mode={expert_mode}")
+                logger.warning(
+                    "LangServe routes already mounted, skipping duplicate add_routes call"
+                )
+            logger.info(
+                f"✅ LazyInit success: graph={type(orchestrator).__name__}, checkpointer={type(checkpointer).__name__}, expert_mode={expert_mode}"
+            )
         except Exception as e:  # pragma: no cover - diagnostic branch
             logger.exception(f"❌ Lazy orchestrator initialization failed: {e}")
 
@@ -176,26 +183,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Initialize Workflow Orchestrator (returns tuple: orchestrator, graph, checkpointer_context)
     try:
-        use_dynamic_router = os.getenv("OLAV_USE_DYNAMIC_ROUTER", "false").lower() == "true"
+        os.getenv("OLAV_USE_DYNAMIC_ROUTER", "false").lower() == "true"
         expert_mode = os.getenv("OLAV_EXPERT_MODE", "false").lower() == "true"
 
         # Initialize orchestrator & underlying Postgres checkpointer (async)
         result = await create_workflow_orchestrator(expert_mode=expert_mode)
-        orch_obj, stateful_graph, stateless_graph, checkpointer_manager = result  # (WorkflowOrchestrator, stateful_graph, stateless_graph, context manager)
+        orch_obj, stateful_graph, _stateless_graph, checkpointer_manager = (
+            result  # (WorkflowOrchestrator, stateful_graph, stateless_graph, context manager)
+        )
 
         # Use stateful graph with checkpointer for full state persistence and interrupt support
         orchestrator = stateful_graph
         app.state.orchestrator_obj = orch_obj  # store original orchestrator
         try:
-            checkpointer = getattr(orch_obj, "checkpointer", None) or checkpointer_manager  # Prefer actual saver
+            checkpointer = (
+                getattr(orch_obj, "checkpointer", None) or checkpointer_manager
+            )  # Prefer actual saver
         except Exception:
             checkpointer = checkpointer_manager
-        logger.info(f"✅ Workflow Orchestrator ready (expert_mode={expert_mode}, sync_fallback={type(checkpointer).__name__ != 'AsyncPostgresSaver'})")
+        logger.info(
+            f"✅ Workflow Orchestrator ready (expert_mode={expert_mode}, sync_fallback={type(checkpointer).__name__ != 'AsyncPostgresSaver'})"
+        )
 
         # Wrapper to normalize client payload (role-based) into OrchestratorState
+
+        from langchain_core.messages import AIMessage, HumanMessage
         from langchain_core.runnables import RunnableLambda
-        from langchain_core.messages import HumanMessage, AIMessage
-        import time
 
         def _normalize_input(state: dict) -> dict:
             """Normalize input messages to OrchestratorState schema."""
@@ -212,7 +225,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 else:
                     # Already a BaseMessage
                     msgs.append(m)
-            
+
             # Provide required keys with defaults to satisfy OrchestratorState schema
             return {
                 "messages": msgs,
@@ -233,7 +246,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 enabled_endpoints=["stream", "stream_log"],
             )
             _routes_mounted = True
-            logger.info("✅ LangServe streaming routes added (with input normalization): /orchestrator/stream")
+            logger.info(
+                "✅ LangServe streaming routes added (with input normalization): /orchestrator/stream"
+            )
         else:
             logger.warning("LangServe routes already mounted, skipping duplicate add_routes call")
     except Exception as e:
@@ -358,7 +373,7 @@ def create_app() -> FastAPI:
     async def health_check() -> HealthResponse:
         """
         Health check endpoint (no authentication required).
-        
+
         Use this endpoint for:
         - Load balancer health checks
         - Kubernetes liveness/readiness probes
@@ -370,7 +385,9 @@ def create_app() -> FastAPI:
             await ensure_orchestrator_initialized(app)
         else:
             logger.debug("/health: orchestrator & checkpointer already present")
-        logger.debug(f"/health status snapshot: orch={type(orchestrator).__name__ if orchestrator else None}, cp={type(checkpointer).__name__ if checkpointer else None}")
+        logger.debug(
+            f"/health status snapshot: orch={type(orchestrator).__name__ if orchestrator else None}, cp={type(checkpointer).__name__ if checkpointer else None}"
+        )
         return HealthResponse(
             status="healthy" if orchestrator else "degraded",
             version="0.4.0-beta",
@@ -472,11 +489,7 @@ def create_app() -> FastAPI:
             },
             401: {
                 "description": "Missing or invalid JWT token",
-                "content": {
-                    "application/json": {
-                        "example": {"detail": "Not authenticated"}
-                    }
-                },
+                "content": {"application/json": {"example": {"detail": "Not authenticated"}}},
             },
         },
     )
@@ -516,9 +529,7 @@ def create_app() -> FastAPI:
             401: {
                 "description": "Missing or invalid JWT token",
                 "content": {
-                    "application/json": {
-                        "example": {"detail": "Could not validate credentials"}
-                    }
+                    "application/json": {"example": {"detail": "Could not validate credentials"}}
                 },
             },
         },
@@ -547,7 +558,9 @@ def create_app() -> FastAPI:
     # ============================================
     # NOTE: LangServe routes now mounted dynamically in lifespan after orchestrator init.
     if not orchestrator:
-        logger.warning("⚠️ Orchestrator not yet initialized at app creation - routes will be mounted during startup")
+        logger.warning(
+            "⚠️ Orchestrator not yet initialized at app creation - routes will be mounted during startup"
+        )
 
     # ============================================
     # Error Handlers
@@ -558,12 +571,12 @@ def create_app() -> FastAPI:
 
         Includes both FastAPI's conventional 'detail' field and a legacy 'error' key
         for backward compatibility with earlier clients.
-        
+
         Preserves WWW-Authenticate header for 401 responses (RFC 7235 compliance).
         """
         # Preserve headers from the original exception (e.g., WWW-Authenticate for 401)
         headers = getattr(exc, "headers", None)
-        
+
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -580,21 +593,21 @@ def create_app() -> FastAPI:
     # ============================================
     # Simplified Invoke Endpoint (bypasses LangServe validation schema)
     # ============================================
-    from typing import List, Literal, Optional, Dict  # Any already imported at module level
+    from typing import Literal  # Any already imported at module level
 
     class SimpleMessage(BaseModel):
         role: Literal["user", "assistant", "system"]
         content: str
 
     class InvokeInput(BaseModel):
-        messages: List[SimpleMessage]
+        messages: list[SimpleMessage]
 
     class InvokeConfig(BaseModel):
-        configurable: Dict[str, Any] | None = None
+        configurable: dict[str, Any] | None = None
 
     class WorkflowInvokePayload(BaseModel):
         input: InvokeInput
-        config: Optional[InvokeConfig] = None
+        config: InvokeConfig | None = None
 
     @app.post("/orchestrator/invoke", tags=["orchestrator"], summary="Invoke workflow (simplified)")
     async def orchestrator_invoke(payload: WorkflowInvokePayload, current_user: CurrentUser):  # type: ignore[valid-type]
@@ -622,23 +635,24 @@ def create_app() -> FastAPI:
             thread_id = payload.config.configurable.get("thread_id")
         if not thread_id:
             import time
+
             thread_id = f"invoke-{int(time.time())}"
 
         try:
             result = await orch_obj.route(user_query, thread_id)
             # Convert BaseMessage objects to serializable dicts
             from langchain_core.messages import BaseMessage
-            
+
             def serialize_messages(obj):
                 """Recursively serialize BaseMessage objects to dicts."""
                 if isinstance(obj, BaseMessage):
                     return {"role": obj.type, "content": obj.content}
-                elif isinstance(obj, dict):
+                if isinstance(obj, dict):
                     return {k: serialize_messages(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
+                if isinstance(obj, list):
                     return [serialize_messages(item) for item in obj]
                 return obj
-            
+
             serialized_result = serialize_messages(result)
             return JSONResponse(status_code=200, content=serialized_result)
         except Exception as e:
@@ -653,7 +667,7 @@ def create_app() -> FastAPI:
                 },
                 "interrupted": False,
                 "final_message": "暂时无法访问LLM，返回占位响应。",
-                "error": str(e) or ""
+                "error": str(e) or "",
             }
             return JSONResponse(status_code=200, content=fallback)
 
@@ -673,9 +687,13 @@ app = create_app()
 # determinism for unit/e2e tests, perform a one-time synchronous initialization
 # if orchestrator was not set by lifespan yet. Guarded so production (docker)
 # is unaffected.
-if settings.environment == "local" and (orchestrator is None or checkpointer is None):  # pragma: no cover - test-only path
+if settings.environment == "local" and (
+    orchestrator is None or checkpointer is None
+):  # pragma: no cover - test-only path
     try:
-        logger.info("[ForceInit] Performing synchronous orchestrator initialization in local environment")
+        logger.info(
+            "[ForceInit] Performing synchronous orchestrator initialization in local environment"
+        )
         # Use asyncio.new_event_loop() instead of deprecated get_event_loop()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -698,7 +716,9 @@ if settings.environment == "local" and (orchestrator is None or checkpointer is 
                 enabled_endpoints=["stream", "stream_log"],
             )
         _routes_mounted = True
-        logger.info(f"[ForceInit] Success: graph={type(orchestrator).__name__}, checkpointer={type(checkpointer).__name__}")
+        logger.info(
+            f"[ForceInit] Success: graph={type(orchestrator).__name__}, checkpointer={type(checkpointer).__name__}"
+        )
     except Exception as e:  # pragma: no cover - diagnostic
         logger.exception(f"[ForceInit] Failed: {e}")
 

@@ -7,7 +7,7 @@ This module provides a unified client interface for OLAV that supports:
 Architecture:
     Remote Mode (Default):
         CLI Client (Rich UI) → HTTP/WebSocket → LangServe API → Orchestrator
-    
+
     Local Mode (-L/--local):
         CLI Client → Direct Orchestrator (in-process)
 """
@@ -16,8 +16,7 @@ import asyncio
 import logging
 import os
 import sys
-from pathlib import Path
-from typing import Any, AsyncIterator, Literal
+from typing import Any, Literal
 
 import httpx
 from langchain_core.messages import BaseMessage
@@ -27,9 +26,6 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
-
 
 # Windows psycopg async compatibility
 if sys.platform == "win32":
@@ -75,7 +71,7 @@ class OLAVClient:
         console: Console | None = None,
         auth_token: str | None = None,
         local_mode: bool | None = None,  # Backward compatibility
-    ):
+    ) -> None:
         """
         Initialize OLAV client.
 
@@ -89,13 +85,15 @@ class OLAVClient:
         """
         # Backward compatibility: local_mode parameter
         if local_mode is not None:
-            logger.warning("⚠️ local_mode parameter is deprecated. Use mode='local' or mode='remote' instead.")
+            logger.warning(
+                "⚠️ local_mode parameter is deprecated. Use mode='local' or mode='remote' instead."
+            )
             mode = "local" if local_mode else "remote"
-        
+
         # Backward compatibility: server_url parameter
         if server_url is not None and server_config is None:
             server_config = ServerConfig(base_url=server_url)
-        
+
         self.mode = mode
         self.server_config = server_config or ServerConfig()
         self.console = console or Console()
@@ -115,7 +113,7 @@ class OLAVClient:
             # Auto-load credentials if no token provided
             if self.auth_token is None:
                 self.auth_token = self._load_stored_token()
-            
+
             await self._connect_remote()
         else:
             await self._connect_local(expert_mode)
@@ -167,7 +165,7 @@ class OLAVClient:
                 )
                 response.raise_for_status()
                 health = response.json()
-            
+
             # Store health check result
             self.remote_health = health
 
@@ -186,16 +184,20 @@ class OLAVClient:
                 timeout=60.0,  # Increased from default 30s to 60s for complex workflows
             )
 
-            self.console.print(f"[green]✅ Connected to OLAV API server: {self.server_config.base_url}[/green]")
+            self.console.print(
+                f"[green]✅ Connected to OLAV API server: {self.server_config.base_url}[/green]"
+            )
             self.console.print(f"   Version: {health['version']}")
             self.console.print(f"   Environment: {health['environment']}")
-            
+
             if self.auth_token:
                 self.console.print("   [dim]🔐 Authenticated (using stored credentials)[/dim]")
             else:
-                self.console.print("   [yellow]⚠️  Not authenticated (public endpoints only)[/yellow]")
+                self.console.print(
+                    "   [yellow]⚠️  Not authenticated (public endpoints only)[/yellow]"
+                )
                 self.console.print("   [dim]💡 Run 'olav login' to authenticate[/dim]")
-            
+
             # Backward compatibility alias
             self.remote_orchestrator = self.remote_runnable
 
@@ -206,12 +208,14 @@ class OLAVClient:
             self.console.print("\n💡 Tips:")
             self.console.print("   1. Start server: uv run python src/olav/server/app.py")
             self.console.print("   2. Or use local mode: olav.py -L")
-            raise ConnectionError(f"Cannot connect to OLAV server at {self.server_config.base_url}")
+            msg = f"Cannot connect to OLAV server at {self.server_config.base_url}"
+            raise ConnectionError(msg)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                self.console.print(f"[red]❌ Authentication failed (401 Unauthorized)[/red]")
+                self.console.print("[red]❌ Authentication failed (401 Unauthorized)[/red]")
                 self.console.print("\n💡 Run 'olav login' to authenticate")
-                raise ConnectionError("Authentication required") from e
+                msg = "Authentication required"
+                raise ConnectionError(msg) from e
             raise
         except Exception as e:
             self.console.print(f"[red]❌ Connection error: {e}[/red]")
@@ -237,9 +241,7 @@ class OLAVClient:
             self.console.print(f"[red]❌ Failed to initialize local orchestrator: {e}[/red]")
             raise
 
-    async def execute(
-        self, query: str, thread_id: str, stream: bool = True
-    ) -> ExecutionResult:
+    async def execute(self, query: str, thread_id: str, stream: bool = True) -> ExecutionResult:
         """
         Execute query using remote or local backend.
 
@@ -253,28 +255,28 @@ class OLAVClient:
         """
         if self.mode == "remote":
             return await self._execute_remote(query, thread_id, stream)
-        else:
-            return await self._execute_local(query, thread_id, stream)
+        return await self._execute_local(query, thread_id, stream)
 
-    async def _execute_remote(
-        self, query: str, thread_id: str, stream: bool
-    ) -> ExecutionResult:
+    async def _execute_remote(self, query: str, thread_id: str, stream: bool) -> ExecutionResult:
         """Execute query via remote API server with retry logic."""
         if not self.remote_runnable:
-            raise RuntimeError("Not connected to remote server. Call connect() first.")
+            msg = "Not connected to remote server. Call connect() first."
+            raise RuntimeError(msg)
 
         # Retry configuration (exponential backoff)
         max_retries = 3
         base_delay = 1.0  # Initial retry delay in seconds
-        
+
         for attempt in range(max_retries):
             try:
                 return await self._execute_remote_attempt(query, thread_id, stream)
             except Exception as e:
                 if attempt < max_retries - 1:
                     # Exponential backoff: 1s, 2s, 4s
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"Remote execution failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        f"Remote execution failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
                     logger.info(f"Retrying in {delay}s...")
                     await asyncio.sleep(delay)
                 else:
@@ -283,12 +285,12 @@ class OLAVClient:
                     return ExecutionResult(
                         success=False, messages=[], thread_id=thread_id, error=str(e)
                     )
-        
+
         # Should never reach here, but satisfy type checker
         return ExecutionResult(
             success=False, messages=[], thread_id=thread_id, error="Unknown error"
         )
-    
+
     async def _execute_remote_attempt(
         self, query: str, thread_id: str, stream: bool
     ) -> ExecutionResult:
@@ -329,16 +331,15 @@ class OLAVClient:
                 interrupted=False,
             )
 
-        except Exception as e:
+        except Exception:
             # Re-raise to trigger retry logic in _execute_remote
             raise
 
-    async def _execute_local(
-        self, query: str, thread_id: str, stream: bool
-    ) -> ExecutionResult:
+    async def _execute_local(self, query: str, thread_id: str, stream: bool) -> ExecutionResult:
         """Execute query via local orchestrator."""
         if not self.orchestrator:
-            raise RuntimeError("Local orchestrator not initialized. Call connect() first.")
+            msg = "Local orchestrator not initialized. Call connect() first."
+            raise RuntimeError(msg)
 
         try:
             config = {"configurable": {"thread_id": thread_id}}
@@ -368,9 +369,7 @@ class OLAVClient:
                 messages_buffer = result.get("messages", [])
 
             # Convert BaseMessage to dict
-            messages_dict = [
-                {"type": msg.type, "content": msg.content} for msg in messages_buffer
-            ]
+            messages_dict = [{"type": msg.type, "content": msg.content} for msg in messages_buffer]
 
             return ExecutionResult(
                 success=True,
@@ -381,9 +380,7 @@ class OLAVClient:
 
         except Exception as e:
             logger.error(f"Local execution failed: {e}")
-            return ExecutionResult(
-                success=False, messages=[], thread_id=thread_id, error=str(e)
-            )
+            return ExecutionResult(success=False, messages=[], thread_id=thread_id, error=str(e))
 
     async def health_check(self) -> dict[str, Any]:
         """
@@ -462,7 +459,7 @@ async def create_client(
 
     # Construct ServerConfig from server_url parameter
     server_config = ServerConfig(base_url=server_url)
-    
+
     client = OLAVClient(mode=mode, server_config=server_config)
     await client.connect(expert_mode=expert_mode)
     return client

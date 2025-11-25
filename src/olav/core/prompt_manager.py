@@ -21,6 +21,7 @@ class PromptManager:
         """
         if prompts_dir is None:
             from config.settings import Paths
+
             prompts_dir = Paths.PROMPTS_DIR
         self.prompts_dir = Path(prompts_dir)
         self._cache: dict[str, PromptTemplate] = {}

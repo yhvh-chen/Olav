@@ -5,9 +5,8 @@ Adds `__meta__.elapsed_sec` to each tool response for performance profiling.
 
 import logging
 import time
-from typing import Any
-import yaml
 from pathlib import Path
+from typing import Any
 
 # Derive CONFIG_DIR without importing non-packaged root module
 CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
@@ -29,7 +28,7 @@ class NornirTool:
             sandbox: Nornir sandbox instance (lazy initialization if None)
         """
         self._sandbox = sandbox
-    
+
     @property
     def sandbox(self) -> NornirSandbox:
         """Lazy-load Nornir sandbox (avoids NetBox connection at import time)."""
@@ -62,7 +61,7 @@ async def netconf_tool(
 
     Returns:
         Execution result with status and output
-        
+
     错误处理:
         如果连接失败，返回明确错误信息以便 Root Agent 降级到 CLI
 
@@ -76,19 +75,30 @@ async def netconf_tool(
     start = time.perf_counter()
     # 参数验证
     if operation == "get-config" and not xpath:
-        return {"error": "get-config requires xpath parameter", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
+        return {
+            "error": "get-config requires xpath parameter",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
+        }
     if operation == "edit-config" and not payload:
-        return {"error": "edit-config requires payload parameter", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
+        return {
+            "error": "edit-config requires payload parameter",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
+        }
 
     # 构造 RPC 与审批标记
     if operation == "get-config":
         command = f"<get-config><source><running/></source><filter type='xpath' select='{xpath}'/></get-config>"
         requires_approval = False
     elif operation == "edit-config":
-        command = f"<edit-config><target><candidate/></target><config>{payload}</config></edit-config>"
+        command = (
+            f"<edit-config><target><candidate/></target><config>{payload}</config></edit-config>"
+        )
         requires_approval = True
     else:
-        return {"error": f"Unsupported operation: {operation}", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
+        return {
+            "error": f"Unsupported operation: {operation}",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
+        }
 
     try:
         result = await _nornir_tool_instance.sandbox.execute(
@@ -100,25 +110,25 @@ async def netconf_tool(
             "success": result.success,
             "output": result.output,
             "error": result.error,
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
     except ConnectionRefusedError as e:
         return {
             "success": False,
             "error": f"NETCONF connection failed: Connection refused on port 830. 设备可能不支持 NETCONF。原始错误: {e}",
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
     except TimeoutError as e:
         return {
             "success": False,
             "error": f"NETCONF connection failed: Timeout connecting to port 830. 原始错误: {e}",
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
     except Exception as e:
         return {
             "success": False,
             "error": f"NETCONF connection failed: {e}",
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
 
 
@@ -165,9 +175,15 @@ async def cli_tool(
     start = time.perf_counter()
     # 验证参数
     if not command and not config_commands:
-        return {"error": "Must provide either command or config_commands", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
+        return {
+            "error": "Must provide either command or config_commands",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
+        }
     if command and config_commands:
-        return {"error": "Cannot provide both command and config_commands", "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}}
+        return {
+            "error": "Cannot provide both command and config_commands",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
+        }
 
     # 判断是否为配置操作
     is_config = config_commands is not None
@@ -194,17 +210,17 @@ async def cli_tool(
             "output": result.output,
             "parsed": result.metadata.get("parsed", False) if result.metadata else False,
             "error": result.error,
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
     except ConnectionRefusedError as e:
         return {
             "success": False,
-            "error": f"SSH connection failed: Connection refused on port 22. 原始错误: {str(e)}",
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "error": f"SSH connection failed: Connection refused on port 22. 原始错误: {e!s}",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }
     except Exception as e:
         return {
             "success": False,
-            "error": f"CLI execution failed: {str(e)}",
-            "__meta__": {"elapsed_sec": round(time.perf_counter()-start,6)}
+            "error": f"CLI execution failed: {e!s}",
+            "__meta__": {"elapsed_sec": round(time.perf_counter() - start, 6)},
         }

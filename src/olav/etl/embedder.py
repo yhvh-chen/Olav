@@ -10,8 +10,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from olav.core.settings import settings as env_settings  # type: ignore
 from config.settings import DATA_DIR  # type: ignore
+
+from olav.core.settings import settings as env_settings  # type: ignore
 
 
 def main() -> None:
@@ -26,7 +27,7 @@ def main() -> None:
     for p in files[:50]:  # limit output
         print(f" - {p.relative_to(docs_dir)}")
     if len(files) > 50:
-        print(f"[embedder] ... ({len(files)-50} more)")
+        print(f"[embedder] ... ({len(files) - 50} more)")
     print("[embedder] Placeholder complete. Ready for indexing extension.")
 
 

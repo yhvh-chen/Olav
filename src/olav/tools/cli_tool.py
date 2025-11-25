@@ -26,37 +26,35 @@ Updated: 2025-11-25 (Phase B.1 Step 3 - NetBox platform injection)
 """
 
 import logging
-import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 from olav.tools.base import BaseTool, ToolOutput
 
 logger = logging.getLogger(__name__)
 
 
-def get_device_platform_from_netbox(device_name: str) -> Optional[str]:
+def get_device_platform_from_netbox(device_name: str) -> str | None:
     """
     Query NetBox for device platform.
-    
+
     This function integrates with NetBox as SSOT (Single Source of Truth)
     to avoid hardcoding platform strings. When a device name is provided,
     it queries NetBox's device API to get the platform.slug field.
-    
+
     Args:
         device_name: Device hostname from NetBox inventory
-        
+
     Returns:
         Platform slug (e.g., "cisco-ios", "cisco-iosxr") or None if:
         - Device not found in NetBox
         - Device has no platform assigned
         - NetBox API error
-        
+
     Example:
         >>> platform = get_device_platform_from_netbox("R1")
         >>> print(platform)
         "cisco-ios"
-    
+
     Note:
         - Platform slugs use hyphens (NetBox convention): "cisco-ios"
         - TemplateManager expects underscores: "cisco_ios"
@@ -64,42 +62,42 @@ def get_device_platform_from_netbox(device_name: str) -> Optional[str]:
     """
     try:
         from olav.tools.netbox_tool import netbox_api_call
-        
+
         # Query NetBox device API by name
         response = netbox_api_call(
-            path="/dcim/devices/",
-            method="GET",
-            params={"name": device_name}
+            path="/dcim/devices/", method="GET", params={"name": device_name}
         )
-        
+
         # Handle errors
         if response.get("status") == "error":
-            logger.error(f"NetBox query failed for device '{device_name}': {response.get('message')}")
+            logger.error(
+                f"NetBox query failed for device '{device_name}': {response.get('message')}"
+            )
             return None
-        
+
         # Extract results
         results = response.get("results", [])
         if not results:
             logger.warning(f"Device '{device_name}' not found in NetBox")
             return None
-        
+
         # Get first result (device name should be unique)
         device = results[0]
         platform = device.get("platform")
-        
+
         if not platform:
             logger.warning(f"Device '{device_name}' has no platform assigned in NetBox")
             return None
-        
+
         # Extract platform slug (e.g., {"id": 1, "name": "Cisco IOS", "slug": "cisco-ios"})
         platform_slug = platform.get("slug")
         if not platform_slug:
             logger.warning(f"Device '{device_name}' platform missing slug field: {platform}")
             return None
-        
+
         logger.info(f"[NetBox SSOT] Device '{device_name}' platform: {platform_slug}")
         return platform_slug
-    
+
     except ImportError:
         logger.error("netbox_tool not available (import error)")
         return None
@@ -111,16 +109,16 @@ def get_device_platform_from_netbox(device_name: str) -> Optional[str]:
 def _normalize_platform_slug(platform_slug: str) -> str:
     """
     Convert NetBox platform slug to ntc-templates format.
-    
+
     NetBox uses hyphens in slugs (e.g., "cisco-ios").
     ntc-templates uses underscores (e.g., "cisco_ios").
-    
+
     Args:
         platform_slug: NetBox platform slug with hyphens
-        
+
     Returns:
         Normalized platform name for ntc-templates
-        
+
     Example:
         >>> _normalize_platform_slug("cisco-ios")
         "cisco_ios"
@@ -129,262 +127,269 @@ def _normalize_platform_slug(platform_slug: str) -> str:
     """
     return platform_slug.replace("-", "_")
 
+
 # Derive CONFIG_DIR and TEMPLATES_DIR without importing non-packaged root module
 CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
-TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "data" / "ntc-templates" / "ntc_templates" / "templates"
+TEMPLATES_DIR = (
+    Path(__file__).resolve().parents[3] / "data" / "ntc-templates" / "ntc_templates" / "templates"
+)
 
 
 class CommandBlacklist:
     """
     Command blacklist manager with security defaults.
-    
+
     Prevents execution of dangerous or disruptive commands:
     - Default blocks: traceroute, reload, write erase, etc.
     - Custom blocks: loaded from config/cli_blacklist.yaml (if exists)
-    
+
     Attributes:
         blacklist: Set of blacklisted command patterns (lowercase)
     """
-    
+
     DEFAULT_BLOCKS = {
-        "traceroute",      # Network flooding risk
-        "reload",          # Device reboot
-        "write erase",     # Configuration wipe
-        "format",          # Filesystem format
-        "delete",          # File deletion
+        "traceroute",  # Network flooding risk
+        "reload",  # Device reboot
+        "write erase",  # Configuration wipe
+        "format",  # Filesystem format
+        "delete",  # File deletion
     }
-    
-    def __init__(self, blacklist_file: Optional[Path] = None):
+
+    def __init__(self, blacklist_file: Path | None = None) -> None:
         """
         Initialize blacklist from file or defaults.
-        
+
         Args:
             blacklist_file: Path to blacklist file (YAML or txt format)
         """
         self.blacklist = self._load_blacklist(blacklist_file)
-    
-    def _load_blacklist(self, blacklist_file: Optional[Path] = None) -> Set[str]:
+
+    def _load_blacklist(self, blacklist_file: Path | None = None) -> set[str]:
         """
         Load command blacklist from file with fallback to defaults.
-        
+
         Reused from archive/baseline_collector.py lines 169-189.
-        
+
         Args:
             blacklist_file: Path to blacklist file
-            
+
         Returns:
             Set of blacklisted command patterns (lowercase)
         """
         blacklist = set()
-        
+
         # Always block dangerous defaults unless explicitly allowed
         blacklist.update(self.DEFAULT_BLOCKS)
-        
+
         # Try to load from file
         if blacklist_file is None:
             blacklist_file = CONFIG_DIR / "cli_blacklist.yaml"
-        
+
         if blacklist_file.exists():
             try:
-                with open(blacklist_file, 'r', encoding='utf-8') as f:
+                with open(blacklist_file, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         # Skip comments and empty lines
-                        if line and not line.startswith('#'):
+                        if line and not line.startswith("#"):
                             # YAML format: - command_pattern
-                            if line.startswith('-'):
+                            if line.startswith("-"):
                                 line = line[1:].strip()
                             blacklist.add(line.lower())
-                logger.info(f"[CommandBlacklist] Loaded {len(blacklist)} blacklisted commands from {blacklist_file}")
+                logger.info(
+                    f"[CommandBlacklist] Loaded {len(blacklist)} blacklisted commands from {blacklist_file}"
+                )
             except Exception as e:
-                logger.warning(f"[CommandBlacklist] Failed to load blacklist from {blacklist_file}: {e}")
+                logger.warning(
+                    f"[CommandBlacklist] Failed to load blacklist from {blacklist_file}: {e}"
+                )
                 logger.info(f"[CommandBlacklist] Using {len(blacklist)} default blocks")
         else:
-            logger.info(f"[CommandBlacklist] No blacklist file found at {blacklist_file}, using {len(blacklist)} defaults")
-        
+            logger.info(
+                f"[CommandBlacklist] No blacklist file found at {blacklist_file}, using {len(blacklist)} defaults"
+            )
+
         return blacklist
-    
+
     def is_blocked(self, command: str) -> bool:
         """
         Check if command matches any blacklist pattern.
-        
+
         Args:
             command: CLI command to check
-            
+
         Returns:
             True if command is blacklisted, False otherwise
         """
         cmd_lower = command.lower().strip()
-        
+
         # Exact match or prefix match (e.g., "reload" blocks "reload in 5")
         for pattern in self.blacklist:
             if cmd_lower == pattern or cmd_lower.startswith(pattern + " "):
                 return True
-        
+
         return False
 
 
 class TemplateManager:
     """
     TextFSM template manager for command discovery and mapping.
-    
+
     Auto-discovers available CLI commands from .textfsm template files:
     - Scans ntc-templates directory for platform-specific templates
     - Caches platform → commands mapping for performance
     - Converts template filenames to CLI commands
     - Checks template validity (non-empty templates)
-    
+
     Attributes:
         templates_dir: Path to ntc-templates directory
         blacklist: CommandBlacklist instance
         _cache: Platform → [(command, template_path, is_empty)] cache
     """
-    
+
     def __init__(
-        self,
-        templates_dir: Optional[Path] = None,
-        blacklist: Optional[CommandBlacklist] = None
-    ):
+        self, templates_dir: Path | None = None, blacklist: CommandBlacklist | None = None
+    ) -> None:
         """
         Initialize template manager with lazy-loading cache.
-        
+
         Args:
             templates_dir: Path to ntc-templates directory (defaults to data/ntc-templates/)
             blacklist: CommandBlacklist instance (created if None)
         """
         self.templates_dir = templates_dir or TEMPLATES_DIR
         self.blacklist = blacklist or CommandBlacklist()
-        self._cache: Dict[str, List[Tuple[str, Path, bool]]] = {}
-        
+        self._cache: dict[str, list[tuple[str, Path, bool]]] = {}
+
         if not self.templates_dir.exists():
             logger.warning(f"[TemplateManager] Templates directory not found: {self.templates_dir}")
-    
-    def _parse_command_from_filename(self, filename: str) -> Optional[str]:
+
+    def _parse_command_from_filename(self, filename: str) -> str | None:
         """
         Extract CLI command from TextFSM template filename.
-        
+
         Reused from archive/baseline_collector.py lines 102-119.
-        
+
         Converts filenames like:
         - cisco_ios_show_ip_interface_brief.textfsm → "show ip interface brief"
         - cisco_iosxr_show_running_config.textfsm → "show running-config"
-        
+
         Args:
             filename: Template filename (e.g., "cisco_ios_show_version.textfsm")
-            
+
         Returns:
             CLI command string or None if parsing failed
         """
         # Remove .textfsm extension
-        name = filename.replace('.textfsm', '')
-        
+        name = filename.replace(".textfsm", "")
+
         # Split by underscore
-        parts = name.split('_')
-        
+        parts = name.split("_")
+
         # Expected format: {vendor}_{platform}_{command...}
         # E.g., cisco_ios_show_ip_interface_brief
         if len(parts) < 3:
             return None
-        
+
         # Extract command parts (skip vendor and platform)
         command_parts = parts[2:]
-        
+
         # Join with spaces
-        command = ' '.join(command_parts)
-        
+        command = " ".join(command_parts)
+
         # Handle special cases
-        command = command.replace('running', 'running-config')
-        command = command.replace('startup', 'startup-config')
-        
-        return command
-    
+        command = command.replace("running", "running-config")
+        return command.replace("startup", "startup-config")
+
     def _is_template_empty(self, template_path: Path) -> bool:
         """
         Check if TextFSM template contains only comments/whitespace.
-        
+
         Reused from archive/baseline_collector.py lines 121-128.
-        
+
         Args:
             template_path: Path to TextFSM template file
-            
+
         Returns:
             True if template is empty (no parsing rules), False otherwise
         """
         try:
-            with open(template_path, 'r', encoding='utf-8') as f:
+            with open(template_path, encoding="utf-8") as f:
                 content = f.read().strip()
                 # Remove comments and whitespace
-                lines = [line.strip() for line in content.split('\n') if line.strip()]
-                non_comment_lines = [line for line in lines if not line.startswith('#')]
+                lines = [line.strip() for line in content.split("\n") if line.strip()]
+                non_comment_lines = [line for line in lines if not line.startswith("#")]
                 return len(non_comment_lines) == 0
         except Exception as e:
             logger.warning(f"[TemplateManager] Failed to read template {template_path}: {e}")
             return True
-    
-    def _scan_templates(self, platform: str) -> List[Tuple[str, Path, bool]]:
+
+    def _scan_templates(self, platform: str) -> list[tuple[str, Path, bool]]:
         """
         Scan templates directory for platform-specific TextFSM templates.
-        
+
         Reused from archive/baseline_collector.py lines 130-168.
-        
+
         Args:
             platform: Platform identifier (e.g., "cisco_ios", "cisco_iosxr")
-            
+
         Returns:
             List of (command, template_path, is_empty) tuples
         """
         commands = []
-        
+
         if not self.templates_dir.exists():
             logger.warning(f"[TemplateManager] Templates directory not found: {self.templates_dir}")
             return commands
-        
+
         # Find all templates for platform: {platform}_*.textfsm
         pattern = f"{platform}_*.textfsm"
         template_files = list(self.templates_dir.glob(pattern))
-        
+
         logger.info(f"[TemplateManager] Found {len(template_files)} templates for {platform}")
-        
+
         for template_path in template_files:
             # Parse command from filename
             command = self._parse_command_from_filename(template_path.name)
-            
+
             if command is None:
-                logger.warning(f"[TemplateManager] Failed to parse command from {template_path.name}")
+                logger.warning(
+                    f"[TemplateManager] Failed to parse command from {template_path.name}"
+                )
                 continue
-            
+
             # Check if template is empty
             is_empty = self._is_template_empty(template_path)
-            
+
             # Skip blacklisted commands
             if self.blacklist.is_blocked(command):
                 logger.info(f"[TemplateManager] Skipping blacklisted command: {command}")
                 continue
-            
+
             commands.append((command, template_path, is_empty))
-        
+
         return commands
-    
-    def get_commands_for_platform(self, platform: str) -> List[Tuple[str, Path, bool]]:
+
+    def get_commands_for_platform(self, platform: str) -> list[tuple[str, Path, bool]]:
         """
         Get all available CLI commands for a platform.
-        
+
         Reused from archive/baseline_collector.py lines 191-258 (simplified).
         Enhanced with fallback mechanism for platforms without templates.
-        
+
         Uses cached results for performance:
         1. Check cache for platform
         2. If not cached, scan templates directory
         3. Add standard fallback commands if templates exist
         4. Filter blacklisted commands
         5. Cache results
-        
+
         Args:
             platform: Platform identifier (e.g., "cisco_ios", "cisco_iosxr", "juniper_junos")
-            
+
         Returns:
             List of (command, template_path, is_empty) tuples
-            
+
         Example:
             >>> manager = TemplateManager()
             >>> commands = manager.get_commands_for_platform("cisco_ios")
@@ -395,44 +400,43 @@ class TemplateManager:
             show running-config: raw text
         """
         # Allow generic 'ios' alias to reuse cisco_ios templates
-        if platform == "ios":
-            platform_lookup = "cisco_ios"
-        else:
-            platform_lookup = platform
-        
+        platform_lookup = "cisco_ios" if platform == "ios" else platform
+
         # Check cache first
         if platform_lookup in self._cache:
             logger.debug(f"[TemplateManager] Using cached commands for {platform_lookup}")
             return self._cache[platform_lookup]
-        
+
         # Scan templates directory
         commands = self._scan_templates(platform_lookup)
-        
+
         # Add standard fallback commands if no templates found
         if not commands:
-            logger.info(f"[TemplateManager] No templates found for {platform_lookup}, using fallback commands")
+            logger.info(
+                f"[TemplateManager] No templates found for {platform_lookup}, using fallback commands"
+            )
             commands = self._get_standard_commands_for_platform(platform_lookup)
-        
+
         # Cache results
         self._cache[platform_lookup] = commands
-        
+
         logger.info(f"[TemplateManager] Cached {len(commands)} commands for {platform_lookup}")
-        
+
         return commands
-    
-    def _get_standard_commands_for_platform(self, platform: str) -> List[Tuple[str, Path, bool]]:
+
+    def _get_standard_commands_for_platform(self, platform: str) -> list[tuple[str, Path, bool]]:
         """
         Return standard show commands with fallback support.
-        
+
         Reused from archive/baseline_collector.py lines 260-332.
-        
+
         Provides production-verified command lists for platforms without templates:
         - cisco_ios: 91 commands (all ntc-templates supported commands)
         - Other platforms: Minimal fallback (show running-config)
-        
+
         Args:
             platform: Platform identifier
-            
+
         Returns:
             List of (command, template_path, is_empty) tuples
             template_path is None for standard commands (use default ntc-templates lookup)
@@ -534,107 +538,105 @@ class TemplateManager:
                 ("show running-config", None, True),  # Keep as raw - config parsing is complex
             ],
         }
-        
+
         # Return platform-specific commands or minimal fallback
         return standard_commands.get(platform, [("show running-config", None, True)])
-    
-    def get_command_template(self, platform: str, command: str) -> Optional[Tuple[Path, bool]]:
+
+    def get_command_template(self, platform: str, command: str) -> tuple[Path, bool] | None:
         """
         Get template path for a specific command on a platform.
-        
+
         Args:
             platform: Platform identifier
             command: CLI command to lookup
-            
+
         Returns:
             Tuple of (template_path, is_empty) or None if not found
         """
         commands = self.get_commands_for_platform(platform)
-        
+
         # Normalize command for comparison
         cmd_normalized = command.lower().strip()
-        
+
         for cmd, template_path, is_empty in commands:
             if cmd.lower() == cmd_normalized:
                 return (template_path, is_empty)
-        
+
         return None
 
 
 class CLITemplateTool(BaseTool):
     """
     CLI Template Discovery Tool - BaseTool implementation.
-    
+
     Provides LLM with:
     - Platform-specific command discovery (e.g., "What commands are available for cisco_ios?")
     - Template availability checking (e.g., "Does 'show version' have TextFSM parsing?")
     - Command validation against blacklist (e.g., "Is 'reload' safe to execute?")
-    
+
     Use Cases:
     1. **Command Discovery**: LLM asks "What commands can I run on cisco_ios?"
     2. **Template Lookup**: LLM asks "Is there a template for 'show ip bgp summary' on cisco_ios?"
     3. **Safety Check**: LLM asks "Is 'reload' command safe to execute?"
-    
+
     Attributes:
         name: Tool identifier
         description: Tool purpose description
         manager: TemplateManager instance for command discovery
     """
-    
+
     name = "cli_template_discover"
     description = """Discover available CLI commands and templates for network devices.
-    
+
     Use this tool to:
     - List available commands for a platform (e.g., cisco_ios, cisco_iosxr)
     - Check if a command has TextFSM parsing support
     - Validate commands against blacklist before execution
-    
+
     This tool provides command discovery, NOT execution.
     Use cli_execute tool for actual command execution.
-    
+
     **Platform Identifiers**:
     - Cisco IOS: "cisco_ios" or "ios"
     - Cisco IOS-XR: "cisco_iosxr"
     - Cisco NX-OS: "cisco_nxos"
     - Juniper JunOS: "juniper_junos"
     - Arista EOS: "arista_eos"
-    
+
     **Example Queries**:
     - "List all commands for cisco_ios"
     - "Does 'show ip bgp summary' have TextFSM template for cisco_ios?"
     - "Is 'reload' command safe to execute?"
     """
-    
+
     def __init__(
-        self,
-        templates_dir: Optional[Path] = None,
-        blacklist_file: Optional[Path] = None
-    ):
+        self, templates_dir: Path | None = None, blacklist_file: Path | None = None
+    ) -> None:
         """
         Initialize CLI template discovery tool.
-        
+
         Args:
             templates_dir: Path to ntc-templates directory
             blacklist_file: Path to command blacklist file
         """
         blacklist = CommandBlacklist(blacklist_file)
         self.manager = TemplateManager(templates_dir, blacklist)
-    
+
     async def execute(
         self,
-        platform: Optional[str] = None,
-        device: Optional[str] = None,
-        command: Optional[str] = None,
-        list_all: bool = False
+        platform: str | None = None,
+        device: str | None = None,
+        command: str | None = None,
+        list_all: bool = False,
     ) -> ToolOutput:
         """
         Discover CLI commands and templates for a platform.
-        
+
         **NetBox Integration (Phase B.1 Step 3)**:
         - If `device` is provided, queries NetBox for device.platform
         - Falls back to `platform` parameter if NetBox query fails
         - Enables SSOT platform management (no hardcoded strings)
-        
+
         Args:
             platform: Platform identifier (e.g., "cisco_ios", "cisco_iosxr")
                       Used as fallback if device/NetBox query fails
@@ -642,34 +644,34 @@ class CLITemplateTool(BaseTool):
                     Takes priority over `platform` parameter
             command: Optional command to lookup (e.g., "show version")
             list_all: If True, return all available commands for platform
-            
+
         Returns:
             ToolOutput with command discovery results
-            
+
         Example (NetBox Integration):
             # Query NetBox for R1's platform
             result = await tool.execute(device="R1", list_all=True)
             # NetBox returns platform.slug="cisco-ios" → normalized to "cisco_ios"
             # Returns: 91 Cisco IOS commands from fallback or templates
-            
+
         Example (Explicit Platform):
             result = await tool.execute(platform="cisco_ios", list_all=True)
             # Returns: [
             #   {"command": "show version", "template": "cisco_ios_show_version.textfsm", "parsed": True},
             #   ...
             # ]
-            
+
         Example (Check Specific Command):
             result = await tool.execute(platform="cisco_ios", command="show ip bgp summary")
             # Returns: [
-            #   {"command": "show ip bgp summary", "template": "cisco_ios_show_ip_bgp_summary.textfsm", 
+            #   {"command": "show ip bgp summary", "template": "cisco_ios_show_ip_bgp_summary.textfsm",
             #    "parsed": True, "available": True}
             # ]
         """
         # Resolve platform from device or use explicit parameter
         resolved_platform = platform
         platform_source = "explicit"
-        
+
         if device:
             # Query NetBox for device platform (SSOT)
             netbox_platform = get_device_platform_from_netbox(device)
@@ -677,131 +679,149 @@ class CLITemplateTool(BaseTool):
                 # Normalize NetBox slug (cisco-ios → cisco_ios)
                 resolved_platform = _normalize_platform_slug(netbox_platform)
                 platform_source = "netbox"
-                logger.info(f"[CLITemplateTool] Resolved platform from NetBox: {device} → {resolved_platform}")
+                logger.info(
+                    f"[CLITemplateTool] Resolved platform from NetBox: {device} → {resolved_platform}"
+                )
             else:
-                logger.warning(f"[CLITemplateTool] NetBox query failed for device '{device}', falling back to platform parameter")
-        
+                logger.warning(
+                    f"[CLITemplateTool] NetBox query failed for device '{device}', falling back to platform parameter"
+                )
+
         # Validation: must have platform from either source
         if not resolved_platform:
             return ToolOutput(
                 source="cli_template",
                 device=device or "unknown",
-                data=[{
-                    "status": "PARAM_ERROR",
-                    "message": "Must provide 'platform' parameter or 'device' with NetBox platform metadata",
-                    "hint": "Use platform='cisco_ios' OR device='R1' (with NetBox platform assigned)"
-                }],
+                data=[
+                    {
+                        "status": "PARAM_ERROR",
+                        "message": "Must provide 'platform' parameter or 'device' with NetBox platform metadata",
+                        "hint": "Use platform='cisco_ios' OR device='R1' (with NetBox platform assigned)",
+                    }
+                ],
                 metadata={"platform": None, "device": device, "command": command},
-                error="Missing platform parameter"
+                error="Missing platform parameter",
             )
-        
+
         metadata = {
             "platform": resolved_platform,
             "platform_source": platform_source,
             "device": device,
             "command": command,
-            "list_all": list_all
+            "list_all": list_all,
         }
-        
+
         # List all commands for platform
         if list_all:
             commands = self.manager.get_commands_for_platform(resolved_platform)
-            
+
             if not commands:
                 return ToolOutput(
                     source="cli_template",
-                        device=device or "platform",
-                    data=[{
-                        "status": "NO_TEMPLATES",
-                        "platform": resolved_platform,
-                        "message": f"No templates found for platform: {resolved_platform}",
-                        "hint": "Check platform identifier (e.g., cisco_ios, cisco_iosxr)"
-                    }],
+                    device=device or "platform",
+                    data=[
+                        {
+                            "status": "NO_TEMPLATES",
+                            "platform": resolved_platform,
+                            "message": f"No templates found for platform: {resolved_platform}",
+                            "hint": "Check platform identifier (e.g., cisco_ios, cisco_iosxr)",
+                        }
+                    ],
                     metadata=metadata,
-                    error=f"No templates found for platform: {resolved_platform}"
+                    error=f"No templates found for platform: {resolved_platform}",
                 )
-            
+
             # Format results
             results = []
             for cmd, template_path, is_empty in commands:
-                results.append({
-                    "command": cmd,
-                    "template": template_path.name if template_path else None,
-                    "parsed": not is_empty,  # True if template has parsing rules
-                    "path": str(template_path) if template_path else None
-                })
-            
+                results.append(
+                    {
+                        "command": cmd,
+                        "template": template_path.name if template_path else None,
+                        "parsed": not is_empty,  # True if template has parsing rules
+                        "path": str(template_path) if template_path else None,
+                    }
+                )
+
             return ToolOutput(
                 source="cli_template",
-                    device=device or "platform",
+                device=device or "platform",
                 data=results,
-                metadata={**metadata, "total_commands": len(results)}
+                metadata={**metadata, "total_commands": len(results)},
             )
-        
+
         # Lookup specific command
         if command:
             # Check blacklist first
             if self.manager.blacklist.is_blocked(command):
                 return ToolOutput(
                     source="cli_template",
-                        device=device or "platform",
-                    data=[{
-                        "command": command,
-                        "platform": resolved_platform,
-                        "available": False,
-                        "blacklisted": True,
-                        "message": f"Command '{command}' is blacklisted for safety",
-                        "hint": "Use alternative diagnostic commands instead"
-                    }],
+                    device=device or "platform",
+                    data=[
+                        {
+                            "command": command,
+                            "platform": resolved_platform,
+                            "available": False,
+                            "blacklisted": True,
+                            "message": f"Command '{command}' is blacklisted for safety",
+                            "hint": "Use alternative diagnostic commands instead",
+                        }
+                    ],
                     metadata=metadata,
-                    error=f"Command '{command}' is blacklisted"
+                    error=f"Command '{command}' is blacklisted",
                 )
-            
+
             # Lookup template
             template_info = self.manager.get_command_template(resolved_platform, command)
-            
+
             if template_info is None:
                 return ToolOutput(
                     source="cli_template",
-                        device=device or "platform",
-                    data=[{
-                        "command": command,
-                        "platform": resolved_platform,
-                        "available": False,
-                        "message": f"No template found for '{command}' on {resolved_platform}",
-                        "hint": "Command may still be executable, but output will be raw text"
-                    }],
-                    metadata=metadata
+                    device=device or "platform",
+                    data=[
+                        {
+                            "command": command,
+                            "platform": resolved_platform,
+                            "available": False,
+                            "message": f"No template found for '{command}' on {resolved_platform}",
+                            "hint": "Command may still be executable, but output will be raw text",
+                        }
+                    ],
+                    metadata=metadata,
                 )
-            
+
             template_path, is_empty = template_info
-            
+
             return ToolOutput(
                 source="cli_template",
-                    device=device or "platform",
-                data=[{
-                    "command": command,
-                    "platform": resolved_platform,
-                    "available": True,
-                    "template": template_path.name,
-                    "parsed": not is_empty,
-                    "path": str(template_path),
-                    "blacklisted": False
-                }],
-                metadata=metadata
+                device=device or "platform",
+                data=[
+                    {
+                        "command": command,
+                        "platform": resolved_platform,
+                        "available": True,
+                        "template": template_path.name,
+                        "parsed": not is_empty,
+                        "path": str(template_path),
+                        "blacklisted": False,
+                    }
+                ],
+                metadata=metadata,
             )
-        
+
         # No command specified and list_all=False
         return ToolOutput(
             source="cli_template",
-                device=device or "platform",
-            data=[{
-                "status": "PARAM_ERROR",
-                "message": "Must specify either 'command' or 'list_all=True'",
-                "hint": "Use list_all=True to see all available commands"
-            }],
+            device=device or "platform",
+            data=[
+                {
+                    "status": "PARAM_ERROR",
+                    "message": "Must specify either 'command' or 'list_all=True'",
+                    "hint": "Use list_all=True to see all available commands",
+                }
+            ],
             metadata=metadata,
-            error="Missing required parameter: command or list_all"
+            error="Missing required parameter: command or list_all",
         )
 
 

@@ -7,7 +7,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def generate_suzieq_config():
+def generate_suzieq_config() -> None:
     """Generate SuzieQ configuration and inventory from environment variables."""
     # Use the data directory from docker-compose volume mount
     config_dir = Path("data/generated_configs")
@@ -58,18 +58,17 @@ def generate_suzieq_config():
     # Generate inventory.yml with actual env values (not placeholders)
     # SuzieQ doesn't support ${VAR} substitution except for password: env:VAR
     inventory_path = config_dir / "inventory.yml"
-    
+
     # Get environment variables - REQUIRED, no defaults for security
     netbox_url = os.getenv("NETBOX_URL")
     netbox_token = os.getenv("NETBOX_TOKEN")
     device_username = os.getenv("DEVICE_USERNAME")
     netbox_tag = os.getenv("NETBOX_DEVICE_TAG", "olav-managed")
-    
+
     if not all([netbox_url, netbox_token, device_username]):
-        raise ValueError(
-            "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
-        )
-    
+        msg = "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
+        raise ValueError(msg)
+
     inventory_config = {
         "sources": [
             {
@@ -111,7 +110,7 @@ def generate_suzieq_config():
     logger.info(f"Generated SuzieQ inventory at {inventory_path}")
 
 
-def generate_nornir_config():
+def generate_nornir_config() -> None:
     """Generate Nornir configuration from environment variables."""
     # Also use generated_configs directory (same as SuzieQ)
     config_dir = Path("data/generated_configs")
@@ -123,11 +122,10 @@ def generate_nornir_config():
     device_username = os.getenv("DEVICE_USERNAME")
     netbox_tag = os.getenv("NETBOX_DEVICE_TAG", "olav-managed")
     num_workers = int(os.getenv("NORNIR_NUM_WORKERS", "20"))
-    
+
     if not all([netbox_url, netbox_token, device_username]):
-        raise ValueError(
-            "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
-        )
+        msg = "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
+        raise ValueError(msg)
 
     # Generate nornir_config.yml with placeholders (actual substitution in Python code)
     config_path = config_dir / "nornir_config.yml"
@@ -168,6 +166,7 @@ def generate_nornir_config():
         yaml.dump(nornir_config, f, default_flow_style=False, sort_keys=False)
 
     logger.info(f"Generated Nornir config at {config_path}")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

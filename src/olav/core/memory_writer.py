@@ -1,8 +1,7 @@
 """Memory writer for capturing successful execution paths to episodic memory."""
 
 import logging
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from olav.core.memory import OpenSearchMemory
@@ -13,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 class MemoryWriter:
     """Captures successful strategy executions to episodic memory for future RAG retrieval.
-    
+
     This component:
     1. Monitors strategy execution results
     2. Captures successful intent→tool→result patterns
     3. Stores to olav-episodic-memory index for learning
     4. Enables Fast Path optimization through historical patterns
-    
+
     Usage:
         writer = MemoryWriter()
         await writer.capture_success(
@@ -31,22 +30,22 @@ class MemoryWriter:
             execution_time_ms=234
         )
     """
-    
+
     def __init__(self, memory: OpenSearchMemory | None = None) -> None:
         """Initialize memory writer.
-        
+
         Args:
             memory: OpenSearch memory instance. If None, creates new instance.
         """
         self._memory = memory
-    
+
     @property
     def memory(self) -> OpenSearchMemory:
         """Lazy-load OpenSearch memory to avoid connection at import."""
         if self._memory is None:
             self._memory = OpenSearchMemory()
         return self._memory
-    
+
     async def capture_success(
         self,
         intent: str,
@@ -57,7 +56,7 @@ class MemoryWriter:
         execution_time_ms: int | None = None,
     ) -> None:
         """Capture successful execution to episodic memory.
-        
+
         Args:
             intent: User intent in natural language (e.g., "查询 R1 BGP 状态")
             tool_used: Tool name that executed successfully
@@ -65,7 +64,7 @@ class MemoryWriter:
             tool_output: Tool execution result (must have success=True via no error)
             strategy_used: Strategy that executed (fast_path, deep_path, batch_path)
             execution_time_ms: Execution time in milliseconds
-        
+
         Returns:
             None. Logs errors but doesn't raise to avoid breaking main workflow.
         """
@@ -73,17 +72,17 @@ class MemoryWriter:
         if tool_output.error:
             logger.debug(f"Skipping memory capture for failed execution: {intent}")
             return
-        
+
         try:
             # Build XPath representation based on tool type
             xpath = self._build_xpath_representation(tool_used, parameters)
-            
+
             # Extract device info from tool output
             device_type = tool_output.device if tool_output.device != "unknown" else "router"
-            
+
             # Generate result summary from tool output
             result_summary = self._generate_result_summary(tool_output)
-            
+
             # Store to episodic memory
             await self.memory.store_episodic_memory(
                 intent=intent,
@@ -96,16 +95,16 @@ class MemoryWriter:
                     "result_summary": result_summary,
                     "strategy_used": strategy_used,
                     "execution_time_ms": execution_time_ms or 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
-            
+
             logger.info(f"✓ Captured episodic memory: {intent} → {tool_used}")
-        
+
         except Exception as e:
             # Log error but don't propagate to avoid breaking main workflow
             logger.error(f"Failed to capture episodic memory for '{intent}': {e}")
-    
+
     async def capture_failure(
         self,
         intent: str,
@@ -115,7 +114,7 @@ class MemoryWriter:
         strategy_used: str,
     ) -> None:
         """Capture failed execution for debugging (optional).
-        
+
         Args:
             intent: User intent
             tool_used: Tool that failed
@@ -125,7 +124,7 @@ class MemoryWriter:
         """
         try:
             xpath = self._build_xpath_representation(tool_used, parameters)
-            
+
             await self.memory.store_episodic_memory(
                 intent=intent,
                 xpath=xpath,
@@ -135,26 +134,26 @@ class MemoryWriter:
                     "parameters": parameters,
                     "error": error,
                     "strategy_used": strategy_used,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
-            
+
             logger.debug(f"Captured failed execution: {intent} → {error}")
-        
+
         except Exception as e:
             logger.error(f"Failed to capture failure memory: {e}")
-    
+
     def _build_xpath_representation(self, tool_used: str, parameters: dict[str, Any]) -> str:
         """Build XPath-like representation for storage.
-        
+
         For SuzieQ tools: "table=bgp, hostname=R1"
         For NETCONF tools: actual OpenConfig XPath
         For CLI tools: "command: show bgp summary"
-        
+
         Args:
             tool_used: Tool name
             parameters: Tool parameters
-        
+
         Returns:
             XPath-like string representation
         """
@@ -165,34 +164,33 @@ class MemoryWriter:
                 if key in parameters:
                     parts.append(f"{key}={parameters[key]}")
             return ", ".join(parts) if parts else str(parameters)
-        
-        elif tool_used == "netconf_execute":
+
+        if tool_used == "netconf_execute":
             # NETCONF: Use xpath parameter directly
             return parameters.get("xpath", str(parameters))
-        
-        elif tool_used == "cli_execute":
+
+        if tool_used == "cli_execute":
             # CLI: Use command
             return f"command: {parameters.get('command', str(parameters))}"
-        
-        else:
-            # Generic: JSON representation
-            return str(parameters)
-    
+
+        # Generic: JSON representation
+        return str(parameters)
+
     def _generate_result_summary(self, tool_output: ToolOutput) -> str:
         """Generate brief summary from tool output.
-        
+
         Args:
             tool_output: Tool execution result
-        
+
         Returns:
             Human-readable summary string
         """
         if not tool_output.data:
             return "No data returned"
-        
+
         # Count records
         record_count = len(tool_output.data)
-        
+
         # Try to extract meaningful fields
         if record_count == 1:
             sample = tool_output.data[0]
@@ -200,9 +198,8 @@ class MemoryWriter:
             fields = list(sample.keys())[:3]
             values = [str(sample[f]) for f in fields]
             return f"1 record: {', '.join(values)}"
-        
-        else:
-            return f"{record_count} records retrieved"
+
+        return f"{record_count} records retrieved"
 
 
 # Singleton instance for easy import
@@ -211,7 +208,7 @@ _memory_writer_instance: MemoryWriter | None = None
 
 def get_memory_writer() -> MemoryWriter:
     """Get singleton MemoryWriter instance.
-    
+
     Returns:
         Singleton MemoryWriter instance
     """

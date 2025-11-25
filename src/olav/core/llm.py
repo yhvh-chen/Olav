@@ -11,10 +11,10 @@ config_path = Path(__file__).parent.parent.parent.parent / "config"
 if str(config_path) not in sys.path:
     sys.path.insert(0, str(config_path.parent))
 
+from config.settings import LLMConfig
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_openai.chat_models.base import _convert_dict_to_message
 
-from config.settings import LLMConfig
 from olav.core.settings import settings as env_settings
 
 logger = logging.getLogger(__name__)
@@ -22,17 +22,17 @@ logger = logging.getLogger(__name__)
 
 def _fixed_convert_dict_to_message(message_dict: dict) -> Any:
     """Fixed version of _convert_dict_to_message that handles JSON string arguments.
-    
+
     OpenRouter/DeepSeek returns tool_calls with arguments as JSON strings.
-    
+
     CRITICAL INSIGHT: We CANNOT pre-parse arguments from str to dict, because
     parse_tool_call() will call json.loads() on it, causing TypeError.
-    
+
     Strategy: Let parse_tool_call handle JSON parsing. Only fix invalid_tool_calls.
     """
     # DO NOT modify tool_calls - let parse_tool_call handle it
     # (Previous code pre-parsed arguments, which broke parse_tool_call's json.loads)
-    
+
     # Fix invalid_tool_calls: args from dict → str (if needed)
     invalid_tool_calls = message_dict.get("invalid_tool_calls")
     if invalid_tool_calls:  # Check if not None and not empty
@@ -49,26 +49,28 @@ def _fixed_convert_dict_to_message(message_dict: dict) -> Any:
                         logger.warning(f"Failed to serialize invalid_tool_call[{i}] args: {e}")
                         tool_call["args"] = ""
                 elif not isinstance(args, str):
-                    logger.warning(f"invalid_tool_call[{i}] args has unexpected type {type(args)}, converting to empty str")
+                    logger.warning(
+                        f"invalid_tool_call[{i}] args has unexpected type {type(args)}, converting to empty str"
+                    )
                     tool_call["args"] = ""
-    
+
     # Call original converter
     return _convert_dict_to_message(message_dict)
 
 
-
 class FixedChatOpenAI(ChatOpenAI):
     """ChatOpenAI with fixed tool call parsing for OpenRouter/DeepSeek.
-    
+
     This class patches the message converter to handle JSON string arguments.
     """
-    
+
     def _create_chat_result(self, response: Any, *args, **kwargs) -> Any:
         """Override to use fixed message converter."""
         # Temporarily patch the converter
         import langchain_openai.chat_models.base as base_module
+
         original_converter = base_module._convert_dict_to_message
-        
+
         try:
             # Use our fixed converter
             base_module._convert_dict_to_message = _fixed_convert_dict_to_message
@@ -95,7 +97,12 @@ class LLMFactory:
             return
         if env_settings.llm_provider == "openai":
             import os
-            if not os.getenv("OPENAI_API_KEY") and env_settings.llm_api_key and not env_settings.llm_api_key.startswith("sk-or-"):
+
+            if (
+                not os.getenv("OPENAI_API_KEY")
+                and env_settings.llm_api_key
+                and not env_settings.llm_api_key.startswith("sk-or-")
+            ):
                 os.environ["OPENAI_API_KEY"] = env_settings.llm_api_key
                 logger.info("Mapped LLM_API_KEY to OPENAI_API_KEY for OpenAI provider")
         cls._openai_env_mapped = True
@@ -125,15 +132,15 @@ class LLMFactory:
             # Ensure environment variable mapping (non-OpenRouter keys only)
             LLMFactory._ensure_openai_env()
             model_kwargs = {}
-            
+
             if json_mode:
                 model_kwargs["response_format"] = {"type": "json_object"}
-            
+
             # DeepSeek via OpenRouter compatibility fixes:
             # 1. Use FixedChatOpenAI to handle JSON string arguments
             # 2. model_kwargs["parallel_tool_calls"]=False: Sequential execution (avoid warning)
             model_kwargs["parallel_tool_calls"] = False  # Sequential tool execution
-            
+
             return FixedChatOpenAI(
                 model=env_settings.llm_model_name or LLMConfig.MODEL_NAME,
                 temperature=temp,
@@ -143,7 +150,7 @@ class LLMFactory:
                 model_kwargs=model_kwargs,
                 **kwargs,
             )
-        elif env_settings.llm_provider == "ollama":
+        if env_settings.llm_provider == "ollama":
             try:
                 from langchain_ollama import ChatOllama
             except ImportError as e:
@@ -156,7 +163,7 @@ class LLMFactory:
                 format="json" if json_mode else None,
                 **kwargs,
             )
-        elif env_settings.llm_provider == "azure":
+        if env_settings.llm_provider == "azure":
             try:
                 from langchain_openai import AzureChatOpenAI
             except ImportError as e:
@@ -169,9 +176,8 @@ class LLMFactory:
                 api_key=env_settings.llm_api_key,
                 **kwargs,
             )
-        else:
-            msg = f"Unsupported LLM provider: {env_settings.llm_provider}"
-            raise ValueError(msg)
+        msg = f"Unsupported LLM provider: {env_settings.llm_provider}"
+        raise ValueError(msg)
 
     @staticmethod
     def get_embedding_model() -> OpenAIEmbeddings:
@@ -190,7 +196,7 @@ class LLMFactory:
                 api_key=env_settings.llm_api_key,
                 base_url=LLMConfig.BASE_URL,
             )
-        elif env_settings.llm_provider == "ollama":
+        if env_settings.llm_provider == "ollama":
             try:
                 from langchain_ollama import OllamaEmbeddings
             except ImportError as e:
@@ -198,11 +204,10 @@ class LLMFactory:
                 raise ImportError(msg) from e
 
             return OllamaEmbeddings(model="nomic-embed-text")
-        elif env_settings.llm_provider == "azure":
+        if env_settings.llm_provider == "azure":
             return OpenAIEmbeddings(
                 model=LLMConfig.EMBEDDING_MODEL,
                 api_key=env_settings.llm_api_key,
             )
-        else:
-            msg = f"Unsupported embedding provider: {env_settings.llm_provider}"
-            raise ValueError(msg)
+        msg = f"Unsupported embedding provider: {env_settings.llm_provider}"
+        raise ValueError(msg)

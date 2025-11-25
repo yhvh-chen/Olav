@@ -7,12 +7,11 @@ Provides:
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi import Request
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -27,23 +26,29 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "60"))
 # Password hashing - using pbkdf2_sha256 instead of bcrypt (avoids 72-byte limit issues)
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
+
 class CustomHTTPBearer(HTTPBearer):
     """HTTPBearer subclass that maps missing credentials (default 403) to 401.
 
     FastAPI's default HTTPBearer raises 403 for missing Authorization header.
     Tests and conventional API semantics expect 401 Unauthorized instead.
     """
+
     async def __call__(self, request: Request) -> HTTPAuthorizationCredentials:  # type: ignore[override]
         try:
             return await super().__call__(request)
         except HTTPException as exc:  # Map 'Not authenticated' 403 to 401
-            if exc.status_code == status.HTTP_403_FORBIDDEN and str(exc.detail).lower() == "not authenticated":
+            if (
+                exc.status_code == status.HTTP_403_FORBIDDEN
+                and str(exc.detail).lower() == "not authenticated"
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Not authenticated",
-                    headers={"WWW-Authenticate": "Bearer"}
+                    headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
             raise
+
 
 # HTTP Bearer token scheme (customized)
 security = CustomHTTPBearer()
@@ -145,9 +150,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     """Generate JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt: str = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -176,7 +181,7 @@ def decode_access_token(token: str) -> TokenData:
 # FastAPI Dependencies
 # ============================================
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> User:
     """Dependency: Extract and validate current user from JWT token."""
     token = credentials.credentials

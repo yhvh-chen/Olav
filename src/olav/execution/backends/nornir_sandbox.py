@@ -12,15 +12,14 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
 
+from config.settings import ToolConfig
 from nornir import InitNornir
 from nornir.core import Nornir
 
 from olav.core.memory import OpenSearchMemory
 from olav.core.settings import settings as env_settings
 from olav.execution.backends.protocol import ExecutionResult, SandboxBackendProtocol
-from config.settings import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -71,30 +70,30 @@ class NornirSandbox(SandboxBackendProtocol):
                     "nb_url": env_settings.netbox_url,
                     "nb_token": env_settings.netbox_token,
                     "ssl_verify": False,
-                    "filter_parameters": {
-                        "tag": ["olav-managed"]
-                    }
+                    "filter_parameters": {"tag": ["olav-managed"]},
                 },
             },
             logging={
                 "enabled": False  # Use Python logging instead
-            }
+            },
         )
-        
+
         # Set device credentials from environment (NBInventory doesn't auto-populate)
         for host in self.nr.inventory.hosts.values():
             host.username = env_settings.device_username
             host.password = env_settings.device_password
-            
+
             # Normalize NAPALM platform names (NetBox uses different conventions)
             if host.platform and host.platform.startswith("cisco_"):
                 # cisco_ios → ios, cisco_nxos → nxos, cisco_iosxr → iosxr
                 normalized = host.platform.replace("cisco_", "")
-                logger.debug(f"Normalizing platform for {host.name}: {host.platform} → {normalized}")
+                logger.debug(
+                    f"Normalizing platform for {host.name}: {host.platform} → {normalized}"
+                )
                 host.platform = normalized
-        
+
         logger.info(f"Nornir initialized with {len(self.nr.inventory.hosts)} devices from NetBox")
-        
+
         self.memory = memory or OpenSearchMemory()
         # Blacklist & privilege settings
         self.blacklist = self._load_blacklist()
@@ -111,9 +110,16 @@ class NornirSandbox(SandboxBackendProtocol):
         Can extend via COLLECTOR_BLACKLIST_FILE (line-separated, case-insensitive).
         """
         default_block = {
-            "traceroute", "trace route", "trace-route",
-            "reload", "reboot", "write erase", "erase startup-config",
-            "format", "delete flash:", "delete disk:",
+            "traceroute",
+            "trace route",
+            "trace-route",
+            "reload",
+            "reboot",
+            "write erase",
+            "erase startup-config",
+            "format",
+            "delete flash:",
+            "delete disk:",
         }
         blacklist: set[str] = set(default_block)
         fname = os.getenv("COLLECTOR_BLACKLIST_FILE", "command_blacklist.txt")
@@ -125,10 +131,10 @@ class NornirSandbox(SandboxBackendProtocol):
         for path in candidates:
             if path.exists():
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         for line in f:
                             line = line.strip().lower()
-                            if line and not line.startswith('#'):
+                            if line and not line.startswith("#"):
                                 blacklist.add(line)
                     logger.info(f"Loaded custom blacklist entries from {path}")
                     break
@@ -136,20 +142,21 @@ class NornirSandbox(SandboxBackendProtocol):
                     logger.warning(f"Failed loading blacklist from {path}: {e}")
         return blacklist
 
-    def _is_blacklisted(self, command: str) -> Optional[str]:
+    def _is_blacklisted(self, command: str) -> str | None:
         """Return matched blacklist pattern if command is blocked else None."""
         cmd = command.lower().strip()
-        normalized = cmd.replace('-', ' ')
+        normalized = cmd.replace("-", " ")
         # Match whole-line or substring containment for dangerous patterns
         for blocked in self.blacklist:
             if blocked in normalized:
                 return blocked
         return None
 
-    def _get_privilege_level(self, device: str) -> Optional[int]:
+    def _get_privilege_level(self, device: str) -> int | None:
         """Attempt to detect current privilege level using 'show privilege'."""
         try:
             from nornir_netmiko.tasks import netmiko_send_command
+
             target = self.nr.filter(name=device)
             if not target.inventory.hosts:
                 return None
@@ -172,7 +179,7 @@ class NornirSandbox(SandboxBackendProtocol):
         except Exception:
             return None
 
-    def _should_escalate(self, privilege: Optional[int]) -> bool:
+    def _should_escalate(self, privilege: int | None) -> bool:
         if privilege is None:
             return self.force_enable  # escalate if forced and unknown
         return privilege < self.min_privilege and self.force_enable
@@ -229,7 +236,7 @@ class NornirSandbox(SandboxBackendProtocol):
             Execution result with success status and output
         """
         from config.settings import AgentConfig
-        
+
         is_write = self._is_write_operation(command)
 
         # Request approval for write operations
@@ -261,7 +268,8 @@ class NornirSandbox(SandboxBackendProtocol):
                 # Nornir filter uses hostname field, not name
                 target = self.nr.filter(filter_func=lambda h: h.name == device)
                 if not target.inventory.hosts:
-                    raise ValueError(f"Device '{device}' not found in inventory")
+                    msg = f"Device '{device}' not found in inventory"
+                    raise ValueError(msg)
             else:
                 target = self.nr
 
@@ -269,7 +277,7 @@ class NornirSandbox(SandboxBackendProtocol):
             # For now, simulate NETCONF attempt to test fallback mechanism
             try:
                 from nornir_napalm.plugins.tasks import napalm_get
-                
+
                 # Attempt NETCONF operation
                 result = target.run(
                     task=napalm_get,
@@ -297,13 +305,14 @@ class NornirSandbox(SandboxBackendProtocol):
                     output=str(output),
                     metadata={"is_write": is_write, "device": device},
                 )
-                
+
             except ImportError:
                 # nornir-napalm not installed - return specific error
-                raise ConnectionRefusedError(
+                msg = (
                     "NETCONF not available: nornir-napalm plugin not installed. "
                     "Install with: uv add nornir-napalm"
                 )
+                raise ConnectionRefusedError(msg)
 
         except ConnectionRefusedError as e:
             # 🔑 Return specific error to trigger CLI fallback
@@ -317,7 +326,7 @@ class NornirSandbox(SandboxBackendProtocol):
             return ExecutionResult(
                 success=False,
                 output="",
-                error=f"NETCONF connection refused: {str(e)}. Device may not support NETCONF on port 830.",
+                error=f"NETCONF connection refused: {e!s}. Device may not support NETCONF on port 830.",
                 metadata={"device": device, "should_fallback_to_cli": True},
             )
         except Exception as e:
@@ -400,7 +409,8 @@ class NornirSandbox(SandboxBackendProtocol):
 
             target = self.nr.filter(name=device)
             if not target.inventory.hosts:
-                raise ValueError(f"Device '{device}' not found in inventory")
+                msg = f"Device '{device}' not found in inventory"
+                raise ValueError(msg)
 
             result = target.run(
                 task=netmiko_send_command,
@@ -502,13 +512,15 @@ class NornirSandbox(SandboxBackendProtocol):
                 logger.info(f"Commands edited by user: {commands}")
 
         try:
-            from nornir_netmiko.tasks import netmiko_send_config, netmiko_send_command
             import difflib
+
+            from nornir_netmiko.tasks import netmiko_send_command, netmiko_send_config
 
             # Filter to specific device
             target = self.nr.filter(name=device)
             if not target.inventory.hosts:
-                raise ValueError(f"Device '{device}' not found in inventory")
+                msg = f"Device '{device}' not found in inventory"
+                raise ValueError(msg)
 
             capture_diff = os.getenv("COLLECTOR_CAPTURE_DIFF", "1") == "1"
 
@@ -554,7 +566,9 @@ class NornirSandbox(SandboxBackendProtocol):
                             diff_lines = difflib.unified_diff(
                                 before_cfg.splitlines(),
                                 after_cfg.splitlines(),
-                                fromfile="before", tofile="after", lineterm=""
+                                fromfile="before",
+                                tofile="after",
+                                lineterm="",
                             )
                             diff_text = "\n".join(diff_lines)
                 except Exception as e:

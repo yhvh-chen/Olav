@@ -54,52 +54,80 @@ def main() -> None:
     if not schema_dir.exists():
         logger.warning(f"Schema directory not found: {schema_dir}, using sample data")
         schema_dir = None
-    
+
     schemas = []
     if schema_dir:
         for avsc_file in schema_dir.glob("*.avsc"):
             try:
-                with open(avsc_file, "r", encoding="utf-8") as f:
+                with open(avsc_file, encoding="utf-8") as f:
                     avro_schema = json.load(f)
-                
+
                 table_name = avsc_file.stem  # filename without .avsc
                 fields = [field["name"] for field in avro_schema.get("fields", [])]
-                
+
                 # Extract description from Avro doc field
                 description = avro_schema.get("doc", f"{table_name} table")
-                
-                schemas.append({
-                    "table": table_name,
-                    "fields": fields,
-                    "description": description,
-                    "methods": ["get", "summarize", "unique", "aver"],
-                })
+
+                schemas.append(
+                    {
+                        "table": table_name,
+                        "fields": fields,
+                        "description": description,
+                        "methods": ["get", "summarize", "unique", "aver"],
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to parse {avsc_file}: {e}")
-    
+
     # Fallback to sample data if parsing failed
     if not schemas:
         schemas = [
             {
                 "table": "bgp",
-                "fields": ["namespace", "hostname", "vrf", "peer", "asn", "state", "peerAsn", "afi"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "peer",
+                    "asn",
+                    "state",
+                    "peerAsn",
+                    "afi",
+                ],
                 "description": "BGP protocol information including peer state and configuration",
                 "methods": ["get", "summarize", "unique", "aver"],
             },
             {
                 "table": "interfaces",
-                "fields": ["namespace", "hostname", "ifname", "state", "adminState", "mtu", "speed", "type"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "ifname",
+                    "state",
+                    "adminState",
+                    "mtu",
+                    "speed",
+                    "type",
+                ],
                 "description": "Interface information including operational and admin state",
                 "methods": ["get", "summarize", "unique", "aver"],
             },
             {
                 "table": "routes",
-                "fields": ["namespace", "hostname", "vrf", "prefix", "nexthopIp", "protocol", "metric"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "prefix",
+                    "nexthopIp",
+                    "protocol",
+                    "metric",
+                ],
                 "description": "Routing table entries with next-hop and protocol information",
                 "methods": ["get", "summarize", "unique", "aver"],
             },
         ]
-    
+
     for schema in schemas:
         client.index(index=index_name, body=schema)
 

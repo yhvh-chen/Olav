@@ -25,7 +25,6 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import httpx
 from pydantic import BaseModel
@@ -67,7 +66,7 @@ class LoginResponse(BaseModel):
 class CredentialsManager:
     """Manage stored authentication credentials."""
 
-    def __init__(self, credentials_path: Path | None = None):
+    def __init__(self, credentials_path: Path | None = None) -> None:
         """
         Initialize credentials manager.
 
@@ -104,7 +103,7 @@ class CredentialsManager:
                         f"insecure permissions. Run: chmod 600 {self.credentials_path}[/yellow]"
                     )
 
-            with open(self.credentials_path, "r", encoding="utf-8") as f:
+            with open(self.credentials_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             creds = Credentials(**data)
@@ -173,7 +172,9 @@ class CredentialsManager:
 class AuthClient:
     """Client for authentication operations."""
 
-    def __init__(self, server_url: str, credentials_manager: CredentialsManager | None = None):
+    def __init__(
+        self, server_url: str, credentials_manager: CredentialsManager | None = None
+    ) -> None:
         """
         Initialize auth client.
 
@@ -234,11 +235,13 @@ class AuthClient:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                raise ValueError("Invalid username or password") from e
+                msg = "Invalid username or password"
+                raise ValueError(msg) from e
             raise
 
         except httpx.RequestError as e:
-            raise ConnectionError(f"Cannot connect to server: {self.server_url}") from e
+            msg = f"Cannot connect to server: {self.server_url}"
+            raise ConnectionError(msg) from e
 
     async def logout(self) -> None:
         """
@@ -248,7 +251,9 @@ class AuthClient:
         """
         self.credentials_manager.delete()
         self.console.print("[green]✅ Successfully logged out[/green]")
-        self.console.print(f"   Credentials removed from {self.credentials_manager.credentials_path}")
+        self.console.print(
+            f"   Credentials removed from {self.credentials_manager.credentials_path}"
+        )
 
     async def refresh_token_if_needed(self, credentials: Credentials) -> Credentials:
         """
@@ -312,8 +317,7 @@ async def login_interactive(server_url: str | None = None) -> Credentials:
     auth_client = AuthClient(server_url)
 
     try:
-        credentials = await auth_client.login(username, password)
-        return credentials
+        return await auth_client.login(username, password)
 
     except ValueError as e:
         console.print(f"[red]❌ Authentication failed: {e}[/red]")

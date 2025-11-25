@@ -1,0 +1,23 @@
+{
+  "tool": "suzieq_query",
+  "parameters": {
+    "table": "bgp",
+    "hostname": "R1"
+  },
+  "cached_at": 1764058254.018823,
+  "cache_ttl": 300,
+  "tool_output": {
+    "source": "suzieq_query",
+    "device": "R1",
+    "data": [
+      {
+        "hostname": "R1",
+        "state": "Established"
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "elapsed_ms": 0
+    }
+  }
+}

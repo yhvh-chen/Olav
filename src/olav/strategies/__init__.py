@@ -13,16 +13,16 @@ Each strategy optimizes for different query characteristics:
 - Batch: High volume, compliance checks (zero-hallucination logic)
 """
 
-from .fast_path import FastPathStrategy
-from .deep_path import DeepPathStrategy
 from .batch_path import BatchPathStrategy
-from .selector import StrategySelector, StrategyDecision, create_strategy_selector
+from .deep_path import DeepPathStrategy
+from .fast_path import FastPathStrategy
+from .selector import StrategyDecision, StrategySelector, create_strategy_selector
 
 __all__ = [
-    "FastPathStrategy",
-    "DeepPathStrategy",
     "BatchPathStrategy",
-    "StrategySelector",
+    "DeepPathStrategy",
+    "FastPathStrategy",
     "StrategyDecision",
+    "StrategySelector",
     "create_strategy_selector",
 ]

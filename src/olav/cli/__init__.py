@@ -10,15 +10,15 @@ from .auth import (
     logout_interactive,
     whoami_interactive,
 )
-from .client import OLAVClient, ExecutionResult, ServerConfig, create_client
+from .client import ExecutionResult, OLAVClient, ServerConfig, create_client
 
 __all__ = [
-    "OLAVClient",
-    "ServerConfig",
-    "ExecutionResult",
-    "create_client",
     "AuthClient",
     "CredentialsManager",
+    "ExecutionResult",
+    "OLAVClient",
+    "ServerConfig",
+    "create_client",
     "login_interactive",
     "logout_interactive",
     "whoami_interactive",

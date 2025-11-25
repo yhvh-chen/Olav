@@ -1,13 +1,14 @@
 """Natural language time range parsing tool."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Tuple
+from datetime import UTC, datetime, timedelta
+
 from langchain_core.tools import tool
 
 
 @tool
-def parse_time_range(natural_text: str, now_iso: bool = True) -> Tuple[str, str]:
+def parse_time_range(natural_text: str, now_iso: bool = True) -> tuple[str, str]:
     """Convert natural language time description into an ISO8601 time range.
 
     Supported phrases (simplified):
@@ -21,7 +22,7 @@ def parse_time_range(natural_text: str, now_iso: bool = True) -> Tuple[str, str]
     Returns:
         (start_iso, end_iso)
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     text = natural_text.lower().strip()
 
     start: datetime

@@ -1,6 +1,7 @@
 """OpenSearch memory and vector store wrapper."""
 
 import logging
+from datetime import UTC
 from typing import Any
 
 from opensearchpy import OpenSearch
@@ -100,14 +101,14 @@ class OpenSearchMemory:
             success: Whether operation succeeded
             context: Additional context (device, values, etc.)
         """
-        from datetime import datetime, timezone
-        
+        from datetime import datetime
+
         doc = {
             "intent": intent,
             "xpath": xpath,
             "success": success,
             **context,  # Flatten context fields into document
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         try:

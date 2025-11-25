@@ -1,7 +1,7 @@
 """Initialize olav-episodic-memory index for historical success tracking."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from opensearchpy import OpenSearch
 
@@ -92,7 +92,7 @@ def main() -> None:
             "tool_used": "suzieq_query",
             "device_type": "router",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 234,
             "parameters": {"table": "bgp", "hostname": "R1", "method": "get"},
             "result_summary": "Found 2 BGP neighbors in Established state",
@@ -104,7 +104,7 @@ def main() -> None:
             "tool_used": "suzieq_query",
             "device_type": "router",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 456,
             "parameters": {"table": "interfaces", "method": "summarize"},
             "result_summary": "Total 24 interfaces, 20 up, 4 down",
@@ -116,7 +116,7 @@ def main() -> None:
             "tool_used": "netconf_execute",
             "device_type": "juniper",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 1823,
             "parameters": {
                 "operation": "edit-config",
@@ -132,7 +132,7 @@ def main() -> None:
             "tool_used": "suzieq_query",
             "device_type": "router",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 312,
             "parameters": {"table": "ospf", "method": "get"},
             "result_summary": "3 OSPF neighbors in Full state",
@@ -144,7 +144,7 @@ def main() -> None:
             "tool_used": "suzieq_query",
             "device_type": "router",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 892,
             "parameters": {"table": "bgp", "method": "summarize"},
             "result_summary": "Checked 15 routers, 142 BGP sessions total",
@@ -156,7 +156,7 @@ def main() -> None:
             "tool_used": "suzieq_query",
             "device_type": "router",
             "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_time_ms": 178,
             "parameters": {
                 "table": "interfaces",

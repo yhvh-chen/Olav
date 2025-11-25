@@ -105,6 +105,11 @@ ignore = [
     "ANN102",  # Missing type annotation for cls
     "ANN401",  # Dynamically typed expressions (Any) are disallowed
     "S101",    # Use of assert detected (needed for tests)
+    "RUF001",  # Chinese full-width punctuation (intentional in Chinese strings)
+    "RUF002",  # Chinese full-width punctuation in docstrings
+    "RUF003",  # Chinese full-width punctuation in comments
+    "E501",    # Line too long (handled by formatter where possible)
+    "PLC0415", # Import outside toplevel (needed for conditional imports)
 ]
 
 [tool.ruff.lint.per-file-ignores]

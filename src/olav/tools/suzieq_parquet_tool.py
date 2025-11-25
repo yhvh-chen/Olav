@@ -11,19 +11,35 @@ from typing import Any, Literal
 import pandas as pd
 from langchain_core.tools import tool
 
-from olav.core.settings import settings
-
 logger = logging.getLogger(__name__)
 
 
 # SuzieQ schema metadata (table → fields mapping)
 SUZIEQ_SCHEMA = {
     "bgp": {
-        "fields": ["namespace", "hostname", "vrf", "peer", "asn", "peerAsn", "state", "peerHostname"],
+        "fields": [
+            "namespace",
+            "hostname",
+            "vrf",
+            "peer",
+            "asn",
+            "peerAsn",
+            "state",
+            "peerHostname",
+        ],
         "description": "BGP protocol information",
     },
     "interfaces": {
-        "fields": ["namespace", "hostname", "ifname", "state", "adminState", "type", "mtu", "speed"],
+        "fields": [
+            "namespace",
+            "hostname",
+            "ifname",
+            "state",
+            "adminState",
+            "type",
+            "mtu",
+            "speed",
+        ],
         "description": "Network interface status and configuration",
     },
     "routes": {
@@ -95,9 +111,12 @@ async def suzieq_schema_search(query: str) -> dict[str, Any]:
     # Simple keyword matching
     keywords = query.lower().split()
     matching_tables = [
-        table for table in SUZIEQ_SCHEMA
-        if any(keyword in table.lower() or keyword in SUZIEQ_SCHEMA[table]["description"].lower() 
-               for keyword in keywords)
+        table
+        for table in SUZIEQ_SCHEMA
+        if any(
+            keyword in table.lower() or keyword in SUZIEQ_SCHEMA[table]["description"].lower()
+            for keyword in keywords
+        )
     ]
 
     if not matching_tables:
@@ -127,7 +146,7 @@ async def suzieq_query(
 
     This tool provides access to historical network state collected by SuzieQ.
     Use this for trend analysis, historical comparisons, and aggregated statistics.
-    
+
     IMPORTANT: By default, only queries data from the last 24 hours to avoid stale/test data pollution.
     Set max_age_hours=0 to query all historical data (use with caution).
 
@@ -157,11 +176,11 @@ async def suzieq_query(
         }
     """
     parquet_dir = _get_parquet_dir()
-    
+
     # Combine explicit filters dict and kwargs
     query_filters = filters.copy() if filters else {}
     query_filters.update(kwargs)
-    
+
     # Check if table exists in schema
     if table not in SUZIEQ_SCHEMA:
         return {
@@ -221,6 +240,7 @@ async def suzieq_query(
         # Use pyarrow dataset API for better Hive partition support
         try:
             import pyarrow.dataset as ds
+
             dataset = ds.dataset(str(table_dir), format="parquet", partitioning="hive")
             df = dataset.to_table().to_pandas()
         except Exception:
@@ -232,6 +252,7 @@ async def suzieq_query(
         # Default: only last 24 hours (configurable via max_age_hours parameter)
         if max_age_hours > 0 and "timestamp" in df.columns:
             import time
+
             current_time_ms = int(time.time() * 1000)
             cutoff_time_ms = current_time_ms - (max_age_hours * 3600 * 1000)
             df = df[df["timestamp"] >= cutoff_time_ms]
@@ -240,11 +261,11 @@ async def suzieq_query(
         # Apply filters
         if hostname:
             df = df[df["hostname"] == hostname]
-        
+
         # Apply namespace filter if provided
         if namespace and namespace != "all" and "namespace" in df.columns:
             df = df[df["namespace"] == namespace]
-        
+
         for field, value in query_filters.items():
             if field in df.columns:
                 df = df[df[field] == value]
@@ -254,10 +275,10 @@ async def suzieq_query(
         # Priority: active=True records first
         if "active" in df.columns:
             # Filter to only active records first (current state)
-            df_active = df[df["active"] == True]
+            df_active = df[df["active"]]
             if len(df_active) > 0:
                 df = df_active
-        
+
         # Deduplicate based on table type (take latest timestamp)
         if "timestamp" in df.columns:
             # Define unique key columns by table
@@ -268,12 +289,14 @@ async def suzieq_query(
                 "lldp": ["hostname", "ifname"],
                 "device": ["hostname"],
             }
-            
+
             key_cols = unique_keys.get(table, ["hostname"])  # Fallback to hostname only
-            
+
             # Keep only latest record for each unique entity
             if all(col in df.columns for col in key_cols):
-                df = df.sort_values("timestamp", ascending=False).drop_duplicates(subset=key_cols, keep="first")
+                df = df.sort_values("timestamp", ascending=False).drop_duplicates(
+                    subset=key_cols, keep="first"
+                )
 
         # Execute method
         if method == "get":
@@ -288,11 +311,11 @@ async def suzieq_query(
                 "data_type": "deduplicated_current_state",
                 "note": "SuzieQ stores time-series data. This result shows only the latest state for each unique entity (active records prioritized).",
             }
-        
-        elif method == "summarize":
+
+        if method == "summarize":
             # Basic summarization - count by state/status fields
             summary = {}
-            
+
             # Common summary patterns
             if "state" in df.columns:
                 summary["state_counts"] = df["state"].value_counts().to_dict()
@@ -300,24 +323,23 @@ async def suzieq_query(
                 summary["admin_state_counts"] = df["adminState"].value_counts().to_dict()
             if "type" in df.columns:
                 summary["type_counts"] = df["type"].value_counts().to_dict()
-            
+
             summary["total_records"] = len(df)
             summary["unique_hosts"] = df["hostname"].nunique() if "hostname" in df.columns else 0
-            
+
             return {
                 "data": [summary],
                 "count": 1,
                 "columns": list(summary.keys()),
                 "table": table,
             }
-        
-        else:
-            return {"error": f"Unsupported method '{method}'. Use 'get' or 'summarize'."}
+
+        return {"error": f"Unsupported method '{method}'. Use 'get' or 'summarize'."}
 
     except Exception as e:
         logger.error(f"Error querying SuzieQ parquet: {e}", exc_info=True)
         return {
-            "error": f"Failed to query parquet: {str(e)}",
+            "error": f"Failed to query parquet: {e!s}",
             "table": table,
             "method": method,
         }

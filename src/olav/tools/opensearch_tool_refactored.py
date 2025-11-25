@@ -8,25 +8,24 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
 
 from olav.core.memory import OpenSearchMemory
 from olav.tools.adapters import OpenSearchAdapter
-from olav.tools.base import BaseTool, ToolOutput, ToolRegistry
+from olav.tools.base import BaseTool, ToolOutput
 
 logger = logging.getLogger(__name__)
 
 
 class OpenConfigSchemaTool(BaseTool):
     """Search OpenConfig YANG schema for XPaths matching user intent.
-    
+
     Uses OpenSearch to query the openconfig-schema index built from YANG models.
     Returns matching XPaths with descriptions, types, and examples.
     """
-    
+
     def __init__(self, memory: OpenSearchMemory | None = None) -> None:
         """Initialize OpenConfig schema search tool.
-        
+
         Args:
             memory: OpenSearch memory instance. If None, creates new instance.
         """
@@ -38,24 +37,24 @@ class OpenConfigSchemaTool(BaseTool):
         )
         self._memory = memory
         self._adapter = OpenSearchAdapter()
-    
+
     @property
     def name(self) -> str:
         """Tool name for registration."""
         return self._name
-    
+
     @property
     def description(self) -> str:
         """Tool description for LLM."""
         return self._description
-    
+
     @property
     def memory(self) -> OpenSearchMemory:
         """Lazy-load OpenSearch memory to avoid connection at import."""
         if self._memory is None:
             self._memory = OpenSearchMemory()
         return self._memory
-    
+
     async def execute(
         self,
         intent: str,
@@ -63,16 +62,16 @@ class OpenConfigSchemaTool(BaseTool):
         max_results: int = 5,
     ) -> ToolOutput:
         """Search OpenConfig schema for XPaths matching intent.
-        
+
         Args:
             intent: Natural language description of what you want to configure.
                    Examples: "change BGP router ID", "add VLAN interface", "configure OSPF area"
             device_type: OpenConfig module type (network-instance, interfaces, routing-policy)
             max_results: Maximum number of results to return (default: 5)
-        
+
         Returns:
             ToolOutput with matching XPaths, descriptions, types, and examples.
-            
+
         Example:
             >>> result = await tool.execute("configure BGP AS number", "network-instance")
             >>> result.data
@@ -86,7 +85,7 @@ class OpenConfigSchemaTool(BaseTool):
             ]
         """
         start_time = time.perf_counter()
-        
+
         # Validate parameters
         if not intent or not intent.strip():
             return ToolOutput(
@@ -94,10 +93,9 @@ class OpenConfigSchemaTool(BaseTool):
                 device="unknown",
                 data=[],
                 metadata={"elapsed_ms": 0},
-                
                 error="Intent parameter cannot be empty",
             )
-        
+
         try:
             # Build OpenSearch query (semantic match on description + filter by module)
             query = {
@@ -108,16 +106,16 @@ class OpenConfigSchemaTool(BaseTool):
                     ],
                 },
             }
-            
+
             # Execute search
             results = await self.memory.search_schema(
                 index="openconfig-schema",
                 query=query,
                 size=max_results,
             )
-            
+
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            
+
             # Use OpenSearchAdapter to normalize results
             return self._adapter.adapt(
                 opensearch_hits=results,
@@ -130,7 +128,7 @@ class OpenConfigSchemaTool(BaseTool):
                 },
                 error=None,
             )
-        
+
         except ConnectionError as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             return ToolOutput(
@@ -138,10 +136,9 @@ class OpenConfigSchemaTool(BaseTool):
                 device="unknown",
                 data=[],
                 metadata={"elapsed_ms": elapsed_ms},
-                
                 error=f"OpenSearch connection failed: {e}",
             )
-        
+
         except TimeoutError as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             return ToolOutput(
@@ -149,10 +146,9 @@ class OpenConfigSchemaTool(BaseTool):
                 device="unknown",
                 data=[],
                 metadata={"elapsed_ms": elapsed_ms},
-                
                 error=f"OpenSearch query timeout: {e}",
             )
-        
+
         except Exception as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             logger.exception("OpenConfig schema search failed")
@@ -167,14 +163,14 @@ class OpenConfigSchemaTool(BaseTool):
 
 class EpisodicMemoryTool(BaseTool):
     """Search episodic memory for previously successful intent→XPath mappings.
-    
+
     Queries the olav-episodic-memory index for historical success patterns.
     Use this BEFORE OpenConfigSchemaTool to leverage past experience.
     """
-    
+
     def __init__(self, memory: OpenSearchMemory | None = None) -> None:
         """Initialize episodic memory search tool.
-        
+
         Args:
             memory: OpenSearch memory instance. If None, creates new instance.
         """
@@ -186,24 +182,24 @@ class EpisodicMemoryTool(BaseTool):
         )
         self._memory = memory
         self._adapter = OpenSearchAdapter()
-    
+
     @property
     def name(self) -> str:
         """Tool name for registration."""
         return self._name
-    
+
     @property
     def description(self) -> str:
         """Tool description for LLM."""
         return self._description
-    
+
     @property
     def memory(self) -> OpenSearchMemory:
         """Lazy-load OpenSearch memory to avoid connection at import."""
         if self._memory is None:
             self._memory = OpenSearchMemory()
         return self._memory
-    
+
     async def execute(
         self,
         intent: str,
@@ -211,15 +207,15 @@ class EpisodicMemoryTool(BaseTool):
         only_successful: bool = True,
     ) -> ToolOutput:
         """Search episodic memory for historical intent→XPath mappings.
-        
+
         Args:
             intent: User intent to search for (natural language).
             max_results: Maximum number of results to return (default: 3).
             only_successful: Only return successful historical mappings (default: True).
-        
+
         Returns:
             ToolOutput with historical mappings including intent, xpath, success status, context.
-            
+
         Example:
             >>> result = await tool.execute("configure BGP neighbor")
             >>> result.data
@@ -233,7 +229,7 @@ class EpisodicMemoryTool(BaseTool):
             ]
         """
         start_time = time.perf_counter()
-        
+
         # Validate parameters
         if not intent or not intent.strip():
             return ToolOutput(
@@ -241,27 +237,26 @@ class EpisodicMemoryTool(BaseTool):
                 device="unknown",
                 data=[],
                 metadata={"elapsed_ms": 0},
-                
                 error="Intent parameter cannot be empty",
             )
-        
+
         try:
             # Build OpenSearch query (semantic match on intent + filter by success)
             query_parts = [{"match": {"intent": intent}}]
             if only_successful:
                 query_parts.append({"term": {"success": True}})
-            
+
             query = {"bool": {"must": query_parts}}
-            
+
             # Execute search
             results = await self.memory.search_schema(
                 index="olav-episodic-memory",
                 query=query,
                 size=max_results,
             )
-            
+
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            
+
             # Use OpenSearchAdapter to normalize results
             return self._adapter.adapt(
                 opensearch_hits=results,
@@ -274,7 +269,7 @@ class EpisodicMemoryTool(BaseTool):
                 },
                 error=None,
             )
-        
+
         except ConnectionError as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             return ToolOutput(
@@ -284,7 +279,7 @@ class EpisodicMemoryTool(BaseTool):
                 metadata={"elapsed_ms": elapsed_ms, "error_type": "connection_error"},
                 error=f"OpenSearch connection failed: {e}",
             )
-        
+
         except TimeoutError as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             return ToolOutput(
@@ -294,7 +289,7 @@ class EpisodicMemoryTool(BaseTool):
                 metadata={"elapsed_ms": elapsed_ms, "error_type": "timeout_error"},
                 error=f"OpenSearch query timeout: {e}",
             )
-        
+
         except Exception as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             logger.exception("Episodic memory search failed")
