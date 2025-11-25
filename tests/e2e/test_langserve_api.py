@@ -249,6 +249,7 @@ async def test_protected_endpoint_without_token(base_url: str):
     - Protected endpoints reject unauthenticated requests
     - Returns 401 Unauthorized
     - Error message is clear
+    - WWW-Authenticate header is present (RFC 7235 compliance)
     """
     async with httpx.AsyncClient() as client:
         # Test /me endpoint without token
@@ -256,12 +257,17 @@ async def test_protected_endpoint_without_token(base_url: str):
         
         assert response.status_code == 401, f"Expected 401, got {response.status_code}"
         
+        # RFC 7235: 401 responses MUST include WWW-Authenticate header
+        assert "www-authenticate" in response.headers, "Missing WWW-Authenticate header (RFC 7235 violation)"
+        assert response.headers["www-authenticate"] == "Bearer", f"Expected 'Bearer', got '{response.headers.get('www-authenticate')}'"
+        
         data = response.json()
         assert "detail" in data, "Missing error detail"
         
         # Test /status endpoint without token
         response = await client.get(f"{base_url}/status", timeout=10.0)
         assert response.status_code == 401, f"Expected 401 for /status, got {response.status_code}"
+        assert "www-authenticate" in response.headers, "Missing WWW-Authenticate header in /status endpoint"
 
 
 # ============================================

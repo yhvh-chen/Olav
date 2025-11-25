@@ -38,7 +38,11 @@ class CustomHTTPBearer(HTTPBearer):
             return await super().__call__(request)
         except HTTPException as exc:  # Map 'Not authenticated' 403 to 401
             if exc.status_code == status.HTTP_403_FORBIDDEN and str(exc.detail).lower() == "not authenticated":
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated") from exc
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Not authenticated",
+                    headers={"WWW-Authenticate": "Bearer"}
+                ) from exc
             raise
 
 # HTTP Bearer token scheme (customized)

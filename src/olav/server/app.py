@@ -558,7 +558,12 @@ def create_app() -> FastAPI:
 
         Includes both FastAPI's conventional 'detail' field and a legacy 'error' key
         for backward compatibility with earlier clients.
+        
+        Preserves WWW-Authenticate header for 401 responses (RFC 7235 compliance).
         """
+        # Preserve headers from the original exception (e.g., WWW-Authenticate for 401)
+        headers = getattr(exc, "headers", None)
+        
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -567,6 +572,7 @@ def create_app() -> FastAPI:
                 "status_code": exc.status_code,
                 "path": str(request.url),
             },
+            headers=headers,
         )
 
         return app
