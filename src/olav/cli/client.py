@@ -177,12 +177,13 @@ class OLAVClient:
                     f"(orchestrator_ready={health['orchestrator_ready']})[/yellow]"
                 )
 
-            # Create RemoteRunnable with authentication headers
+            # Create RemoteRunnable with authentication headers and timeout
             # Note: LangServe RemoteRunnable doesn't support custom headers in constructor
             # So we'll need to use httpx client directly for authenticated requests
             self.remote_runnable = RemoteRunnable(
                 f"{self.server_config.base_url}/orchestrator",
                 headers=headers if self.auth_token else None,
+                timeout=60.0,  # Increased from default 30s to 60s for complex workflows
             )
 
             self.console.print(f"[green]✅ Connected to OLAV API server: {self.server_config.base_url}[/green]")
@@ -258,10 +259,40 @@ class OLAVClient:
     async def _execute_remote(
         self, query: str, thread_id: str, stream: bool
     ) -> ExecutionResult:
-        """Execute query via remote API server."""
+        """Execute query via remote API server with retry logic."""
         if not self.remote_runnable:
             raise RuntimeError("Not connected to remote server. Call connect() first.")
 
+        # Retry configuration (exponential backoff)
+        max_retries = 3
+        base_delay = 1.0  # Initial retry delay in seconds
+        
+        for attempt in range(max_retries):
+            try:
+                return await self._execute_remote_attempt(query, thread_id, stream)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Remote execution failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.info(f"Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    # Final attempt failed
+                    logger.error(f"Remote execution failed after {max_retries} attempts: {e}")
+                    return ExecutionResult(
+                        success=False, messages=[], thread_id=thread_id, error=str(e)
+                    )
+        
+        # Should never reach here, but satisfy type checker
+        return ExecutionResult(
+            success=False, messages=[], thread_id=thread_id, error="Unknown error"
+        )
+    
+    async def _execute_remote_attempt(
+        self, query: str, thread_id: str, stream: bool
+    ) -> ExecutionResult:
+        """Single attempt to execute query via remote API server."""
         try:
             config = {"configurable": {"thread_id": thread_id}}
             messages_buffer: list[dict] = []
@@ -299,10 +330,8 @@ class OLAVClient:
             )
 
         except Exception as e:
-            logger.error(f"Remote execution failed: {e}")
-            return ExecutionResult(
-                success=False, messages=[], thread_id=thread_id, error=str(e)
-            )
+            # Re-raise to trigger retry logic in _execute_remote
+            raise
 
     async def _execute_local(
         self, query: str, thread_id: str, stream: bool

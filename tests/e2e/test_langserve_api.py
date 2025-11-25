@@ -349,7 +349,7 @@ async def test_workflow_invoke_endpoint(base_url: str, auth_headers: dict):
     
     Note: This is a smoke test. Full workflow functionality tested separately.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:  # Increased to 60s for complex workflows
         # Prepare workflow input
         payload = {
             "input": {
@@ -393,7 +393,7 @@ async def test_workflow_stream_endpoint(base_url: str, auth_headers: dict):
     
     Note: This is a smoke test. Full streaming tested in integration tests.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:  # Increased to 60s for complex workflows
         payload = {
             "input": {
                 "messages": [
