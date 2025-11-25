@@ -136,6 +136,26 @@
     -   文档: `docs/PHASE_B3_CLEANUP_SUMMARY.md`
     -   Commits: 06bffc1, aa2202c
 
+### Sprint 8: 测试稳定化修复 - **2025-11-25 进行中** 🔄
+
+-   🔄 **Unit 测试修复** (366/400 → 目标: 400/400 passing)
+    -   **Progress**: 366 passing, 25 failing (从 360 passing, 14 failing + 17 errors 改进)
+    -   **完成**:
+        -   test_router.py: 修复 router fixture 依赖 sample_workflows ✅
+        -   test_router.py: Mock embeddings 改为 async (aembed_documents/aembed_query) ✅
+        -   test_router.py: 属性名从 _workflow_vectors → example_vectors ✅
+        -   test_router.py: 2 个测试改为预期 workflow_name 字符串 ✅
+        -   Commits: a2dc87d, a269666
+    -   **待修复**:
+        -   test_router.py: 16 个测试仍期望 RouteDecision object (需改为 workflow_name 字符串)
+        -   Tool registration: 6 个测试（单独运行通过，完整套件失败 - 状态污染问题）
+        -   其他: test_core.py (1), test_strategies.py (1), test_suzieq_tools_parquet.py (2), test_suzieq_tools_extended.py (1)
+    
+-   ❌ **E2E 测试修复** (9/12 → 目标: 12/12 passing)
+    -   test_authentication_login_failure (缺 WWW-Authenticate header)
+    -   test_workflow_invoke_endpoint (LLM 调用超时 30s)
+    -   test_cli_client_remote_mode (参数名错误)
+
 ---
 
 ## 📋 下一步计划 (Next Steps)
@@ -143,19 +163,25 @@
 ### 🎯 当前优先级 (2025-11-25)
 
 **短期（本周）**：
-1. 🔴 **修复 E2E 测试失败** (3 个测试 - 0.5 天)
+1. 🔴 **完成 test_router.py 修复** (0.5 天)
+   - 批量更新 16 个测试：期望 workflow_name 字符串而非 RouteDecision object
+   - Pattern: `workflow_name = await router.route(query); assert workflow_name in [...]`
+
+2. 🟡 **调查 Tool Registration 状态污染** (0.5 天 - 可选)
+   - 6 个测试单独运行通过，完整套件失败
+   - 可能原因: import order, shared state, race condition
+   - 优先级: 低（可推迟到 Phase B.4）
+
+3. 🔴 **修复 E2E 测试失败** (3 个测试 - 0.5 天)
    - `test_authentication_login_failure` (缺 WWW-Authenticate header)
    - `test_workflow_invoke_endpoint` (LLM 调用超时)
    - `test_cli_client_remote_mode` (参数名错误)
 
-2. 🔴 **修复 Unit 测试失败** (17 errors + 14 failures - 1 天)
-   - `test_router.py`: WorkflowRegistry 初始化错误 (17 errors)
-   - Tool registration tests: 6 failures
-   - 环境依赖测试: 3 failures
-
-3. 🟡 **代码质量优化** (剩余 132 个 ruff violations - 可选)
-   - 重构复杂函数 (PLR0915: too-many-statements - 9 个)
-   - 简化条件逻辑 (PLR0912: too-many-branches - 7 个)
+4. 🔴 **修复其他 Unit 测试失败** (5 个测试 - 0.5 天)
+   - test_core.py: 1 failure
+   - test_strategies.py: 1 failure
+   - test_suzieq_tools_parquet.py: 2 failures
+   - test_suzieq_tools_extended.py: 1 failure
 
 **中期（下周）**：
 4. 🔴 **Phase B.4: CLI Tool 实现** (2-3 天) - 开始 Task B1
