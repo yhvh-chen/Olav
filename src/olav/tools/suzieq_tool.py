@@ -130,6 +130,22 @@ class SuzieQTool:
             df = self._read_parquet_table(table_dir)
 
             if df is None or df.empty:
+                # Check if directory exists but has no parquet files
+                parquet_files = list(table_dir.rglob("*.parquet"))
+                if not parquet_files:
+                    return ToolOutput(
+                        source="suzieq",
+                        device=hostname or "multi",
+                        data=[
+                            {
+                                "status": "NO_PARQUET_FILES",
+                                "message": f"Table '{table}' directory exists but contains no parquet files",
+                                "hint": f"SuzieQ has not yet collected {table} data. Run SuzieQ collector to populate.",
+                                "directory": str(table_dir),
+                            }
+                        ],
+                        metadata=metadata,
+                    )
                 return SuzieqAdapter.adapt(
                     dataframe=None, device=hostname or "multi", metadata=metadata
                 )

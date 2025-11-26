@@ -106,9 +106,10 @@ class TestSuzieQTool:
         
         assert isinstance(result, ToolOutput)
         assert result.source == "suzieq"
-        # When no data directory exists, returns NO_DATA status
+        # When no data directory exists, returns NO_DATA or NO_PARQUET_FILES status
         if result.data:
-            assert "NO_DATA" in result.data[0]["status"]
+            status = result.data[0].get("status", "")
+            assert status in ("NO_DATA", "NO_PARQUET_FILES"), f"Unexpected status: {status}"
             assert "bgp" in result.data[0]["message"]
     
     @pytest.mark.asyncio

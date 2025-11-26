@@ -4,7 +4,7 @@
     "table": "bgp",
     "hostname": "R1"
   },
-  "cached_at": 1764195741.348995,
+  "cached_at": 1764196474.1289756,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq_query",
