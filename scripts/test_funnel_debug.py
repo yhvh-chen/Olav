@@ -537,65 +537,9 @@ async def run_ospf_diagnosis():
     user_query = "R2 和 R4 之间的 OSPF 邻居无法建立 Full 状态，请排查原因"
     print(f"\n问题描述: {user_query}")
     
-    # Try Deep Dive workflow first
-    try:
-        from langchain_core.messages import HumanMessage
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        from olav.workflows.deep_dive import DeepDiveWorkflow
-        from olav.core.settings import settings
-        
-        async with AsyncPostgresSaver.from_conn_string(
-            settings.postgres_uri
-        ) as checkpointer:
-            await checkpointer.setup()
-            
-            workflow = DeepDiveWorkflow()
-            graph = workflow.build_graph(checkpointer)
-            
-            config = {
-                "configurable": {
-                    "thread_id": f"test_ospf_mtu_{asyncio.get_event_loop().time()}"
-                }
-            }
-            
-            initial_state = {
-                "messages": [HumanMessage(content=user_query)],
-            }
-            
-            print("\n=== Workflow Execution ===\n")
-            
-            async for event in graph.astream(initial_state, config):
-                for node_name, node_output in event.items():
-                    print(f"\n--- Node: {node_name} ---")
-                    
-                    if "topology" in node_output:
-                        topo = node_output["topology"]
-                        print(f"受影响设备: {topo.get('affected_devices', [])}")
-                    
-                    if "findings" in node_output and node_output["findings"]:
-                        print("发现问题:")
-                        for f in node_output["findings"]:
-                            print(f"  ⚠️  {f}")
-                    
-                    if "realtime_data" in node_output:
-                        print("实时验证数据:")
-                        for device, data in node_output["realtime_data"].items():
-                            print(f"  {device}: {len(data)} 条命令输出")
-                    
-                    if "messages" in node_output:
-                        for msg in node_output["messages"]:
-                            if hasattr(msg, "content"):
-                                print(f"\n{msg.content[:2000]}...")
-            
-            print("\n" + "=" * 60)
-            print("OSPF 诊断完成")
-            print("=" * 60)
-            return
-            
-    except Exception as e:
-        print(f"Workflow failed: {e}, falling back to hybrid diagnosis...")
-    
-    # Fallback to hybrid diagnosis
+    # Skip Deep Dive workflow (requires HITL approval which blocks)
+    # Go directly to hybrid diagnosis for complete results
+    print("\n直接执行混合诊断（SuzieQ 历史 + CLI 实时）...")
     await run_ospf_hybrid_diagnosis()
 
 
