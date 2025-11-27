@@ -8,14 +8,39 @@ logger = logging.getLogger(__name__)
 
 
 def generate_suzieq_config() -> None:
-    """Generate SuzieQ configuration and inventory from environment variables."""
+    """Generate SuzieQ configuration and inventory from environment variables.
+    
+    Poller Configuration Best Practices:
+    - period: Polling interval. For large networks (100+ devices), use 60-300s
+    - connect-timeout: SSH/API connect timeout. Increase for slow WAN links
+    - cmd-timeout: Per-command execution timeout (some show commands are slow)
+    - max-cmd-pipeline: Commands to pipeline per device (reduce for memory)
+    - chunked-poll: Enable for large inventories to avoid memory spikes
+    - chunk-size: Devices per chunk when chunked-poll enabled
+    
+    Scaling Guidelines:
+    - 1-50 devices: period=15, chunk-size=10
+    - 50-200 devices: period=60, chunk-size=25
+    - 200-500 devices: period=120, chunk-size=50, chunked-poll=true
+    - 500+ devices: period=300, chunk-size=100, chunked-poll=true
+    """
     # Use the data directory from docker-compose volume mount
     config_dir = Path("data/generated_configs")
     config_dir.mkdir(parents=True, exist_ok=True)
 
     # Get environment variables (no hardcoded defaults except for structure)
     rest_api_key = os.getenv("SUZIEQ_REST_API_KEY", os.urandom(16).hex())
-    poller_period = int(os.getenv("SUZIEQ_POLLER_PERIOD", "15"))
+    
+    # Poller tuning parameters with sensible defaults for medium networks
+    poller_period = int(os.getenv("SUZIEQ_POLLER_PERIOD", "60"))  # Increased from 15 to 60
+    connect_timeout = int(os.getenv("SUZIEQ_CONNECT_TIMEOUT", "30"))  # Increased from 15 to 30
+    cmd_timeout = int(os.getenv("SUZIEQ_CMD_TIMEOUT", "60"))  # Per-command timeout
+    max_cmd_pipeline = int(os.getenv("SUZIEQ_MAX_CMD_PIPELINE", "10"))  # Commands in parallel
+    
+    # Chunked polling for large inventories
+    chunked_poll = os.getenv("SUZIEQ_CHUNKED_POLL", "true").lower() == "true"
+    chunk_size = int(os.getenv("SUZIEQ_CHUNK_SIZE", "25"))  # Devices per chunk
+    
     inventory_update_period = int(os.getenv("SUZIEQ_INVENTORY_UPDATE_PERIOD", "3600"))
     coalescer_period = os.getenv("SUZIEQ_COALESCER_PERIOD", "1h")
     log_level = os.getenv("SUZIEQ_LOG_LEVEL", "WARNING")
@@ -35,10 +60,17 @@ def generate_suzieq_config() -> None:
         "poller": {
             "logging-level": log_level,
             "period": poller_period,
-            "connect-timeout": 15,
+            "connect-timeout": connect_timeout,
+            "cmd-timeout": cmd_timeout,
+            "max-cmd-pipeline": max_cmd_pipeline,
+            "chunked-poll": chunked_poll,
+            "chunk-size": chunk_size,
             "log-stdout": True,
             "inventory-file": "/suzieq/config/inventory.yml",
             "update-period": inventory_update_period,
+            # Retry configuration for resilience
+            "retries-on-auth-fail": 2,
+            "ssh-config-file": None,  # Use default SSH config
         },
         "coalescer": {
             "period": coalescer_period,
