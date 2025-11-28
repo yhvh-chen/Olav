@@ -4,9 +4,9 @@ NetBox Reconciler - Sync differences back to NetBox.
 Applies corrections to NetBox based on DiffEngine results,
 with HITL approval for critical changes.
 
-Schema-Aware Architecture:
-    - Uses SchemaMapper for dynamic field mapping (no hardcoding)
-    - LLM discovers SuzieQ → NetBox mappings via schema search tools
+LLM-Driven Architecture:
+    - Uses LLMDiffEngine for semantic comparison and value transformation
+    - Zero mapping maintenance - LLM understands semantic equivalence
     - Extensible to any NetBox plugin without code changes
 """
 
@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from olav.sync.diff_engine import DiffEngine
+from olav.sync.llm_diff import LLMDiffEngine
 from olav.sync.models import (
     DiffResult,
     EntityType,
@@ -22,7 +23,6 @@ from olav.sync.models import (
     ReconcileResult,
     ReconciliationReport,
 )
-from olav.sync.schema_mapper import SchemaMapper, get_schema_mapper
 from olav.tools.netbox_tool import NetBoxAPITool
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class NetBoxReconciler:
         diff_engine: DiffEngine | None = None,
         hitl_callback: Callable[[DiffResult], bool] | None = None,
         dry_run: bool = False,
-        schema_mapper: SchemaMapper | None = None,
+        llm_diff_engine: LLMDiffEngine | None = None,
     ) -> None:
         """
         Initialize NetBoxReconciler.
@@ -64,13 +64,13 @@ class NetBoxReconciler:
             diff_engine: Diff engine for field classification
             hitl_callback: Callback for HITL approval (receives diff, returns bool)
             dry_run: If True, don't make actual changes
-            schema_mapper: Schema mapper for dynamic field mapping (default: global singleton)
+            llm_diff_engine: LLM diff engine for value transformation (default: create new)
         """
         self.netbox = netbox_tool or NetBoxAPITool()
         self.diff_engine = diff_engine or DiffEngine(netbox_tool=self.netbox)
         self.hitl_callback = hitl_callback
         self.dry_run = dry_run
-        self.schema_mapper = schema_mapper or get_schema_mapper()
+        self.llm_engine = llm_diff_engine or LLMDiffEngine()
 
         # Stats
         self.stats = {
@@ -283,12 +283,12 @@ class NetBoxReconciler:
 
         device_id = device_result.data[0].get("id")
 
-        # Create interface using SchemaMapper for dynamic field mapping
+        # Create interface using LLMDiffEngine for value transformation
         ctx = diff.additional_context or {}
 
-        # Use SchemaMapper for type mapping (supports LLM discovery + fallback)
+        # Use LLMDiffEngine for type mapping
         suzieq_type = ctx.get("type", "")
-        netbox_type = self.schema_mapper.map_interface_type(suzieq_type, diff.identifier)
+        netbox_type = self.llm_engine.map_interface_type(suzieq_type, diff.identifier)
 
         interface_data = {
             "device": device_id,
@@ -299,14 +299,14 @@ class NetBoxReconciler:
         # Always add description (empty string if not available)
         interface_data["description"] = ctx.get("description", "")
 
-        # Add other optional fields using SchemaMapper transforms
+        # Add other optional fields using LLMDiffEngine transforms
         if "enabled" in ctx:
-            interface_data["enabled"] = ctx["enabled"]
+            interface_data["enabled"] = self.llm_engine.admin_state_to_bool(ctx["enabled"])
         if ctx.get("mtu"):
             interface_data["mtu"] = ctx["mtu"]
         if ctx.get("speed"):
-            # Use SchemaMapper for speed normalization
-            interface_data["speed"] = self.schema_mapper._normalize_speed(ctx["speed"])
+            # Use LLMDiffEngine for speed normalization
+            interface_data["speed"] = self.llm_engine.normalize_speed(ctx["speed"])
 
         result = await self.netbox.execute(
             path="/api/dcim/interfaces/",

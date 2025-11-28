@@ -4,26 +4,19 @@
     "table": "bgp",
     "hostname": "R1"
   },
-  "cached_at": 1764339445.8899972,
+  "cached_at": 1764339796.980228,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq_query",
     "device": "R1",
     "data": [
       {
-        "neighbor": "10.0.0.2",
-        "state": "Established",
-        "uptime": "2d"
-      },
-      {
-        "neighbor": "10.0.0.3",
-        "state": "Idle",
-        "uptime": "0"
+        "hostname": "R1",
+        "state": "Established"
       }
     ],
     "error": null,
     "metadata": {
-      "table": "bgp",
       "elapsed_ms": 0
     }
   }

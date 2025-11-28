@@ -5,6 +5,9 @@ This module replaces the complex Schema-Aware mapping system with a simpler
 LLM-driven approach. The LLM directly compares JSON data from NetBox and
 SuzieQ/network sources, understanding semantic equivalence automatically.
 
+Also provides value transformation for creating/updating NetBox entities
+from network data (interface type mapping, speed normalization, etc.).
+
 Benefits:
 - Zero mapping maintenance
 - Automatic adaptation to new NetBox plugins
@@ -16,11 +19,15 @@ Usage:
 
     engine = LLMDiffEngine()
     diffs = await engine.compare(device="R1", netbox_data=nb, network_data=sq)
+    
+    # Value transformation
+    netbox_type = engine.map_interface_type("loopback", "Loopback0")
+    speed_kbps = engine.normalize_speed(1000000000)  # 1Gbps in bps
 """
 
 import json
 import logging
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -126,7 +133,25 @@ class LLMDiffEngine:
     LLM-driven diff engine that compares NetBox and network data.
 
     Uses structured output to ensure consistent, validated results.
+    Also provides value transformation methods for NetBox entity creation.
     """
+
+    # Interface type mapping: SuzieQ/network type → NetBox type slug
+    INTERFACE_TYPE_MAP: ClassVar[dict[str, str]] = {
+        "loopback": "virtual",
+        "vlan": "virtual",
+        "svi": "virtual",
+        "tunnel": "virtual",
+        "gre": "virtual",
+        "ethernet": "1000base-t",
+        "gigabit": "1000base-t",
+        "tengigabit": "10gbase-t",
+        "fastethernet": "100base-tx",
+        "lag": "lag",
+        "bond": "lag",
+        "port-channel": "lag",
+        "bridge": "bridge",
+    }
 
     def __init__(self, model: Any = None) -> None:
         """Initialize with optional LLM model."""
@@ -138,6 +163,129 @@ class LLMDiffEngine:
             base_model = LLMFactory.get_chat_model()
             self._model = base_model.with_structured_output(ComparisonResult)
         return self._model
+
+    # ============ Value Transformation Methods ============
+
+    def map_interface_type(self, sq_type: str | None, ifname: str | None = None) -> str:
+        """
+        Map SuzieQ/network interface type to NetBox type slug.
+
+        Args:
+            sq_type: Interface type from SuzieQ (loopback, ethernet, etc.)
+            ifname: Interface name for additional hints (Loopback0, GigabitEthernet0/0)
+
+        Returns:
+            NetBox interface type slug (virtual, 1000base-t, lag, etc.)
+        """
+        # Check type first
+        if sq_type:
+            sq_lower = sq_type.lower()
+            for pattern, netbox_type in self.INTERFACE_TYPE_MAP.items():
+                if pattern in sq_lower:
+                    return netbox_type
+
+        # Check interface name as fallback
+        if ifname:
+            ifname_lower = ifname.lower()
+            if "loopback" in ifname_lower or ifname_lower.startswith("lo"):
+                return "virtual"
+            if "vlan" in ifname_lower:
+                return "virtual"
+            if "tunnel" in ifname_lower or "gre" in ifname_lower:
+                return "virtual"
+            if "gigabit" in ifname_lower or "ge-" in ifname_lower or ifname_lower.startswith("gi"):
+                return "1000base-t"
+            if "tengigabit" in ifname_lower or "te-" in ifname_lower:
+                return "10gbase-t"
+            if "ethernet" in ifname_lower or ifname_lower.startswith("eth"):
+                return "1000base-t"
+
+        return "other"
+
+    def normalize_speed(self, speed: int | str | None) -> int | None:
+        """
+        Normalize interface speed to NetBox format (kbps).
+
+        Uses heuristics based on magnitude to determine input unit:
+        - < 1000: Assume Gbps (e.g., 1, 10, 100)
+        - 1000-999999: Assume Mbps (e.g., 1000, 10000)
+        - 1M-999M: Assume already kbps
+        - >= 1B: Assume bps
+
+        Args:
+            speed: Speed value from network (may be bps, Mbps, or Gbps)
+
+        Returns:
+            Speed in kbps for NetBox, or None if invalid
+        """
+        if speed is None:
+            return None
+
+        try:
+            speed_int = int(speed)
+        except (ValueError, TypeError):
+            return None
+
+        if speed_int <= 0:
+            return None
+
+        if speed_int < 1000:
+            return speed_int * 1_000_000  # Gbps to kbps
+        elif speed_int < 1_000_000:
+            return speed_int * 1000  # Mbps to kbps
+        elif speed_int < 1_000_000_000:
+            return speed_int  # Already kbps
+        else:
+            return speed_int // 1000  # bps to kbps
+
+    def normalize_mac(self, mac: str | None) -> str | None:
+        """
+        Normalize MAC address to NetBox format (AA:BB:CC:DD:EE:FF).
+
+        Accepts various formats:
+        - aa:bb:cc:dd:ee:ff (colon)
+        - aa-bb-cc-dd-ee-ff (dash)
+        - aabb.ccdd.eeff (Cisco dot)
+
+        Args:
+            mac: MAC address in any common format
+
+        Returns:
+            Normalized MAC (uppercase, colon-separated), or None if invalid
+        """
+        if not mac:
+            return None
+
+        # Remove all separators
+        mac_clean = mac.replace(":", "").replace("-", "").replace(".", "").upper()
+
+        if len(mac_clean) != 12:
+            return None
+
+        # Format as AA:BB:CC:DD:EE:FF
+        return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))
+
+    def admin_state_to_bool(self, state: str | bool | int | None) -> bool:
+        """
+        Convert admin state to boolean.
+
+        Args:
+            state: "up"/"down", True/False, 1/0
+
+        Returns:
+            Boolean enabled state
+        """
+        if state is None:
+            return True  # Default to enabled
+        if isinstance(state, bool):
+            return state
+        if isinstance(state, int):
+            return bool(state)
+        if isinstance(state, str):
+            return state.lower() == "up"
+        return True
+
+    # ============ Comparison Methods ============
 
     async def compare(
         self,
