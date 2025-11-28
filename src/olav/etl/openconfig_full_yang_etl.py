@@ -92,7 +92,7 @@ def generate(root: str) -> Iterator[dict[str, Any]]:
 
 def main(force: bool = False, yang_path: str | None = None) -> None:
     """Initialize OpenConfig YANG schema index.
-    
+
     Args:
         force: If True, delete existing index before recreating.
         yang_path: Path to OpenConfig YANG root directory. Defaults to OPENCONFIG_DIR env.
@@ -100,6 +100,7 @@ def main(force: bool = False, yang_path: str | None = None) -> None:
     # Support command-line arguments when run directly
     if yang_path is None:
         import argparse
+
         parser = argparse.ArgumentParser()
         parser.add_argument("--path", help="Path to OpenConfig YANG root (defaults OPENCONFIG_DIR)")
         parser.add_argument("--force", "-f", action="store_true", help="Force reset index")

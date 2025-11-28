@@ -1,13 +1,84 @@
 ﻿# OLAV 已知问题与待办事项
 
-> **更新日期**: 2025-01-25  
+> **更新日期**: 2025-11-28  
 > **版本**: v0.5.0-beta  
 > **架构**: **Dynamic Intent Router + Workflows + Memory RAG + Unified Tools**  
-> **核心原则**: **Schema-Aware 设计** - 所有工具优先查询 Schema 索引，避免工具数量膨胀  
-> **状态**: ✅ **Schema-Aware 完全迁移完成 - 100% 动态加载** 🎉  
-> **架构符合度**: 100% (Schema-Aware 100% + All Workflows 100%)  
-> **测试覆盖**: Unit 394/394 (100%), E2E 9/12 (75%)  
-> **代码质量**: Ruff 错误 132, 测试稳定性 100%
+> **核心原则**: **LLM-Driven 设计** - 使用 LLM 进行语义比对，零维护成本  
+> **状态**: ✅ **Force Sync 完成 - 网络 → NetBox 强制一致性同步** 🎉  
+> **架构符合度**: 100% (LLM-Driven Sync 100% + All Workflows 100%)  
+> **测试覆盖**: Unit 545/545 (100%), E2E 9/12 (75%)  
+> **代码质量**: Ruff 错误 0, 测试稳定性 100%
+
+---
+
+## 🎉 最新完成: Force Sync 强制一致性同步 (2025-11-28)
+
+### 概述
+实现网络设备到 NetBox 的强制同步，确保 NetBox 与网络状态完全一致。
+
+### 新功能
+- **`scripts/force_sync.py`**: 强制同步脚本
+  - 接口同步：创建/删除/更新
+  - IP 地址同步：创建/删除
+  - 设备信息同步：serial, version
+  - HITL 审批：删除操作需确认
+  - Dry Run 模式：默认安全预览
+
+### 使用方法
+```bash
+uv run python scripts/force_sync.py --device R1          # 预览变更
+uv run python scripts/force_sync.py --device R1 --apply  # 真正执行
+uv run python scripts/force_sync.py --all --apply --yes  # 批量同步
+```
+
+---
+
+## 🎉 LLM-Driven Sync Architecture (2025-11-28)
+
+### 概述
+成功从 Schema-Aware 映射架构迁移到 **LLM-Driven** 差异比对架构，实现零维护成本的字段映射。
+
+### 架构变更
+| 旧架构 (Schema-Aware) | 新架构 (LLM-Driven) |
+|----------------------|---------------------|
+| 需要维护 field-mapping 索引 | 无索引维护需求 |
+| 每新增 NetBox 插件需更新映射 | 自动适应任何插件 |
+| 硬编码 transform 函数 | LLM 语义理解转换 |
+| SchemaMapper 类 + ETL 脚本 | LLMDiffEngine + Pydantic |
+
+### 新核心组件
+- **`src/olav/sync/llm_diff.py`**: LLM-Driven 差异引擎
+  - `LLMDiffEngine`: 语义比较 NetBox 与 SuzieQ 数据
+  - `ComparisonResult`: Pydantic 验证 LLM 输出
+  - `FieldDiff`: 单字段差异模型
+  - `EntityDiff`: 实体级差异（含多个字段差异）
+
+### 使用示例
+```python
+from olav.sync import LLMDiffEngine
+
+engine = LLMDiffEngine()
+diffs = await engine.compare_entities(
+    entity_type="interface",
+    device="R1",
+    netbox_data={"eth0": {"enabled": True, "mtu": 1500}},
+    network_data={"eth0": {"adminState": "up", "mtu": 9000}},
+)
+# diffs = [FieldDiff(field="eth0.mtu", netbox_value=1500, network_value=9000, ...)]
+```
+
+### 已删除文件（清理完成）
+- ~~`src/olav/sync/schema_mapper.py`~~ - 已删除，被 LLMDiffEngine 替代
+- ~~`src/olav/etl/field_mapping_etl.py`~~ - 已删除，不再需要映射索引
+- ~~`docs/SCHEMA_AWARE_IMPLEMENTATION.md`~~ - 已删除，架构已过时
+- ~~`scripts/test_sync.py`~~ - 已删除，被 force_sync.py 替代
+- ~~`scripts/test_sync_live.py`~~ - 已删除，被 force_sync.py 替代
+- ~~`scripts/test_llm_sync.py`~~ - 已删除，被 force_sync.py 替代
+
+### 测试状态
+- 545 tests passing (unit tests)
+- 12 tests for LLMDiffEngine
+- 22 tests for sync module
 
 ---
 

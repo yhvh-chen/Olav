@@ -190,14 +190,60 @@ class DeviceExecutionWorkflow(BaseWorkflow):
             }
 
         async def hitl_approval_node(state: DeviceExecutionState) -> DeviceExecutionState:
-            """HITL approval - LangGraph interrupt point."""
-            # When resumed, approval_status should be set by user via state update
-            approval_status = state.get("approval_status", "pending")
-
-            return {
-                **state,
-                "approval_status": approval_status,
-            }
+            """HITL approval - LangGraph interrupt point.
+            
+            Uses LangGraph interrupt to pause and wait for user approval.
+            When workflow resumes, approval_response contains user decision.
+            """
+            import logging
+            from langgraph.types import interrupt
+            from config.settings import AgentConfig
+            
+            logger = logging.getLogger(__name__)
+            user_approval = state.get("approval_status")
+            
+            # YOLO mode: auto-approve
+            if AgentConfig.YOLO_MODE and user_approval is None:
+                logger.info("[YOLO] Auto-approving device execution...")
+                return {
+                    **state,
+                    "approval_status": "approved",
+                }
+            
+            # Already processed (resuming after interrupt)
+            if user_approval in ("approved", "rejected"):
+                return {
+                    **state,
+                    "approval_status": user_approval,
+                }
+            
+            # HITL: Request user approval via interrupt
+            config_plan = state.get("config_plan", {})
+            
+            approval_response = interrupt({
+                "action": "approval_required",
+                "config_plan": config_plan,
+                "message": f"请审批设备配置变更:\n计划: {config_plan}\n\n输入 Y 确认, N 取消:",
+            })
+            
+            # Process approval response
+            if isinstance(approval_response, dict):
+                if approval_response.get("approved") or approval_response.get("user_approval") == "approved":
+                    return {
+                        **state,
+                        "approval_status": "approved",
+                    }
+                else:
+                    return {
+                        **state,
+                        "approval_status": "rejected",
+                    }
+            else:
+                # String response (Y/N) - treat as approved if truthy
+                return {
+                    **state,
+                    "approval_status": "approved" if approval_response else "rejected",
+                }
 
         async def config_execution_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """Execute configuration changes (NETCONF preferred)."""
@@ -314,11 +360,20 @@ class DeviceExecutionWorkflow(BaseWorkflow):
         workflow.add_edge("validation", "final_answer")
         workflow.add_edge("final_answer", END)
 
-        # Compile with interrupt before approval
-        return workflow.compile(
-            checkpointer=checkpointer,
-            interrupt_before=["hitl_approval"],
-        )
+        # Compile with interrupt before approval (only if not YOLO mode)
+        from config.settings import AgentConfig
+        
+        if AgentConfig.YOLO_MODE:
+            # YOLO mode: no interrupts, auto-approve in hitl_approval_node
+            return workflow.compile(
+                checkpointer=checkpointer,
+            )
+        else:
+            # Normal mode: interrupt before approval for user review
+            return workflow.compile(
+                checkpointer=checkpointer,
+                interrupt_before=["hitl_approval"],
+            )
 
 
 __all__ = ["DeviceExecutionState", "DeviceExecutionWorkflow"]

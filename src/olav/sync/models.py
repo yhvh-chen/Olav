@@ -65,6 +65,7 @@ class DiffResult:
         auto_correctable: Can this be auto-fixed without HITL
         netbox_id: NetBox object ID for updates (optional)
         netbox_endpoint: NetBox API endpoint for updates
+        identifier: Entity identifier (interface name, IP address, etc.)
         additional_context: Extra context for decision making
     """
     entity_type: EntityType
@@ -77,6 +78,7 @@ class DiffResult:
     auto_correctable: bool = False
     netbox_id: int | None = None
     netbox_endpoint: str | None = None
+    identifier: str | None = None  # e.g., interface name "GigabitEthernet0/0"
     additional_context: dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict[str, Any]:
@@ -92,6 +94,7 @@ class DiffResult:
             "auto_correctable": self.auto_correctable,
             "netbox_id": self.netbox_id,
             "netbox_endpoint": self.netbox_endpoint,
+            "identifier": self.identifier,
             "additional_context": self.additional_context,
         }
     
@@ -109,6 +112,7 @@ class DiffResult:
             auto_correctable=data.get("auto_correctable", False),
             netbox_id=data.get("netbox_id"),
             netbox_endpoint=data.get("netbox_endpoint"),
+            identifier=data.get("identifier"),
             additional_context=data.get("additional_context", {}),
         )
 
@@ -204,9 +208,16 @@ class ReconciliationReport:
             lines.append("|--------|------|-------|---------|--------|----------|----------|")
             for diff in self.diffs[:50]:  # Limit to 50 rows
                 auto = "✅" if diff.auto_correctable else "❌"
+                # For existence diffs, show identifier instead of present/missing
+                if diff.field == "existence":
+                    network_val = diff.identifier if diff.network_value == "present" else "missing"
+                    netbox_val = diff.netbox_value if diff.netbox_value != "missing" else "missing"
+                else:
+                    network_val = diff.network_value
+                    netbox_val = diff.netbox_value
                 lines.append(
                     f"| {diff.device} | {diff.entity_type.value} | {diff.field} | "
-                    f"{diff.network_value} | {diff.netbox_value} | {diff.severity.value} | {auto} |"
+                    f"{network_val} | {netbox_val} | {diff.severity.value} | {auto} |"
                 )
             
             if len(self.diffs) > 50:

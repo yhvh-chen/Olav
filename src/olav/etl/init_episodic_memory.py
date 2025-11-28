@@ -18,7 +18,7 @@ def main(force: bool = False) -> None:
 
     Args:
         force: If True, delete existing index before recreating.
-        
+
     Index Schema:
         - intent (text): User intent in natural language (e.g., "查询 BGP 状态")
         - xpath (keyword): OpenConfig XPath or SuzieQ query used

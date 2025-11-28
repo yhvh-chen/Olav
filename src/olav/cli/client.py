@@ -463,66 +463,45 @@ class OLAVClient:
             raise
 
     async def _execute_local(self, query: str, thread_id: str, stream: bool) -> ExecutionResult:
-        """Execute query via local orchestrator."""
-        if not self.orchestrator:
+        """Execute query via local orchestrator.
+        
+        Uses orchestrator_instance.route() for proper HITL interrupt detection.
+        """
+        if not self.orchestrator_instance:
             msg = "Local orchestrator not initialized. Call connect() first."
             raise RuntimeError(msg)
 
         try:
-            config = {"configurable": {"thread_id": thread_id}}
-            messages_buffer: list[BaseMessage] = []
-            final_message_content: str = ""
-            result_state: dict = {}
-
-            if stream:
-                # Streaming mode
-                with Live(console=self.console, refresh_per_second=4) as live:
-                    live.update(Panel("🔄 Processing query...", title="OLAV Local"))
-
-                    async for chunk in self.orchestrator.astream(
-                        {"messages": [{"role": "user", "content": query}]}, config=config
-                    ):
-                        # Process streaming chunks - LangGraph returns {node_name: {state}}
-                        for node_name, node_state in chunk.items():
-                            if isinstance(node_state, dict):
-                                result_state = node_state  # Keep latest state
-                                if "messages" in node_state:
-                                    messages_buffer = node_state["messages"]
-                                    # Display latest AI message
-                                    for msg in reversed(messages_buffer):
-                                        if hasattr(msg, "type") and msg.type == "ai":
-                                            if hasattr(msg, "content") and msg.content:
-                                                final_message_content = str(msg.content)
-                                                live.update(Markdown(final_message_content))
-                                            break
-                                # Also check for final_message in result
-                                if "final_message" in node_state and node_state["final_message"]:
-                                    final_message_content = node_state["final_message"]
-                                    live.update(Markdown(final_message_content))
-
-            else:
-                # Non-streaming mode
-                result_state = await self.orchestrator.ainvoke(
-                    {"messages": [{"role": "user", "content": query}]}, config=config
-                )
-                messages_buffer = result_state.get("messages", [])
-                final_message_content = result_state.get("final_message", "")
-
-            # Ensure we have proper AI message in buffer for display
-            if final_message_content and not any(
-                hasattr(m, "type") and m.type == "ai" for m in messages_buffer
-            ):
-                from langchain_core.messages import AIMessage
-                messages_buffer.append(AIMessage(content=final_message_content))
-
+            # Use orchestrator.route() for proper interrupt handling
+            result = await self.orchestrator_instance.route(query, thread_id)
+            
+            # Extract messages from result
+            messages_buffer = []
+            inner_result = result.get("result", {})
+            if inner_result and "messages" in inner_result:
+                messages_buffer = inner_result["messages"]
+            
             # Convert BaseMessage to dict
-            messages_dict = [{"type": msg.type, "content": msg.content} for msg in messages_buffer]
-
-            # Check for HITL interrupt - orchestrator returns interrupted=True when workflow paused
-            is_interrupted = result_state.get("interrupted", False)
-            workflow_type = result_state.get("workflow_type")
-            execution_plan = result_state.get("execution_plan")
-            todos = result_state.get("todos", [])
+            messages_dict = []
+            for msg in messages_buffer:
+                if hasattr(msg, "type") and hasattr(msg, "content"):
+                    messages_dict.append({"type": msg.type, "content": msg.content})
+            
+            # Get final message
+            final_message = result.get("final_message", "")
+            if final_message and not any(m.get("type") == "ai" for m in messages_dict):
+                messages_dict.append({"type": "ai", "content": final_message})
+            
+            # Display final message if available
+            if final_message:
+                from rich.markdown import Markdown
+                self.console.print(Markdown(final_message))
+            
+            # Check for HITL interrupt
+            is_interrupted = result.get("interrupted", False)
+            workflow_type = result.get("workflow_type")
+            execution_plan = inner_result.get("execution_plan") if inner_result else None
+            todos = inner_result.get("todos", []) if inner_result else []
 
             return ExecutionResult(
                 success=True,
@@ -536,6 +515,7 @@ class OLAVClient:
 
         except Exception as e:
             logger.error(f"Local execution failed: {e}")
+            return ExecutionResult(success=False, messages=[], thread_id=thread_id, error=str(e))
             return ExecutionResult(success=False, messages=[], thread_id=thread_id, error=str(e))
 
     async def health_check(self) -> dict[str, Any]:

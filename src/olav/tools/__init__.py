@@ -4,9 +4,24 @@ This module provides both:
 1. LangChain @tool decorated functions (for LangGraph ToolNode)
 2. BaseTool classes that register with ToolRegistry (for Strategies)
 
-All *_tool.py modules are imported here to ensure ToolRegistry population
-on package import. This is important for FastPathStrategy and DeepPathStrategy
-which use ToolRegistry.get_tool() for schema discovery.
+Tool Organization:
+- datetime_tool: Time utilities
+- netbox_tool: NetBox API integration (NetBoxAPITool class)
+- nornir_tool: NETCONF/CLI execution
+- opensearch_tool: Schema and document search
+- suzieq_tool: BaseTool classes for ToolRegistry
+- suzieq_parquet_tool: @tool functions for Parquet queries (direct import)
+- cli_tool: @tool functions for CLI commands (direct import)
+- indexing_tool: Document indexing utilities (direct import)
+
+Usage:
+    # For ToolRegistry-based access
+    from olav.tools.base import ToolRegistry
+    tool = ToolRegistry.get_tool("suzieq_query")
+    
+    # For LangGraph ToolNode (direct @tool functions)
+    from olav.tools.suzieq_parquet_tool import suzieq_query, suzieq_schema_search
+    from olav.tools.cli_tool import cli_command_tool
 """
 
 # Import all tool modules to trigger ToolRegistry.register() side effects
@@ -18,14 +33,25 @@ from olav.tools import (
     suzieq_tool,
 )
 
-# Note: suzieq_parquet_tool and cli_tool are LangChain @tool functions,
-# not BaseTool classes, so they don't register with ToolRegistry.
-# They are used directly by workflow ToolNodes.
+# Re-export commonly used classes
+from olav.tools.netbox_tool import NetBoxAPITool
+from olav.tools.base import ToolRegistry, BaseTool
+
+# Note: The following are @tool functions (not BaseTool classes):
+# - suzieq_parquet_tool: suzieq_query, suzieq_schema_search
+# - cli_tool: cli_command_tool
+# - indexing_tool: index_document, index_directory, search_indexed_documents
+# Import them directly when needed for LangGraph ToolNode.
 
 __all__ = [
+    # Modules
     "datetime_tool",
     "netbox_tool",
     "nornir_tool",
     "opensearch_tool",
     "suzieq_tool",
+    # Classes
+    "NetBoxAPITool",
+    "ToolRegistry",
+    "BaseTool",
 ]

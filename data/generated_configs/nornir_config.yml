@@ -6,7 +6,7 @@
 inventory:
   plugin: NetBoxInventory2
   options:
-    nb_url: http://localhost:8080
+    nb_url: http://netbox:8080
     nb_token: 5f0e3c6245275e54dcaf549121f7a32d7c132893
     ssl_verify: false
     filter_parameters:

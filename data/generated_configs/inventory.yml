@@ -1,7 +1,7 @@
 sources:
 - name: netbox-olav
   type: netbox
-  url: http://localhost:8080
+  url: http://netbox:8080
   token: 5f0e3c6245275e54dcaf549121f7a32d7c132893
   tag:
   - olav-managed

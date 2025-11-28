@@ -105,15 +105,15 @@ class TestInspectionWorkflow:
         workflow.llm.ainvoke = AsyncMock(return_value=MagicMock(
             content='{"device_scope": ["all"], "entity_types": ["interface"]}'
         ))
-        
-        # Mock NetBox device list
+
+        # Mock NetBox device list - adapter already extracts results
         workflow.netbox.execute = AsyncMock(return_value=MagicMock(
             error=None,
-            data={"results": [
+            data=[
                 {"name": "R1"},
                 {"name": "R2"},
                 {"name": "SW1"},
-            ]}
+            ]
         ))
         
         state = {

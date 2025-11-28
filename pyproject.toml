@@ -40,6 +40,7 @@ dependencies = [
     "numpy>=1.26.0",
     "pdfplumber>=0.10.0",
     "langgraph-cli[inmem]>=0.1.54",
+    "pynetbox>=7.5.0",
 ]
 
 [project.optional-dependencies]

@@ -1,41 +1,32 @@
-"""Agent state definitions using TypedDict."""
+"""Agent state definitions using TypedDict.
 
-from typing import Annotated, TypedDict
+NOTE: The primary workflow states are now defined in olav.workflows.base.BaseWorkflowState
+and workflow-specific state classes (InspectionState, QueryDiagnosticState, etc.).
+
+This module provides legacy AgentState for compatibility and reference.
+"""
+
+from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph import add_messages
 
 
 class AgentState(TypedDict):
-    """Root agent state shared across all SubAgents."""
+    """Root agent state shared across all SubAgents.
+    
+    NOTE: Current architecture uses BaseWorkflowState from olav.workflows.base.
+    This class is retained for compatibility and potential future use.
+    """
 
     messages: Annotated[list[BaseMessage], add_messages]
     device: str | None
-    topology_context: dict[str, any] | None
+    topology_context: dict[str, Any] | None
     current_user: str
     session_id: str
 
 
-class SuzieQState(TypedDict):
-    """SuzieQ agent state for network analysis."""
-
-    messages: Annotated[list[BaseMessage], add_messages]
-    query_result: dict[str, any] | None
-    schema_info: dict[str, any] | None
-
-
-class RAGState(TypedDict):
-    """RAG agent state for schema search."""
-
-    messages: Annotated[list[BaseMessage], add_messages]
-    search_results: list[dict[str, any]]
-    selected_xpath: str | None
-
-
-class NetConfState(TypedDict):
-    """NETCONF agent state for configuration changes."""
-
-    messages: Annotated[list[BaseMessage], add_messages]
-    proposed_config: str | None
-    approval_status: str | None
-    execution_result: dict[str, any] | None
+# Legacy state classes removed (2025-11-28)
+# - SuzieQState: Replaced by QueryDiagnosticState
+# - RAGState: Replaced by OpenSearch schema search
+# - NetConfState: Replaced by DeviceExecutionState

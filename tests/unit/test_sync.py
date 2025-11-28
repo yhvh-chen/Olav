@@ -236,7 +236,8 @@ class TestDiffEngine:
         
         assert report.missing_in_netbox == 1
         assert report.diffs[0].field == "existence"
-        assert report.diffs[0].network_value == "Gi0/1"
+        assert report.diffs[0].network_value == "present"
+        assert report.diffs[0].identifier == "Gi0/1"
         assert report.diffs[0].netbox_value == "missing"
     
     def test_normalize_ip(self, engine):

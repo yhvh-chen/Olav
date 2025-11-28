@@ -1,24 +1,18 @@
 data-directory: /suzieq/parquet
 temp-directory: /tmp/suzieq
 rest:
-  API_KEY: 4efe837dbff59eb4e99c68b186aafd29
+  API_KEY: 248e6937ffe1d525d470a8471741749c
   logging-level: WARNING
   address: 0.0.0.0
   port: 8000
   no-https: true
 poller:
   logging-level: WARNING
-  period: 60
-  connect-timeout: 30
-  cmd-timeout: 60
-  max-cmd-pipeline: 10
-  chunked-poll: true
-  chunk-size: 25
+  period: 15
+  connect-timeout: 15
   log-stdout: true
   inventory-file: /suzieq/config/inventory.yml
   update-period: 3600
-  retries-on-auth-fail: 2
-  ssh-config-file: null
 coalescer:
   period: 1h
   logging-level: WARNING

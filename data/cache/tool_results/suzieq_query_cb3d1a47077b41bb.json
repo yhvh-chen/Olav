@@ -1,0 +1,41 @@
+{
+  "tool": "suzieq_query",
+  "parameters": {
+    "table": "interfaces",
+    "hostname": "R1",
+    "method": "summarize",
+    "max_age_hours": 24
+  },
+  "cached_at": 1764309775.9752636,
+  "cache_ttl": 300,
+  "tool_output": {
+    "source": "suzieq",
+    "device": "R1",
+    "data": [
+      {
+        "state_counts": {
+          "up": 4,
+          "down": 1
+        },
+        "adminState_counts": {
+          "up": 4,
+          "down": 1
+        },
+        "type_counts": {
+          "csr vnic": 4,
+          "loopback": 1
+        },
+        "total_records": 5,
+        "unique_hosts": 1
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "table": "interfaces",
+      "method": "summarize",
+      "max_age_hours": 24,
+      "filters": {},
+      "elapsed_ms": 74
+    }
+  }
+}

@@ -28,7 +28,10 @@ Workflow:
     └─ Rejected → [Final Answer] (abort)
 """
 
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     import asyncio
@@ -191,13 +194,60 @@ class NetBoxManagementWorkflow(BaseWorkflow):
             }
 
         async def hitl_approval_node(state: NetBoxManagementState) -> NetBoxManagementState:
-            """HITL approval for write operations."""
-            approval_status = state.get("approval_status", "pending")
-
-            return {
-                **state,
-                "approval_status": approval_status,
-            }
+            """HITL approval for write operations.
+            
+            Uses LangGraph interrupt to pause and wait for user approval.
+            When workflow resumes, approval_response contains user decision.
+            """
+            from langgraph.types import interrupt
+            from config.settings import AgentConfig
+            
+            user_approval = state.get("approval_status")
+            
+            # YOLO mode: auto-approve
+            if AgentConfig.YOLO_MODE and user_approval is None:
+                logger.info("[YOLO] Auto-approving NetBox operation...")
+                return {
+                    **state,
+                    "approval_status": "approved",
+                }
+            
+            # Already processed (resuming after interrupt)
+            if user_approval in ("approved", "rejected"):
+                return {
+                    **state,
+                    "approval_status": user_approval,
+                }
+            
+            # HITL: Request user approval via interrupt
+            operation_plan = state.get("operation_plan", {})
+            api_endpoint = state.get("api_endpoint", "")
+            
+            approval_response = interrupt({
+                "action": "approval_required",
+                "api_endpoint": api_endpoint,
+                "operation_plan": operation_plan,
+                "message": f"请审批 NetBox 操作:\n端点: {api_endpoint}\n计划: {operation_plan}\n\n输入 Y 确认, N 取消:",
+            })
+            
+            # Process approval response
+            if isinstance(approval_response, dict):
+                if approval_response.get("approved") or approval_response.get("user_approval") == "approved":
+                    return {
+                        **state,
+                        "approval_status": "approved",
+                    }
+                else:
+                    return {
+                        **state,
+                        "approval_status": "rejected",
+                    }
+            else:
+                # String response (Y/N) - treat as approved if truthy
+                return {
+                    **state,
+                    "approval_status": "approved" if approval_response else "rejected",
+                }
 
         async def api_execution_node(state: NetBoxManagementState) -> NetBoxManagementState:
             """Execute NetBox API operation."""
@@ -335,10 +385,10 @@ API 端点: {state.get("api_endpoint")}
         workflow.add_edge("verification", "final_answer")
         workflow.add_edge("final_answer", END)
 
-        # Compile with interrupt before approval
+        # Compile with checkpointer
+        # HITL is handled by interrupt() in hitl_approval_node
         return workflow.compile(
             checkpointer=checkpointer,
-            interrupt_before=["hitl_approval"],
         )
 
 

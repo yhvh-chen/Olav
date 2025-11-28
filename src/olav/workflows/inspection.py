@@ -46,6 +46,7 @@ from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
 from olav.sync import (
     DiffEngine,
+    DiffResult,
     EntityType,
     NetBoxReconciler,
     ReconciliationReport,
@@ -70,6 +71,7 @@ class InspectionState(BaseWorkflowState):
     reconcile_results: list[dict] | None  # Reconciliation results
     dry_run: bool  # Whether to apply changes
     auto_correct: bool  # Whether to auto-correct safe fields
+    user_approval: str | None  # HITL approval status: approved/rejected/skip
 
 
 @WorkflowRegistry.register(
@@ -163,6 +165,7 @@ class InspectionWorkflow(BaseWorkflow):
         workflow.add_node("parse_scope", self._parse_scope)
         workflow.add_node("collect_data", self._collect_data)
         workflow.add_node("generate_report", self._generate_report)
+        workflow.add_node("hitl_approval", self._hitl_approval)
         workflow.add_node("apply_reconciliation", self._apply_reconciliation)
         workflow.add_node("final_summary", self._final_summary)
 
@@ -170,11 +173,19 @@ class InspectionWorkflow(BaseWorkflow):
         workflow.set_entry_point("parse_scope")
         workflow.add_edge("parse_scope", "collect_data")
         workflow.add_edge("collect_data", "generate_report")
-        workflow.add_edge("generate_report", "apply_reconciliation")
+        workflow.add_edge("generate_report", "hitl_approval")
+        workflow.add_conditional_edges(
+            "hitl_approval",
+            self._route_after_approval,
+            {
+                "apply_reconciliation": "apply_reconciliation",
+                "final_summary": "final_summary",
+            },
+        )
         workflow.add_edge("apply_reconciliation", "final_summary")
         workflow.add_edge("final_summary", END)
 
-        # Compile
+        # Compile - HITL is handled by interrupt() in hitl_approval node
         if checkpointer:
             return workflow.compile(checkpointer=checkpointer)
         return workflow.compile()
@@ -303,8 +314,6 @@ class InspectionWorkflow(BaseWorkflow):
             return {}
         
         # Reconstruct report for markdown generation
-        from olav.sync.models import ReconciliationReport, DiffResult
-        
         report = ReconciliationReport(
             device_scope=diff_report_dict.get("device_scope", []),
             total_entities=diff_report_dict.get("total_entities", 0),
@@ -328,6 +337,97 @@ class InspectionWorkflow(BaseWorkflow):
             ],
         }
 
+    async def _hitl_approval(self, state: InspectionState) -> dict[str, Any]:
+        """HITL approval for sync operations.
+        
+        Uses LangGraph interrupt to pause and wait for user approval.
+        """
+        from langgraph.types import interrupt
+        from config.settings import AgentConfig
+        
+        diff_report_dict = state.get("diff_report")
+        user_approval = state.get("user_approval")
+        
+        # Check if there are any diffs to sync
+        if not diff_report_dict or not diff_report_dict.get("diffs"):
+            return {
+                "user_approval": "skip",
+                "dry_run": True,  # No sync needed
+            }
+        
+        diff_count = len(diff_report_dict.get("diffs", []))
+        mismatched = diff_report_dict.get("mismatched", 0)
+        
+        # If no mismatches, skip HITL
+        if mismatched == 0:
+            return {
+                "user_approval": "skip",
+                "dry_run": True,
+            }
+        
+        # YOLO mode: auto-approve
+        if AgentConfig.YOLO_MODE and user_approval is None:
+            logger.info("[YOLO] Auto-approving inspection sync...")
+            return {
+                "user_approval": "approved",
+                "dry_run": False,  # Execute actual sync
+            }
+        
+        # Already processed (resuming after interrupt)
+        if user_approval in ("approved", "rejected", "skip"):
+            return {
+                "user_approval": user_approval,
+                "dry_run": user_approval != "approved",
+            }
+        
+        # HITL: Request user approval via interrupt
+        summary = diff_report_dict.get("summary_by_severity", {})
+        
+        approval_message = (
+            f"🔍 **巡检发现 {mismatched} 处差异需要同步**\n\n"
+            f"- 严重: {summary.get('critical', 0)}\n"
+            f"- 警告: {summary.get('warning', 0)}\n"
+            f"- 信息: {summary.get('info', 0)}\n\n"
+            f"是否将网络状态同步到 NetBox？\n"
+            f"输入 Y 确认执行, N 取消:"
+        )
+        
+        approval_response = interrupt({
+            "action": "approval_required",
+            "diff_count": diff_count,
+            "mismatched": mismatched,
+            "summary": summary,
+            "message": approval_message,
+        })
+        
+        # Process approval response
+        if isinstance(approval_response, dict):
+            if approval_response.get("approved") or approval_response.get("user_approval") == "approved":
+                return {
+                    "user_approval": "approved",
+                    "dry_run": False,  # Execute actual sync
+                }
+            else:
+                return {
+                    "user_approval": "rejected",
+                    "dry_run": True,  # Don't execute
+                }
+        else:
+            # String response - check for approval
+            return {
+                "user_approval": "approved" if approval_response else "rejected",
+                "dry_run": not bool(approval_response),
+            }
+
+    def _route_after_approval(self, state: InspectionState) -> Literal["apply_reconciliation", "final_summary"]:
+        """Route based on approval decision."""
+        user_approval = state.get("user_approval")
+        
+        if user_approval == "approved":
+            return "apply_reconciliation"
+        # Skip or rejected - go directly to summary
+        return "final_summary"
+
     async def _apply_reconciliation(self, state: InspectionState) -> dict[str, Any]:
         """Apply reconciliation for auto-correctable diffs."""
         diff_report_dict = state.get("diff_report")
@@ -338,8 +438,6 @@ class InspectionWorkflow(BaseWorkflow):
             return {"reconcile_results": []}
         
         # Reconstruct report
-        from olav.sync.models import ReconciliationReport, DiffResult
-        
         report = ReconciliationReport(
             device_scope=diff_report_dict.get("device_scope", []),
         )
@@ -349,12 +447,16 @@ class InspectionWorkflow(BaseWorkflow):
         # Configure reconciler
         self.reconciler.dry_run = dry_run
         
+        # User already approved at workflow level, so no need for per-item HITL
+        # require_hitl=False means execute directly after user approval
+        user_approved = state.get("user_approval") == "approved"
+        
         # Run reconciliation
         try:
             results = await self.reconciler.reconcile(
                 report,
                 auto_correct=auto_correct,
-                require_hitl=True,
+                require_hitl=not user_approved,  # Skip per-item HITL if user already approved
             )
             
             return {

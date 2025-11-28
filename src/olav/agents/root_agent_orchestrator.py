@@ -438,10 +438,16 @@ class WorkflowOrchestrator:
         # 3. Build and execute workflow graph
         # DEEP_DIVE always needs checkpointer for HITL interrupt support
         # Other workflows respect stream_stateless setting for LangServe compatibility
-        if workflow_type == WorkflowType.DEEP_DIVE:
-            # DeepDive requires stateful execution for HITL approval
+        # NETBOX_MANAGEMENT, DEVICE_EXECUTION and INSPECTION also need HITL support
+        if workflow_type in (
+            WorkflowType.DEEP_DIVE,
+            WorkflowType.NETBOX_MANAGEMENT,
+            WorkflowType.DEVICE_EXECUTION,
+            WorkflowType.INSPECTION,
+        ):
+            # These workflows require stateful execution for HITL approval
             use_stateless = False
-            print("[Orchestrator] DeepDive workflow: forcing stateful mode for HITL support")
+            print(f"[Orchestrator] {workflow_type.name} workflow: forcing stateful mode for HITL support")
         else:
             use_stateless = settings.stream_stateless
         graph = workflow.build_graph(checkpointer=None if use_stateless else self.checkpointer)
