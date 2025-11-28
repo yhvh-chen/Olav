@@ -346,13 +346,14 @@ LangChain 的 `OpenSearchVectorSearch` 不支持我们的多索引场景。
    移除的依赖: scikit-learn, scipy, joblib, threadpoolctl (4个包)
 ```
 
-### Phase 2: P1 项目 (评估后降级)
+### Phase 2: P1 项目 (评估后部分完成)
 
 ```
-3. ToolRegistry 简化 → 暂缓
-   - 使用次数: 148处
-   - 重构风险: 高 (需修改全部工具文件)
-   - 结论: 当前设计合理，ToolOutput 标准化有价值
+3. ToolRegistry 简化 → ✅ 已简化
+   - [x] 移除 discover_tools() 自动发现 (~50行复杂代码)
+   - [x] 改为幂等注册 (重复注册静默跳过)
+   - [x] 保留 ToolOutput 标准化 (有价值)
+   - 未做: @tool 装饰器统一 (影响范围太大，暂缓)
 
 4. Cache 系统评估 → 保留
    - 代码行数: 678行
@@ -374,8 +375,9 @@ LangChain 的 `OpenSearchVectorSearch` 不支持我们的多索引场景。
 | 指标 | 之前 | 之后 |
 |------|------|------|
 | 依赖数量 | sklearn, scipy, joblib, threadpoolctl | ✅ 全部移除 (4个包) |
-| 删除代码 | - | ~200行 (extract_json, tool_call_parser) |
+| 删除代码 | - | ~250行 (extract_json, tool_call_parser, discover_tools) |
 | 自定义代码 | numpy/sklearn手动操作 | LangChain原生API |
+| 工具注册 | 复杂自动发现+重复警告 | 简单自注册，幂等 |
 | LangChain 兼容性 | 中 | 高 |
 | 自定义代码行数 | ~2000行 | ~800行 |
 | 维护复杂度 | 高 | 中 |

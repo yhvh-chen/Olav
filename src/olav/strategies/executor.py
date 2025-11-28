@@ -117,9 +117,9 @@ class StrategyExecutor:
         if self._fast_path is None:
             from olav.tools.base import ToolRegistry
             
-            # Ensure tools are discovered
+            # Import tools package to trigger self-registration
             if not ToolRegistry.list_tools():
-                ToolRegistry.discover_tools("olav.tools")
+                import olav.tools  # noqa: F401 - triggers tool registration
             
             self._fast_path = FastPathStrategy(
                 llm=self.llm,
@@ -133,8 +133,9 @@ class StrategyExecutor:
         if self._deep_path is None:
             from olav.tools.base import ToolRegistry
             
+            # Import tools package to trigger self-registration
             if not ToolRegistry.list_tools():
-                ToolRegistry.discover_tools("olav.tools")
+                import olav.tools  # noqa: F401 - triggers tool registration
             
             self._deep_path = DeepPathStrategy(
                 llm=self.llm,

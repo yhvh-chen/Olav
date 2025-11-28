@@ -8,13 +8,14 @@ inconsistent tool return types (DataFrame, dict, str, XML, etc.).
 Key Components:
 - ToolOutput: Pydantic model for unified tool responses
 - BaseTool: Protocol defining tool interface
-- ToolRegistry: Auto-discovery and registration of tools
+- ToolRegistry: Simple tool registry with self-registration
 
 Design Principles:
 1. All tools return ToolOutput (source, device, timestamp, data, metadata)
 2. Data field is always List[Dict[str, Any]] - no DataFrames or raw strings
 3. Adapters normalize vendor-specific formats (XML, JSON, text) to dict
 4. LLM receives clean JSON - no parsing required
+5. Tools self-register on module import (no discover_tools needed)
 
 Usage:
     from olav.tools.base import ToolOutput, BaseTool, ToolRegistry
@@ -30,15 +31,15 @@ Usage:
                 data=[{"result": "success"}]
             )
 
-    # Auto-register
+    # Self-register at module load
     ToolRegistry.register(MyTool())
+    
+    # Retrieve tool
+    tool = ToolRegistry.get_tool("my_tool")
 """
 
-import importlib
-import inspect
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
@@ -173,23 +174,21 @@ class BaseTool(Protocol):
 
 class ToolRegistry:
     """
-    Central registry for tool auto-discovery and management.
+    Simple registry for OLAV tools.
 
-    Tools register themselves by calling ToolRegistry.register(tool_instance).
-    The registry can auto-discover tools by scanning the tools/ directory
-    and importing modules that define BaseTool subclasses.
+    Provides a centralized registry for tool instances. Tools register 
+    themselves at module load time via ToolRegistry.register().
+
+    Note: discover_tools() has been removed - tools self-register on import.
 
     Attributes:
         _tools: Dict mapping tool names to tool instances
 
     Example:
-        # Manual registration
+        # Registration (in tool module)
         ToolRegistry.register(SuzieqTool())
 
-        # Auto-discovery
-        ToolRegistry.discover_tools("olav.tools")
-
-        # Retrieve tool
+        # Retrieval
         tool = ToolRegistry.get_tool("suzieq_query")
         result = await tool.execute(table="bgp")
     """
@@ -204,25 +203,31 @@ class ToolRegistry:
         Args:
             tool: Tool instance implementing BaseTool protocol
 
-        Raises:
-            ValueError: If tool with same name already registered
-            TypeError: If tool doesn't implement BaseTool protocol
+        Note:
+            If tool with same name exists, silently skips (idempotent).
+            This allows safe re-imports without errors.
         """
         # Validate tool implements protocol
         if not hasattr(tool, "name") or not hasattr(tool, "execute"):
             msg = f"Tool {tool.__class__.__name__} does not implement BaseTool protocol"
             raise TypeError(msg)
 
+        # Idempotent: skip if already registered (same class)
         if tool.name in cls._tools:
+            existing = cls._tools[tool.name]
+            if existing.__class__.__name__ == tool.__class__.__name__:
+                # Same tool, skip silently
+                return
+            # Different class with same name - this is a real conflict
             msg = (
-                f"Tool '{tool.name}' already registered. "
-                f"Existing: {cls._tools[tool.name].__class__.__name__}, "
+                f"Tool name conflict: '{tool.name}' - "
+                f"Existing: {existing.__class__.__name__}, "
                 f"New: {tool.__class__.__name__}"
             )
             raise ValueError(msg)
 
         cls._tools[tool.name] = tool
-        logger.info(f"Registered tool: {tool.name} ({tool.__class__.__name__})")
+        logger.debug(f"Registered tool: {tool.name}")
 
     @classmethod
     def get_tool(cls, name: str) -> BaseTool | None:
@@ -248,59 +253,14 @@ class ToolRegistry:
         return list(cls._tools.values())
 
     @classmethod
-    def discover_tools(cls, package: str) -> None:
+    def tool_names(cls) -> list[str]:
         """
-        Auto-discover tools in a package by importing all *_tool.py files.
+        Get all registered tool names.
 
-        This scans the specified package for modules matching *_tool.py pattern,
-        imports them, and registers any classes that implement BaseTool.
-
-        Args:
-            package: Python package path (e.g., "olav.tools")
-
-        Example:
-            ToolRegistry.discover_tools("olav.tools")
-            # Imports: suzieq_tool.py, netconf_tool.py, cli_tool.py, etc.
+        Returns:
+            List of tool name strings
         """
-        try:
-            # Import the package
-            pkg = importlib.import_module(package)
-            pkg_path = Path(pkg.__file__).parent
-
-            # Find all *_tool.py files
-            tool_files = list(pkg_path.glob("*_tool.py"))
-
-            logger.info(f"Discovering tools in {package}, found {len(tool_files)} modules")
-
-            for tool_file in tool_files:
-                module_name = f"{package}.{tool_file.stem}"
-
-                try:
-                    module = importlib.import_module(module_name)
-
-                    # Find all classes implementing BaseTool
-                    for name, obj in inspect.getmembers(module, inspect.isclass):
-                        # Check if class has required attributes (duck typing)
-                        if (
-                            hasattr(obj, "name")
-                            and hasattr(obj, "description")
-                            and hasattr(obj, "execute")
-                            and not inspect.isabstract(obj)
-                        ):
-                            # Instantiate and register
-                            try:
-                                tool_instance = obj()
-                                cls.register(tool_instance)
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to instantiate tool {name} from {module_name}: {e}"
-                                )
-
-                except Exception as e:
-                    logger.warning(f"Failed to import {module_name}: {e}")
-
-        except Exception as e:
-            logger.error(f"Failed to discover tools in {package}: {e}")
+        return list(cls._tools.keys())
 
     @classmethod
     def clear(cls) -> None:
