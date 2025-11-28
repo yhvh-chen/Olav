@@ -721,6 +721,8 @@ class DiffEngine:
                             "description": sq_data.get("description", ""),
                             "mtu": sq_data.get("mtu"),
                             "enabled": sq_data.get("adminState", "up") == "up",
+                            "type": sq_data.get("type"),
+                            "speed": sq_data.get("speed"),
                         },
                     )
                 )
