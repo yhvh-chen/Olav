@@ -563,6 +563,105 @@ async def test_langserve_remote_runnable(base_url: str, server_token: str):
 
 
 # ============================================
+# Test 13: Sessions API - List Sessions
+# ============================================
+@pytest.mark.asyncio
+async def test_sessions_list(base_url: str, server_token: str):
+    """Test sessions list endpoint.
+    
+    Validates:
+    - GET /sessions returns 200 with valid token
+    - Response contains sessions array and total count
+    - Returns 401 without token
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test with valid token
+        response = await client.get(
+            f"{base_url}/sessions",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        data = response.json()
+        
+        # Validate response structure
+        assert "sessions" in data, "Response missing 'sessions' field"
+        assert "total" in data, "Response missing 'total' field"
+        assert isinstance(data["sessions"], list), "sessions should be a list"
+        assert isinstance(data["total"], int), "total should be an integer"
+        
+        # Test without token (should fail)
+        response_no_auth = await client.get(f"{base_url}/sessions")
+        assert response_no_auth.status_code == 401, "Expected 401 without auth"
+
+
+# ============================================
+# Test 14: Sessions API - Get Session (Not Found)
+# ============================================
+@pytest.mark.asyncio
+async def test_sessions_get_not_found(base_url: str, server_token: str):
+    """Test session get endpoint with non-existent session.
+    
+    Validates:
+    - GET /sessions/{id} returns 404 for non-existent session
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{base_url}/sessions/non-existent-session-12345",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+
+
+# ============================================
+# Test 15: Topology API - Get Network Topology
+# ============================================
+@pytest.mark.asyncio
+async def test_topology_endpoint(base_url: str, server_token: str):
+    """Test network topology endpoint.
+    
+    Validates:
+    - GET /topology returns 200 with valid token
+    - Response contains nodes and edges arrays
+    - Returns 401 without token
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test with valid token
+        response = await client.get(
+            f"{base_url}/topology",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        data = response.json()
+        
+        # Validate response structure
+        assert "nodes" in data, "Response missing 'nodes' field"
+        assert "edges" in data, "Response missing 'edges' field"
+        assert isinstance(data["nodes"], list), "nodes should be a list"
+        assert isinstance(data["edges"], list), "edges should be a list"
+        
+        # Validate node structure if any nodes exist
+        if data["nodes"]:
+            node = data["nodes"][0]
+            assert "id" in node, "Node missing 'id' field"
+            assert "hostname" in node, "Node missing 'hostname' field"
+            assert "status" in node, "Node missing 'status' field"
+        
+        # Validate edge structure if any edges exist
+        if data["edges"]:
+            edge = data["edges"][0]
+            assert "id" in edge, "Edge missing 'id' field"
+            assert "source" in edge, "Edge missing 'source' field"
+            assert "target" in edge, "Edge missing 'target' field"
+        
+        # Test without token (should fail)
+        response_no_auth = await client.get(f"{base_url}/topology")
+        assert response_no_auth.status_code == 401, "Expected 401 without auth"
+
+
+# ============================================
 # Summary Report
 # ============================================
 @pytest.fixture(scope="session", autouse=True)
@@ -582,4 +681,6 @@ def print_test_summary(request):
     print("  ✓ CLI client remote mode integration")
     print("  ✓ Error handling (401, 422, malformed requests)")
     print("  ✓ LangServe RemoteRunnable SDK compatibility")
+    print("  ✓ Sessions API (list, get, delete)")
+    print("  ✓ Topology API (network graph data)")
     print("="*60)
