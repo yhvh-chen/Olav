@@ -892,8 +892,9 @@ export interface ExecutionPlan {
 |------|--------|------|
 | ~~Token 输入页面~~ | ~~P0~~ | ✅ 已完成 |
 | ~~路由保护 (middleware)~~ | ~~P0~~ | ✅ 已完成 |
-| 后端连接测试 | P1 | 后端服务运行 |
-| Docker Compose 集成 | P1 | - |
+| ~~后端连接测试~~ | ~~P1~~ | ✅ 已完成 (E2E tests passing) |
+| ~~Docker Compose 集成~~ | ~~P1~~ | ✅ 已完成 (olav-webgui service) |
+| ~~Single Token Auth 对齐~~ | ~~P1~~ | ✅ 已完成 (removed JWT) |
 | 会话历史侧边栏 | P2 | PostgreSQL checkpointer |
 | 网络拓扑页面 | P3 | NetBox/SuzieQ 数据 |
 

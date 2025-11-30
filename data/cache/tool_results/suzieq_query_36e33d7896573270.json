@@ -5,7 +5,7 @@
     "hostname": "R1",
     "method": "get"
   },
-  "cached_at": 1764542941.0661192,
+  "cached_at": 1764544044.7454493,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq_query",
