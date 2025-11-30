@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 class WorkflowOrchestrator:
     """Route user queries to appropriate workflow using Dynamic Intent Router.
-    
+
     Strategy Integration:
     - For QUERY_DIAGNOSTIC: Uses StrategySelector to choose Fast/Deep/Batch path
     - Fast Path: Simple queries (< 2s response, single tool call)
@@ -190,7 +190,7 @@ class WorkflowOrchestrator:
         This method has been refactored to use LLMWorkflowRouter for more
         dynamic, context-aware classification. The hardcoded keyword patterns
         have been moved to the router as minimal fallback.
-        
+
         See: olav.core.llm_workflow_router for implementation details.
         """
         from olav.core.llm_workflow_router import LLMWorkflowRouter, WorkflowRouteResult
@@ -243,9 +243,10 @@ class WorkflowOrchestrator:
             return WorkflowType.INSPECTION
 
         # Priority 3: NetBox management
-        if any(kw in query_lower for kw in [
-            "设备清单", "inventory", "netbox", "ip分配", "ip地址", "站点", "机架"
-        ]):
+        if any(
+            kw in query_lower
+            for kw in ["设备清单", "inventory", "netbox", "ip分配", "ip地址", "站点", "机架"]
+        ):
             return WorkflowType.NETBOX_MANAGEMENT
 
         # Priority 4: Device execution (config changes)
@@ -285,7 +286,9 @@ class WorkflowOrchestrator:
             try:
                 strategy_result = await self._execute_with_strategy(user_query)
                 if strategy_result and strategy_result.get("success"):
-                    print(f"[Orchestrator] Strategy optimization succeeded: {strategy_result.get('strategy_used')}")
+                    print(
+                        f"[Orchestrator] Strategy optimization succeeded: {strategy_result.get('strategy_used')}"
+                    )
                     return {
                         "workflow_type": workflow_type.name,
                         "result": strategy_result,
@@ -310,7 +313,9 @@ class WorkflowOrchestrator:
         ):
             # These workflows require stateful execution for HITL approval
             use_stateless = False
-            print(f"[Orchestrator] {workflow_type.name} workflow: forcing stateful mode for HITL support")
+            print(
+                f"[Orchestrator] {workflow_type.name} workflow: forcing stateful mode for HITL support"
+            )
         else:
             use_stateless = settings.stream_stateless
         graph = workflow.build_graph(checkpointer=None if use_stateless else self.checkpointer)
@@ -318,7 +323,8 @@ class WorkflowOrchestrator:
         config = {
             "configurable": {
                 "thread_id": thread_id,
-            }
+            },
+            "recursion_limit": 100,  # Increased from default 25 for multi-device operations
         }
 
         initial_state = {
@@ -490,7 +496,8 @@ class WorkflowOrchestrator:
                 "result": result,
                 "interrupted": True,
                 "next_node": state_snapshot.next[0] if state_snapshot.next else None,
-                "execution_plan": result.get("execution_plan") or current_state.get("execution_plan"),
+                "execution_plan": result.get("execution_plan")
+                or current_state.get("execution_plan"),
                 "todos": result.get("todos") or current_state.get("todos", []),
                 "final_message": result["messages"][-1].content if result.get("messages") else None,
             }
@@ -742,7 +749,7 @@ async def create_workflow_orchestrator(expert_mode: bool = False):
             output_messages = result_data["messages"]
         elif result.get("final_message"):
             # Strategy path: convert final_message to AIMessage
-            output_messages = normalized_messages + [AIMessage(content=result["final_message"])]
+            output_messages = [*normalized_messages, AIMessage(content=result["final_message"])]
         else:
             output_messages = normalized_messages
 

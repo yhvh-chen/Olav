@@ -3,36 +3,60 @@ input_variables:
   - config_plan
   - execution_result
 template: |
-  验证配置变更是否成功。
+  Validate that configuration changes were successfully applied.
 
-  ## 配置计划
+  ## Configuration Plan
   {config_plan}
 
-  ## 执行结果
+  ## Execution Result
   {execution_result}
 
-  ## 验证策略
+  ## Chain of Thought - Validation Process
 
-  1. **NETCONF 验证** (优先):
-     - get_config 查询刚配置的 XPath
-     - 对比 payload 和实际配置
+  Think step by step:
 
-  2. **SuzieQ 验证** (补充):
-     - 等待 SuzieQ poller 更新（通常 60s）
-     - 查询相关表确认变更生效
-     - 例如: suzieq_query(table='interfaces', ifname='Vlan100')
+  ### Step 1: Analyze What Was Configured
+  - What configuration was applied?
+  - Which devices were targeted?
+  - What should the verification command/query be?
 
-  3. **输出要求**:
-     - 验证通过: 说明配置已生效
-     - 验证失败: 给出差异点和建议
-     - 部分成功: 列出成功/失败的设备
+  ### Step 2: Choose Verification Method
+  - **CLI Verification** (simple configs): `show running-config | include <keyword>`
+  - **NETCONF Verification** (structured): `netconf_tool` with get-config operation
+  - **SuzieQ Verification** (state-based): Query relevant tables after ~60s poller update
 
-  ## 示例
+  ### Step 3: Execute Verification for Each Device
+  Call the appropriate verification tool:
+  - `cli_tool(device="X", command="show running-config | include logging")` for CLI
+  - `netconf_tool(device="X", operation="get-config", xpath="/path")` for NETCONF
+  - `suzieq_query(table='interfaces', hostname='X')` for state verification
 
-  config_plan = {{\"devices\": [\"router1\"], \"xpath\": \"/interfaces/interface[name='Vlan100']\", ...}}
-  validation:
-  1. netconf_tool(device="router1", operation="get_config", xpath="/interfaces/interface[name='Vlan100']")
-  2. 对比: 配置的 VLAN ID = 100, 实际 VLAN ID = 100 ✓
-  3. suzieq_query(table='interfaces', hostname='router1', ifname='Vlan100')
-     → 状态: up, 验证通过 ✓
-  4. validation_result = {{\"status\": \"success\", \"verified_at\": \"...\"}}
+  ### Step 4: Compare and Report
+  - **PASS**: Configuration found and matches expected
+  - **FAIL**: Configuration missing or differs from expected
+  - **PARTIAL**: Some devices passed, some failed
+
+  ## Example
+
+  Plan: Configure logging host 192.168.100.10 on R1
+  Execution: cli_tool succeeded
+
+  **Thinking:**
+  1. Need to verify logging host configuration on R1
+  2. Best verification: CLI command `show running-config | include logging`
+  3. Execute verification
+  4. Check if "logging host 192.168.100.10" appears in output
+
+  **Verification:**
+  ```
+  cli_tool(device="R1", command="show running-config | include logging")
+  → Output: "logging host 192.168.100.10"
+  → Result: PASS ✅
+  ```
+
+  ## Output Format
+
+  Provide a structured validation result:
+  - Overall Status: PASS / FAIL / PARTIAL
+  - Per-device results with evidence
+  - Recommendations if validation failed

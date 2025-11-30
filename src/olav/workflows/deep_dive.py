@@ -459,19 +459,125 @@ class DeepDiveWorkflow(BaseWorkflow):
     # NEW: Funnel Debugging Nodes
     # ============================================
 
+    async def _search_historical_diagnostics(
+        self, user_query: str, max_results: int = 3
+    ) -> dict[str, Any] | None:
+        """Search episodic memory for historical similar diagnostics (Agentic RAG Read).
+
+        This implements RAG optimization for DeepDive: if we've successfully
+        diagnosed a similar issue before, reuse the diagnostic approach.
+
+        Args:
+            user_query: User's diagnostic query
+            max_results: Maximum historical patterns to retrieve
+
+        Returns:
+            Dict with historical diagnostic pattern if found, else None
+
+        Example:
+            >>> pattern = await self._search_historical_diagnostics("R1 BGP 邻居问题")
+            >>> pattern
+            {
+                "intent": "R1 R2 BGP 邻居建立失败",
+                "phases_completed": 3,
+                "findings_count": 2,
+                "affected_devices": ["R1", "R2"],
+                "root_cause": "BGP peer IP 配置错误",
+                "confidence": 0.85
+            }
+        """
+        # Check if RAG read is enabled
+        if not settings.enable_deep_dive_memory:
+            logger.debug("Deep Dive memory disabled, skipping historical search")
+            return None
+
+        try:
+            from olav.tools.opensearch_tool import search_episodic_memory
+
+            result = await search_episodic_memory.ainvoke({
+                "intent": user_query,
+                "max_results": max_results,
+                "only_successful": True,
+            })
+
+            if not result.get("success") or not result.get("data"):
+                logger.debug(f"No historical diagnostics found for: {user_query[:50]}...")
+                return None
+
+            # Get best match (first result, highest relevance)
+            best_match = result["data"][0]
+
+            # Filter for DeepDive-specific patterns
+            tool_used = best_match.get("context", {}).get("tool_used", "")
+            if tool_used not in ("deep_dive_workflow", "deep_dive_funnel"):
+                logger.debug(f"Historical pattern is not from DeepDive: {tool_used}")
+                return None
+
+            # Calculate similarity confidence (simple heuristic)
+            historical_intent = best_match.get("intent", "")
+            query_words = set(user_query.lower().split())
+            historical_words = set(historical_intent.lower().split())
+
+            if query_words and historical_words:
+                intersection = query_words & historical_words
+                union = query_words | historical_words
+                similarity = len(intersection) / len(union)
+            else:
+                similarity = 0.0
+
+            # Only use if similarity is above threshold
+            if similarity < 0.6:
+                logger.debug(
+                    f"Historical pattern similarity {similarity:.2f} below threshold"
+                )
+                return None
+
+            context = best_match.get("context", {})
+            return {
+                "intent": historical_intent,
+                "phases_completed": context.get("phases_completed", 0),
+                "findings_count": context.get("findings_count", 0),
+                "affected_devices": context.get("affected_devices", []),
+                "result_summary": context.get("result_summary", ""),
+                "confidence": similarity,
+            }
+
+        except Exception as e:
+            logger.warning(f"Historical diagnostic search failed: {e}")
+            return None
+
     async def topology_analysis_node(self, state: DeepDiveState) -> dict:
         """Analyze user query to identify affected devices and fault scope.
 
         This is the first step in funnel debugging:
-        1. Extract device names from query
-        2. Infer device roles (router, switch, firewall)
-        3. Determine fault scope (single, local, path, domain)
-        4. Query LLDP/topology if available
+        1. [NEW] Search historical diagnostics (Agentic RAG Read)
+        2. Extract device names from query
+        3. Infer device roles (router, switch, firewall)
+        4. Determine fault scope (single, local, path, domain)
+        5. Query LLDP/topology if available
 
         Returns:
             Updated state with topology analysis
         """
         user_query = state["messages"][-1].content if state["messages"] else ""
+
+        # ============================================
+        # Step 0: Agentic RAG - Search Historical Diagnostics
+        # ============================================
+        historical_pattern = await self._search_historical_diagnostics(user_query)
+        historical_context = ""
+        if historical_pattern:
+            logger.info(
+                f"Found historical diagnostic pattern: {historical_pattern['intent'][:50]}... "
+                f"(confidence: {historical_pattern['confidence']:.2f})"
+            )
+            historical_context = (
+                f"\n\n📚 **历史参考**: 发现类似问题的成功诊断记录\n"
+                f"- 历史问题: {historical_pattern['intent'][:100]}\n"
+                f"- 诊断阶段: {historical_pattern['phases_completed']} 个\n"
+                f"- 发现问题: {historical_pattern['findings_count']} 项\n"
+                f"- 参考价值: {historical_pattern['confidence']:.0%}\n"
+            )
 
         # Extract device names using regex
         device_pattern = r"\b([A-Z]{1,4}[-_]?[A-Z0-9]*[-_]?[A-Z0-9]*\d+)\b"
@@ -508,13 +614,17 @@ class DeepDiveWorkflow(BaseWorkflow):
             except Exception as e:
                 logger.warning(f"LLDP query failed: {e}")
 
-        # Use LLM to analyze topology
+        # Use LLM to analyze topology (with historical context if available)
         prompt = prompt_manager.load_prompt(
             category="workflows/deep_dive",
             name="topology_analysis",
             user_query=user_query,
             devices_mentioned=", ".join(devices_mentioned) if devices_mentioned else "未明确指定",
         )
+
+        # Enhance prompt with historical context
+        if historical_pattern:
+            prompt += f"\n\n历史参考信息:\n{historical_context}"
 
         response = await self.llm_json.ainvoke(
             [
@@ -562,7 +672,7 @@ class DeepDiveWorkflow(BaseWorkflow):
 **受影响设备**: {", ".join(topology["affected_devices"]) or "待确定"}
 **置信度**: {topology["confidence"]}
 
-{topology_context if topology_context else ""}
+{topology_context if topology_context else ""}{historical_context}
 
 正在生成分层诊断计划..."""
 
@@ -1681,12 +1791,14 @@ class DeepDiveWorkflow(BaseWorkflow):
                             syslog_keywords = self._extract_syslog_keywords(task_text)
                             device_ip = extra_filters.get("device_ip")
 
-                            syslog_result = await syslog_search.ainvoke({
-                                "keyword": syslog_keywords,
-                                "device_ip": device_ip,
-                                "start_time": "now-1h",
-                                "limit": 50,
-                            })
+                            syslog_result = await syslog_search.ainvoke(
+                                {
+                                    "keyword": syslog_keywords,
+                                    "device_ip": device_ip,
+                                    "start_time": "now-1h",
+                                    "limit": 50,
+                                }
+                            )
 
                             if syslog_result.get("success") and syslog_result.get("data"):
                                 tool_result = {
@@ -1700,7 +1812,8 @@ class DeepDiveWorkflow(BaseWorkflow):
                                 tool_result = {
                                     "status": "NO_DATA_FOUND",
                                     "table": "syslog",
-                                    "message": syslog_result.get("error") or "No syslog entries found",
+                                    "message": syslog_result.get("error")
+                                    or "No syslog entries found",
                                     "hint": f"Keywords: {syslog_keywords}",
                                 }
                         except Exception as e:
@@ -1863,12 +1976,14 @@ class DeepDiveWorkflow(BaseWorkflow):
                     syslog_keywords = self._extract_syslog_keywords(task_text)
                     device_ip = extra_filters.get("device_ip")
 
-                    syslog_result = await syslog_search.ainvoke({
-                        "keyword": syslog_keywords,
-                        "device_ip": device_ip,
-                        "start_time": "now-1h",  # Default: last hour
-                        "limit": 50,
-                    })
+                    syslog_result = await syslog_search.ainvoke(
+                        {
+                            "keyword": syslog_keywords,
+                            "device_ip": device_ip,
+                            "start_time": "now-1h",  # Default: last hour
+                            "limit": 50,
+                        }
+                    )
 
                     if syslog_result.get("success") and syslog_result.get("data"):
                         tool_result = {

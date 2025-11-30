@@ -1,72 +1,96 @@
 _type: prompt
 input_variables: []
 template: |
-  # SuzieQ 工具能力指南
+  # SuzieQ Tool Capability Guide
   
-  SuzieQ 是一个网络遥测工具，提供历史状态查询和分析能力。
+  SuzieQ is a network telemetry tool providing historical state queries and analysis capabilities.
   
-  ## 工具组合
+  ## Tool Set
   
-  **必须先后调用**：
-  1. `suzieq_schema_search` - 发现可用表和字段（动态，从 OpenSearch 加载）
-  2. `suzieq_query` - 执行实际查询（使用发现的表名）
+  **Must call in sequence**:
+  1. `suzieq_schema_search` - Discover available tables and fields (dynamic, from OpenSearch)
+  2. `suzieq_query` - Execute actual query (using discovered table names)
   
-  ## 核心能力
+  ## Core Capabilities
   
-  ### 1. 查询方法 (method 参数)
+  ### 1. Query Methods (method parameter)
   
-  | 方法 | 用途 | 返回值 |
-  |------|------|--------|
-  | `get` | 获取原始记录 | 详细数据列表 |
-  | `summarize` | 统计汇总 | 聚合统计信息 |
-  | `unique` | 唯一值列表 | 去重后的值 |
-  | `aver` | 断言验证 | 符合/不符合预期的记录 |
+  | Method | Purpose | Returns |
+  |--------|---------|---------|
+  | `get` | Get raw records | Detailed data list |
+  | `summarize` | Statistical summary | Aggregated statistics |
+  | `unique` | Unique values list | Deduplicated values |
+  | `aver` | Assertion validation | Records matching/not matching expectations |
   
-  ### 2. 时间窗口过滤
+  ### 2. Time Window Filtering
   
-  - `max_age_hours` 参数控制查询数据的时间范围
-  - 默认 24 小时，避免返回过期数据
-  - 设为 0 查询全部历史数据（用于趋势分析）
+  - `max_age_hours` parameter controls query time range
+  - Default 24 hours, avoids stale data
+  - Set to 0 for all historical data (trend analysis)
   
-  ### 3. 智能过滤
+  ### 3. Smart Filtering
   
-  - `hostname`: 按设备过滤（精确匹配）
-  - `namespace`: 按命名空间过滤（逻辑分组）
-  - `**filters`: 任意字段过滤（需先通过 schema_search 确认字段名）
+  - `hostname`: Filter by device (exact match)
+  - `namespace`: Filter by namespace (logical grouping)
+  - `**filters`: Any field filter (confirm field name via schema_search first)
   
-  ### 4. 自动去重
+  ### 4. Automatic Deduplication
   
-  - 自动返回每个实体的**最新状态**
-  - 优先返回 `active=True` 的记录
-  - 避免时间序列数据重复
+  - Returns **latest state** for each entity
+  - Prioritizes `active=True` records
+  - Avoids time-series data duplication
   
-  ## 高级用法
+  ## Chain of Thought - SuzieQ Queries
   
-  ### 状态变化检测
+  <thinking>
+  Step 1: Discover schema first
+  - Call suzieq_schema_search to find available tables
+  - Identify correct table name for the data needed
+  - Get available field names for filtering
+  
+  Step 2: Choose query method
+  - Need detailed records → use 'get'
+  - Need statistics/overview → use 'summarize'
+  - Need unique values → use 'unique'
+  - Need compliance check → use 'aver'
+  
+  Step 3: Apply appropriate filters
+  - Specific device → set hostname
+  - Time-based → set max_age_hours
+  - Field-specific → use discovered field names
+  
+  Step 4: Consider multi-table analysis
+  - Complex diagnoses may need multiple tables
+  - Correlate across BGP neighbors, interfaces, routes
+  </thinking>
+  
+  ## Advanced Usage
+  
+  ### State Change Detection
   ```
-  # 比较两个时间点的状态（需要两次查询）
-  1. suzieq_query(table=<表名>, max_age_hours=1)  # 最近 1 小时
-  2. suzieq_query(table=<表名>, max_age_hours=24) # 对比 24 小时
+  # Compare two time points (requires two queries)
+  1. suzieq_query(table=<table>, max_age_hours=1)  # Last 1 hour
+  2. suzieq_query(table=<table>, max_age_hours=24) # Compare with 24 hours
   ```
   
-  ### 跨表关联分析
+  ### Cross-Table Correlation Analysis
   ```
-  # 诊断路由问题时，可能需要查询多个相关表
-  1. 路由协议邻居表 → 检查邻居状态
-  2. 接口表 → 检查链路状态
-  3. 路由表 → 检查路由是否正确
-  ```
-  
-  ### 批量设备检查
-  ```
-  # 不指定 hostname 时，返回所有设备的数据
-  suzieq_query(table=<表名>, method="summarize")
+  # Diagnosing routing issues may require multiple related tables
+  1. Routing protocol neighbor table → Check neighbor status
+  2. Interface table → Check link status
+  3. Route table → Check route correctness
   ```
   
-  ## 注意事项
+  ### Batch Device Checks
+  ```
+  # Without specifying hostname, returns all devices' data
+  suzieq_query(table=<table>, method="summarize")
+  ```
   
-  - ✅ **只读工具** - 不会修改任何设备配置
-  - ✅ **Parquet 存储** - 数据来自本地文件，无网络延迟
-  - ⚠️ **字段名大小写敏感** - 使用 schema_search 确认字段名
-  - ⚠️ **表名不要猜测** - 始终先用 schema_search 发现
-  - ⚠️ **数据延迟** - 取决于采集间隔（通常 60 秒）
+  ## Important Notes
+  
+  - ✅ **Read-only tool** - Won't modify any device configuration
+  - ✅ **Parquet storage** - Data from local files, no network latency
+  - ⚠️ **Field names are case-sensitive** - Use schema_search to confirm
+  - ⚠️ **Don't guess table names** - Always use schema_search first
+  - ⚠️ **Data latency** - Depends on collection interval (typically 60 seconds)

@@ -1,5 +1,24 @@
 
 services:
+  # Fluent Bit - Network Device Log Collector
+  # Replaces rsyslog for better OpenSearch 2.x compatibility
+  fluent-bit:
+    image: fluent/fluent-bit:latest
+    container_name: olav-fluent-bit
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+      - "2020:2020"  # HTTP monitoring endpoint
+    volumes:
+      - ./config/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./config/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - olav-network
+    restart: unless-stopped
+
   # OpenSearch - Vector Database & Schema Index
   opensearch:
     image: opensearchproject/opensearch:2.16.0
@@ -11,6 +30,7 @@ services:
       - "19600:9600"  # Changed to 19600 to avoid Windows reserved port range
     volumes:
       - opensearch_data:/usr/share/opensearch/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
@@ -29,6 +49,7 @@ services:
       - "55432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U olav -d olav"]
       interval: 10s
@@ -45,6 +66,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -78,7 +100,13 @@ services:
         condition: service_completed_successfully
     networks:
       - olav-network
-    # profiles removed for unified startup
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8501/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   suzieq-poller:
     image: netenglabs/suzieq:latest
@@ -116,6 +144,7 @@ services:
       POSTGRES_PASSWORD: netbox
     volumes:
       - netbox_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"]
       interval: 10s
@@ -132,6 +161,7 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - netbox_redis_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -177,6 +207,13 @@ services:
       - ./data/netbox-reports:/opt/netbox/netbox/reports
       - ./data/netbox-scripts:/opt/netbox/netbox/scripts
       - ./config/netbox-extra:/etc/netbox/config/extra
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
 
   # OLAV Init - ETL Pipeline (runs once)
   olav-init:
@@ -239,24 +276,6 @@ services:
     networks:
       - olav-network
 
-  # OLAV Embedder - Document Indexing Service
-  olav-embedder:
-    build:
-      context: .
-      dockerfile: Dockerfile.embedder
-    container_name: olav-embedder
-    env_file:
-      - .env
-    volumes:
-      - ./data/documents:/app/data/documents:ro
-    depends_on:
-      opensearch:
-        condition: service_healthy
-      olav-init:
-        condition: service_completed_successfully
-    networks:
-      - olav-network
-
   # OLAV App - Main ChatOps Application (Legacy CLI)
   olav-app:
     build:
@@ -265,6 +284,12 @@ services:
     container_name: olav-app
     env_file:
       - .env
+    environment:
+      # Override for Docker network (containers use service name, not localhost)
+      POSTGRES_URI: postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
+      OPENSEARCH_URL: http://opensearch:9200
+      REDIS_URL: redis://redis:6379
+      NETBOX_URL: http://netbox:8080
     ports:
       - "8000:8000"
     volumes:
@@ -283,8 +308,13 @@ services:
         condition: service_completed_successfully
     networks:
       - olav-network
-    # profiles:
-    #   - legacy  # Disable by default, enable with: docker-compose --profile legacy up
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   # OLAV API Server - LangServe API Platform (NEW)
   olav-server:
@@ -298,6 +328,9 @@ services:
       - "8001:8000"  # External 8001 to avoid conflict with legacy app
     volumes:
       - ./config:/app/config:ro
+      - ./data/suzieq-parquet:/app/data/suzieq-parquet:ro  # SuzieQ Parquet data (read-only)
+      - ./data/documents:/app/data/documents:ro  # Documents for RAG
+      - ./data/generated_configs:/app/data/generated_configs  # Generated configs (writable)
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
@@ -307,6 +340,7 @@ services:
       - OPENSEARCH_URL=http://opensearch:9200
       - REDIS_URL=redis://redis:6379
       - NETBOX_URL=http://netbox:8080
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -323,6 +357,33 @@ services:
       # olav-init dependency removed for testing (manual PostgreSQL init above)
     networks:
       - olav-network
+
+  # OLAV WebGUI - Next.js Frontend
+  olav-webgui:
+    build:
+      context: ./webgui
+      dockerfile: Dockerfile
+      args:
+        # API URL for server-side - use Docker network
+        NEXT_PUBLIC_API_URL: http://localhost:8001
+    container_name: olav-webgui
+    ports:
+      - "3100:3000"
+    environment:
+      # Runtime API URL - browser uses host machine address
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+    depends_on:
+      olav-server:
+        condition: service_healthy
+    networks:
+      - olav-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   # OLAV E2E Tests - Integration Testing
   olav-tests:

@@ -31,7 +31,7 @@ WorkflowCategory = Literal[
 
 class WorkflowRouteResult(BaseModel):
     """Structured output for workflow routing decision.
-    
+
     Attributes:
         workflow: The selected workflow type
         confidence: Confidence score (0.0-1.0)
@@ -44,16 +44,16 @@ class WorkflowRouteResult(BaseModel):
     reasoning: str = Field(description="Explanation for routing decision")
     requires_expert_mode: bool = Field(
         default=False,
-        description="True if query requires expert mode (complex audit, batch operations)"
+        description="True if query requires expert mode (complex audit, batch operations)",
     )
 
 
 class LLMWorkflowRouter:
     """LLM-based workflow router with structured output.
-    
+
     Uses Pydantic structured output for reliable classification without
     hardcoded keyword matching.
-    
+
     Example:
         router = LLMWorkflowRouter(expert_mode=True)
         result = await router.route("审计所有边界路由器的 BGP 配置")
@@ -71,7 +71,7 @@ class LLMWorkflowRouter:
         expert_mode: bool = False,
     ) -> None:
         """Initialize the workflow router.
-        
+
         Args:
             llm: Language model to use. If None, uses LLMFactory.
             expert_mode: Whether expert mode (deep_dive) is enabled.
@@ -112,13 +112,17 @@ class LLMWorkflowRouter:
 
     def _fallback_prompt(self) -> str:
         """Fallback prompt when prompt manager fails."""
-        expert_section = """
+        expert_section = (
+            """
   5. **deep_dive** (仅专家模式): 复杂多步骤任务
      - 场景: 批量审计、跨设备故障排查、配置完整性检查
      - 关键词: 审计所有、批量、为什么无法访问、多台设备
      - 特点: 递归调查、自动任务分解
-     
-""" if self.expert_mode else ""
+
+"""
+            if self.expert_mode
+            else ""
+        )
 
         return f"""你是 OLAV 工作流编排器。根据用户查询，选择最合适的工作流。
 
@@ -128,19 +132,19 @@ class LLMWorkflowRouter:
      - 场景: BGP/OSPF 状态查询、接口状态、路由表、邻居关系
      - 关键词: 查询、显示、状态、性能分析
      - 工具: SuzieQ (宏观分析)
-     
+
   2. **device_execution**: 设备配置变更
      - 场景: VLAN 配置、接口启停、路由配置变更
      - 关键词: 配置、修改、添加、删除、shutdown
      - 工具: NETCONF/CLI
      - ⚠️ 需要 HITL 审批
-     
+
   3. **netbox_management**: NetBox SSOT 管理
      - 场景: 设备清单、IP 分配、站点/机架管理
      - 关键词: 设备清单、添加设备、IP 地址、站点
      - 工具: NetBox API
      - ⚠️ 需要 HITL 审批
-     
+
   4. **inspection**: 网络巡检和状态同步
      - 场景: NetBox 同步、配置差异检测、健康检查
      - 关键词: 巡检、同步、对比、diff、健康检查
@@ -161,10 +165,10 @@ class LLMWorkflowRouter:
 
     async def route(self, query: str) -> WorkflowRouteResult:
         """Route query to appropriate workflow using LLM.
-        
+
         Args:
             query: User's natural language query
-            
+
         Returns:
             WorkflowRouteResult with workflow type and confidence
         """
@@ -188,8 +192,7 @@ class LLMWorkflowRouter:
             # Validate expert mode requirement
             if route_result.workflow == "deep_dive" and not self.expert_mode:
                 logger.info(
-                    "Deep dive requested but expert mode disabled, "
-                    "falling back to query_diagnostic"
+                    "Deep dive requested but expert mode disabled, falling back to query_diagnostic"
                 )
                 return WorkflowRouteResult(
                     workflow="query_diagnostic",
@@ -210,7 +213,7 @@ class LLMWorkflowRouter:
 
     def _fallback_route(self, query: str) -> WorkflowRouteResult:
         """Minimal keyword fallback when LLM fails.
-        
+
         Uses reduced keyword set for reliability.
         """
         query_lower = query.lower()
@@ -263,10 +266,10 @@ _router: LLMWorkflowRouter | None = None
 
 def get_workflow_router(expert_mode: bool = False) -> LLMWorkflowRouter:
     """Get singleton workflow router instance.
-    
+
     Args:
         expert_mode: Whether expert mode (deep_dive) is enabled.
-        
+
     Returns:
         LLMWorkflowRouter instance
     """
@@ -278,11 +281,11 @@ def get_workflow_router(expert_mode: bool = False) -> LLMWorkflowRouter:
 
 async def route_workflow(query: str, expert_mode: bool = False) -> WorkflowRouteResult:
     """Convenience function for workflow routing.
-    
+
     Args:
         query: User's natural language query
         expert_mode: Whether expert mode is enabled
-        
+
     Returns:
         WorkflowRouteResult with routing decision
     """

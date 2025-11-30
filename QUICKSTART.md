@@ -365,7 +365,7 @@ uv run python -m olav.main chat -L "查询设备 R1 的接口状态"
 uv run python -m olav.main chat -e "审计所有边界路由器的 BGP 安全配置"
 
 # 恢复之前的会话继续对话
-uv run python -m olav.main chat --thread-id "session-123"
+uv run python -m olav.main chat --thread-id "session-123"··
 
 # 巡检 NetBox 同步状态 ✨ NEW
 uv run python -m olav.main chat -L "巡检所有核心路由器"
@@ -554,16 +554,13 @@ middleware=[], # TODO: Re-enable TodoListMiddleware after switching to native Op
    LLM_MODEL_NAME=qwen2.5:32b
    ```
 
-3. **保持 OpenRouter 但接受无 TodoList 功能**  
-   当前配置已自动修复工具调用 JSON 解析问题 (`src/olav/core/llm.py` 中的 `FixedChatOpenAI`),  
-   但 TodoListMiddleware 仍然不可用。适用于不需要自动任务分解的场景。
+3. **保持 OpenRouter**  
+   LangChain 1.10 的 `init_chat_model()` 已统一处理各种模型提供商的差异，
+   工具调用 JSON 解析问题已通过 `with_structured_output()` 解决。
 
 **影响范围**:
-- ❌ 无法使用自动任务列表分解功能
 - ✅ 其他工具调用 (NETCONF/CLI) 正常工作
 - ✅ 基础对话和查询功能不受影响
-
-**追踪Issue**: https://github.com/your-org/olav/issues/XXX (TODO: 创建实际issue)
 
 ---
 ### 9.2 Windows 平台 ProactorEventLoop 问题

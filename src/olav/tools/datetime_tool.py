@@ -11,8 +11,9 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from olav.tools.base import BaseTool, ToolOutput, ToolRegistry
 from langchain_core.tools import tool
+
+from olav.tools.base import BaseTool, ToolOutput, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -174,13 +175,15 @@ class TimeRangeTool(BaseTool):
                 metadata={"elapsed_ms": elapsed_ms, "error_type": "param_error"},
                 error=f"Time parsing error: {e}",
             )
-    
+
+
 # Register tool with registry
 ToolRegistry.register(TimeRangeTool())
 
 # ---------------------------------------------------------------------------
 # Compatibility Wrapper (@tool) for legacy usage (returns simplified dict)
 # ---------------------------------------------------------------------------
+
 
 @tool
 async def parse_time_range(natural_text: str, utc_format: bool = True) -> dict[str, Any]:

@@ -9,7 +9,6 @@ Enhancements added:
 """
 
 import logging
-import os
 import re
 from pathlib import Path
 
@@ -422,7 +421,7 @@ class NornirSandbox(SandboxBackendProtocol):
                     enable=escalate,
                 )
                 device_result = result[device]
-                
+
                 # Check if TextFSM parsing failed (exception contains "TextFSM" or "State Error")
                 if device_result.failed:
                     error_str = str(device_result.exception or "")
@@ -434,7 +433,7 @@ class NornirSandbox(SandboxBackendProtocol):
                         textfsm_failed = True
                     else:
                         raise Exception(device_result.exception or "Command failed")
-            
+
             # Retry without TextFSM if parsing failed, or if use_textfsm=False
             if textfsm_failed or not use_textfsm:
                 result = target.run(

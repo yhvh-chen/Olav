@@ -1,0 +1,121 @@
+{
+  "tool": "suzieq_schema_search",
+  "parameters": {
+    "query": "syslog"
+  },
+  "cached_at": 1764400249.6419961,
+  "cache_ttl": 300,
+  "tool_output": {
+    "source": "suzieq_schema",
+    "device": "localhost",
+    "data": [
+      {
+        "table": "bgp",
+        "fields": [
+          "namespace",
+          "hostname",
+          "vrf",
+          "peer",
+          "asn",
+          "state",
+          "peerAsn",
+          "afi"
+        ],
+        "description": "BGP protocol information including peer state and configuration",
+        "methods": [
+          "get",
+          "summarize",
+          "unique",
+          "aver"
+        ]
+      },
+      {
+        "table": "interfaces",
+        "fields": [
+          "namespace",
+          "hostname",
+          "ifname",
+          "state",
+          "adminState",
+          "mtu",
+          "speed",
+          "type",
+          "ipAddressList",
+          "description",
+          "macaddr",
+          "master"
+        ],
+        "description": "Interface information including operational and admin state, IP addresses",
+        "methods": [
+          "get",
+          "summarize",
+          "unique",
+          "aver"
+        ]
+      },
+      {
+        "table": "routes",
+        "fields": [
+          "namespace",
+          "hostname",
+          "vrf",
+          "prefix",
+          "nexthopIp",
+          "protocol",
+          "metric"
+        ],
+        "description": "Routing table entries with next-hop and protocol information",
+        "methods": [
+          "get",
+          "summarize",
+          "unique",
+          "aver"
+        ]
+      },
+      {
+        "table": "device",
+        "fields": [
+          "namespace",
+          "hostname",
+          "model",
+          "vendor",
+          "version",
+          "status",
+          "serialNumber"
+        ],
+        "description": "Device hardware and software information",
+        "methods": [
+          "get",
+          "summarize",
+          "unique",
+          "aver"
+        ]
+      },
+      {
+        "table": "vlan",
+        "fields": [
+          "namespace",
+          "hostname",
+          "vlanName",
+          "vlan",
+          "state",
+          "interfaces"
+        ],
+        "description": "VLAN configuration",
+        "methods": [
+          "get",
+          "summarize",
+          "unique",
+          "aver"
+        ]
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "query": "syslog",
+      "total_tables": 10,
+      "schema_source": "opensearch",
+      "elapsed_ms": 1
+    }
+  }
+}

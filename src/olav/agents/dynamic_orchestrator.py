@@ -28,6 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.vectorstores import InMemoryVectorStore
 from pydantic import BaseModel, Field
 
+from olav.core.json_utils import robust_structured_output
 from olav.workflows.registry import WorkflowMetadata, WorkflowRegistry
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class DynamicIntentRouter:
 
         # Create InMemoryVectorStore
         self.vector_store = InMemoryVectorStore(embedding=self.embeddings)
-        
+
         # Build documents from workflow examples
         documents: list[Document] = []
         for metadata in workflows:
@@ -123,23 +124,18 @@ class DynamicIntentRouter:
             for text in texts:
                 doc = Document(
                     page_content=text,
-                    metadata={"workflow": metadata.name, "description": metadata.description}
+                    metadata={"workflow": metadata.name, "description": metadata.description},
                 )
                 documents.append(doc)
 
-            logger.debug(
-                f"Created {len(texts)} documents for workflow '{metadata.name}'"
-            )
+            logger.debug(f"Created {len(texts)} documents for workflow '{metadata.name}'")
 
         # Add all documents to vector store
         await self.vector_store.aadd_documents(documents)
         self._indexed = True
         self._workflow_count = len(workflows)
 
-        logger.info(
-            f"Semantic index built successfully. "
-            f"Total documents indexed: {len(documents)}"
-        )
+        logger.info(f"Semantic index built successfully. Total documents indexed: {len(documents)}")
 
     async def semantic_prefilter(self, query: str) -> list[tuple[str, float]]:
         """
@@ -161,7 +157,8 @@ class DynamicIntentRouter:
         # Use vector store similarity search with scores
         # Get more results than top_k to aggregate by workflow
         results = await self.vector_store.asimilarity_search_with_score(
-            query, k=self.top_k * 3  # Get extra to aggregate
+            query,
+            k=self.top_k * 3,  # Get extra to aggregate
         )
 
         # Aggregate scores by workflow (take max score for each workflow)
@@ -219,14 +216,15 @@ class DynamicIntentRouter:
 }}
 """
 
-        # Invoke LLM with JSON mode
-        response = await self.llm.ainvoke(prompt)
-
-        # Parse response (assuming LLM returns JSON)
+        # Use robust_structured_output for reliable JSON parsing
         try:
-            decision = RouteDecision.model_validate_json(response.content)
+            decision = await robust_structured_output(
+                llm=self.llm,
+                output_class=RouteDecision,
+                prompt=prompt,
+            )
         except Exception as e:
-            logger.error(f"Failed to parse LLM response: {response.content}")
+            logger.error(f"Failed to parse LLM response: {e}")
             # Fallback: select first candidate
             decision = RouteDecision(
                 workflow_name=candidates[0].name,

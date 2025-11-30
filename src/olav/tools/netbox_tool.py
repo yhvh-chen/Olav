@@ -12,12 +12,12 @@ from typing import Any, Literal
 from urllib.parse import urljoin
 
 import requests
+from langchain_core.tools import tool
 from opensearchpy import OpenSearch
 
 from olav.core.settings import settings
 from olav.tools.adapters import NetBoxAdapter
 from olav.tools.base import ToolOutput, ToolRegistry
-from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +370,7 @@ ToolRegistry.register(NetBoxSchemaSearchTool())
 # These provide backward-compatible interfaces expected by existing workflows
 # and tests while internally delegating to the refactored BaseTool implementation.
 
+
 @tool
 async def netbox_api_call(
     path: str,
@@ -386,13 +387,16 @@ async def netbox_api_call(
     tool_impl = ToolRegistry.get_tool("netbox_api")
     if tool_impl is None:
         return {"success": False, "error": "netbox_api tool not registered"}
-    result = await tool_impl.execute(path=path, method=method, data=data, params=params, device=device)
+    result = await tool_impl.execute(
+        path=path, method=method, data=data, params=params, device=device
+    )
     return {
         "success": result.error is None,
         "error": result.error,
         "data": result.data,
         "metadata": result.metadata,
     }
+
 
 @tool
 async def netbox_schema_search(query: str) -> dict[str, Any]:

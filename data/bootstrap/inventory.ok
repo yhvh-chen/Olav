@@ -1,1 +1,1 @@
-{'success': True, 'code': 0, 'mode': 'force', 'devices': [{'name': 'R1', 'status': 'exists'}, {'name': 'R2', 'status': 'exists'}, {'name': 'R3', 'status': 'exists'}, {'name': 'R4', 'status': 'exists'}, {'name': 'SW1', 'status': 'exists'}, {'name': 'SW2', 'status': 'exists'}]}
+{'mode': 'skip', 'skipped': True}

@@ -23,6 +23,7 @@ from config.settings import AgentConfig
 from olav import __version__
 from olav.core.logging_config import setup_logging
 from olav.core.settings import settings
+from olav.sync.rules.loader import get_hitl_required_tools
 
 # Agent imports moved to runtime (dynamic import based on --agent-mode)
 from olav.tools.suzieq_parquet_tool import suzieq_query  # Direct tool access for one-shot timing
@@ -124,12 +125,14 @@ def chat(
     # Determine execution mode
     exec_mode = "local" if local else "remote"
     mode_name = "Expert Mode (Deep Dive)" if expert else "Normal Mode"
-    
+
     # YOLO mode: set global flag to skip HITL
     if yolo:
         AgentConfig.YOLO_MODE = True
-        console.print("[bold red]⚠️  YOLO MODE ENABLED - All approvals will be auto-accepted![/bold red]")
-    
+        console.print(
+            "[bold red]⚠️  YOLO MODE ENABLED - All approvals will be auto-accepted![/bold red]"
+        )
+
     # Language setting: validate and set
     valid_langs = ("zh", "en", "ja")
     if lang not in valid_langs:
@@ -144,7 +147,11 @@ def chat(
     console.print(f"Execution: {exec_mode.capitalize()} Mode")
     console.print(f"Workflow: {mode_name}")
     console.print(f"Language: {lang_names.get(lang, lang)}")
-    hitl_status = "[red]YOLO (Auto-approve)[/red]" if yolo else ("Enabled" if AgentConfig.ENABLE_HITL else "Disabled")
+    hitl_status = (
+        "[red]YOLO (Auto-approve)[/red]"
+        if yolo
+        else ("Enabled" if AgentConfig.ENABLE_HITL else "Disabled")
+    )
     console.print(f"HITL: {hitl_status}")
 
     # Windows: Use SelectorEventLoop for psycopg async compatibility
@@ -153,12 +160,16 @@ def chat(
 
     if query:
         # Single query mode (non-interactive)
-        asyncio.run(_run_single_query_new(query, expert, local, server, thread_id, auto_fallback_to_local))
+        asyncio.run(
+            _run_single_query_new(query, expert, local, server, thread_id, auto_fallback_to_local)
+        )
     else:
         # Interactive chat mode
         console.print("\nType 'exit' or 'quit' to end session")
         console.print("Type 'help' for available commands\n")
-        asyncio.run(_run_interactive_chat_new(expert, local, server, thread_id, auto_fallback_to_local))
+        asyncio.run(
+            _run_interactive_chat_new(expert, local, server, thread_id, auto_fallback_to_local)
+        )
 
 
 async def _run_single_query_new(
@@ -299,6 +310,7 @@ async def _run_interactive_chat_new(
                         last_msg = resume_result.messages[-1]
                         if last_msg.get("content"):
                             from rich.markdown import Markdown
+
                             console.print(Markdown(last_msg["content"]))
                 continue
 
@@ -608,8 +620,8 @@ async def _stream_agent_response(
     tool_start_times = {}  # Map tool call IDs to start timestamps
 
     hitl_enabled = AgentConfig.ENABLE_HITL
-    # Tools requiring HITL approval before execution (write/sensitive ops)
-    hitl_required_tools = {"cli_tool", "netconf_tool", "nornir_tool", "netbox_api_call"}
+    # Tools requiring HITL approval - loaded from config/rules/hitl_config.yaml
+    hitl_required_tools = get_hitl_required_tools()
 
     with ui.create_thinking_context() as live:
         seen_tool_ids = set()  # Track processed tool calls
@@ -967,7 +979,7 @@ def serve(
     """Start OLAV web API server.
 
     Launches the FastAPI server with LangServe endpoints for remote orchestrator access.
-    
+
     Endpoints:
         - POST /orchestrator/invoke - Execute orchestrator synchronously
         - POST /orchestrator/stream - Stream orchestrator response
@@ -1098,70 +1110,65 @@ def inspect(
     config_path: str | None = typer.Option(
         None, "--config", "-c", help="Path to inspection config YAML file"
     ),
-    daemon: bool = typer.Option(
-        False, "--daemon", "-d", help="Run as background scheduler daemon"
-    ),
+    daemon: bool = typer.Option(False, "--daemon", "-d", help="Run as background scheduler daemon"),
     lang: str = typer.Option(
         "zh", "--lang", "-l", help="Report language: zh (Chinese), en (English), ja (Japanese)"
     ),
-    list_profiles: bool = typer.Option(
-        False, "--list", help="List available inspection profiles"
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show detailed logs"
-    ),
+    list_profiles: bool = typer.Option(False, "--list", help="List available inspection profiles"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
 ) -> None:
     """Run automated network inspection (no HITL required).
-    
+
     Inspections are read-only health checks that run without user approval.
     Results are saved as timestamped Markdown reports in data/inspection-reports/.
-    
+
     Modes:
         - One-shot (default): Run inspection once and exit
         - Daemon (-d/--daemon): Run scheduler in background with periodic execution
-    
+
     Configuration:
         Inspection profiles are defined in config/inspections/*.yaml
         Each profile specifies:
         - Target devices (list, NetBox filter, or regex)
         - Checks to run (SuzieQ queries with thresholds)
         - Severity levels (critical, warning, info)
-    
+
     Examples:
         # List available profiles
         uv run olav.py inspect --list
-        
+
         # Run default inspection profile
         uv run olav.py inspect
-        
+
         # Run specific profile
         uv run olav.py inspect -p bgp_peer_audit
-        
+
         # Run with custom config file
         uv run olav.py inspect -c my_inspection.yaml
-        
+
         # Start scheduler daemon (runs on schedule from config)
         uv run olav.py inspect --daemon
-        
+
         # Run in English
         uv run olav.py inspect -p daily_core_check -l en
     """
     setup_logging(verbose)
-    
+
     # Validate language
     valid_langs = ("zh", "en", "ja")
     if lang not in valid_langs:
         console.print(f"[yellow]⚠️  Invalid language '{lang}', using default 'zh'[/yellow]")
         lang = "zh"
     AgentConfig.LANGUAGE = lang  # type: ignore
-    
+
     # Windows async compatibility
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+
     # List profiles mode
     if list_profiles:
         from config.settings import Paths
+
         profile_dir = Paths.INSPECTIONS_DIR
         console.print("\n[bold]Available Inspection Profiles:[/bold]")
         if profile_dir.exists():
@@ -1169,6 +1176,7 @@ def inspect(
                 # Try to get description from file
                 try:
                     import yaml
+
                     with open(yaml_file, encoding="utf-8") as f:
                         cfg = yaml.safe_load(f)
                         name = cfg.get("name", yaml_file.stem)
@@ -1179,47 +1187,55 @@ def inspect(
                 except Exception:
                     console.print(f"  • [cyan]{yaml_file.stem}[/cyan]")
         else:
-            console.print("[yellow]  No profiles found. Create profiles in config/inspections/[/yellow]")
+            console.print(
+                "[yellow]  No profiles found. Create profiles in config/inspections/[/yellow]"
+            )
         return
-    
+
     # Daemon mode
     if daemon:
         from config.settings import InspectionConfig
-        console.print(Panel.fit(
-            f"[bold green]OLAV Inspection Scheduler[/bold green]\n\n"
-            f"Profile: {InspectionConfig.DEFAULT_PROFILE}\n"
-            f"Schedule: {InspectionConfig.SCHEDULE_CRON or f'Daily at {InspectionConfig.SCHEDULE_TIME}'}\n"
-            f"Reports: {InspectionConfig.REPORTS_DIR}\n\n"
-            "[dim]Press Ctrl+C to stop[/dim]",
-            title="Daemon Mode",
-        ))
-        
+
+        console.print(
+            Panel.fit(
+                f"[bold green]OLAV Inspection Scheduler[/bold green]\n\n"
+                f"Profile: {InspectionConfig.DEFAULT_PROFILE}\n"
+                f"Schedule: {InspectionConfig.SCHEDULE_CRON or f'Daily at {InspectionConfig.SCHEDULE_TIME}'}\n"
+                f"Reports: {InspectionConfig.REPORTS_DIR}\n\n"
+                "[dim]Press Ctrl+C to stop[/dim]",
+                title="Daemon Mode",
+            )
+        )
+
         from olav.inspection.scheduler import run_scheduler
+
         asyncio.run(run_scheduler())
         return
-    
+
     # One-shot inspection mode
     from olav.inspection.runner import run_inspection
-    
+
     profile_name = profile or "daily_core_check"
     console.print(f"\n[bold]Running Inspection: {profile_name}[/bold]")
     console.print(f"Language: {lang}")
     console.print("[dim]This is a read-only check (no HITL required)[/dim]\n")
-    
+
     try:
-        result = asyncio.run(run_inspection(
-            profile=profile_name if not config_path else None,
-            config_path=config_path,
-            language=lang,
-        ))
-        
+        result = asyncio.run(
+            run_inspection(
+                profile=profile_name if not config_path else None,
+                config_path=config_path,
+                language=lang,
+            )
+        )
+
         if result.get("status") == "success":
             passed = result.get("passed", 0)
             total = result.get("total_checks", 0)
             critical = result.get("critical", 0)
             duration = result.get("duration_seconds", 0)
             report_path = result.get("report_path", "")
-            
+
             # Summary
             status_emoji = "🔴" if critical > 0 else ("🟡" if passed < total else "🟢")
             console.print(f"\n{status_emoji} [bold]Inspection Complete[/bold]")
@@ -1231,7 +1247,7 @@ def inspect(
         else:
             console.print(f"\n[red]❌ Inspection failed: {result.get('message')}[/red]")
             raise typer.Exit(code=1)
-            
+
     except FileNotFoundError as e:
         console.print(f"\n[red]❌ Profile not found: {e}[/red]")
         console.print("[dim]Use --list to see available profiles[/dim]")

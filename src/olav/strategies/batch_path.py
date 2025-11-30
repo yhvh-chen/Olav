@@ -205,18 +205,18 @@ class BatchPathStrategy:
 
     def _load_tool_capability_guides(self) -> dict[str, str]:
         """Load tool capability guides from config/prompts/tools/.
-        
+
         Returns:
             Dict mapping tool prefix to capability guide content
         """
         from olav.core.prompt_manager import prompt_manager
-        
+
         guides = {}
         for tool_prefix in ["suzieq", "netbox", "cli", "netconf"]:
             guide = prompt_manager.load_tool_capability_guide(tool_prefix)
             if guide:
                 guides[tool_prefix] = guide
-        
+
         return guides
 
     @classmethod
@@ -373,10 +373,10 @@ class BatchPathStrategy:
     async def _discover_schema(self, intent: str) -> dict[str, Any] | None:
         """
         Schema-Aware discovery for BatchPath.
-        
+
         Args:
             intent: Natural language intent to search schema for
-            
+
         Returns:
             Dict mapping table names to schema info, or None
         """
@@ -384,30 +384,31 @@ class BatchPathStrategy:
             schema_tool = self.tool_registry.get_tool("suzieq_schema_search")
             if not schema_tool:
                 return None
-            
+
             from olav.tools.base import ToolOutput
+
             result = await schema_tool.execute(query=intent)
-            
+
             if isinstance(result, ToolOutput) and result.data:
                 schema_context = {}
                 data = result.data
-                
+
                 if isinstance(data, dict):
-                    tables = data.get('tables', [])
+                    tables = data.get("tables", [])
                     for table in tables:
                         if table in data:
                             schema_context[table] = data[table]
                 elif isinstance(data, list):
                     for item in data:
-                        if isinstance(item, dict) and 'table' in item:
-                            schema_context[item['table']] = item
-                
+                        if isinstance(item, dict) and "table" in item:
+                            schema_context[item["table"]] = item
+
                 if schema_context:
                     logger.debug(f"BatchPath schema discovery found: {list(schema_context.keys())}")
                     return schema_context
-                    
+
             return None
-            
+
         except Exception as e:
             logger.warning(f"Schema discovery failed: {e}")
             return None
@@ -417,7 +418,7 @@ class BatchPathStrategy:
     ) -> dict[str, Any]:
         """
         Compile natural language intent to tool parameters using LLM.
-        
+
         Uses Schema-Aware pattern to discover correct table names.
 
         This method enables YAML configs to use natural language descriptions
@@ -443,10 +444,12 @@ class BatchPathStrategy:
         if tool == "suzieq_query":
             schema_context = await self._discover_schema(intent)
             if schema_context:
-                schema_tables = "\n".join([
-                    f"    - {table}: {info.get('description', '')} (fields: {', '.join(info.get('fields', [])[:5])}...)"
-                    for table, info in schema_context.items()
-                ])
+                schema_tables = "\n".join(
+                    [
+                        f"    - {table}: {info.get('description', '')} (fields: {', '.join(info.get('fields', [])[:5])}...)"
+                        for table, info in schema_context.items()
+                    ]
+                )
                 schema_section = f"""
 ## 🎯 Schema Discovery 结果（必须使用这些表名）
 {schema_tables}
@@ -518,9 +521,8 @@ class BatchPathStrategy:
                 merged = {**compiled_params, **existing_params}
                 logger.info(f"Compiled intent '{intent}' → {merged}")
                 return merged
-            else:
-                logger.warning(f"LLM response did not contain valid JSON: {content}")
-                return existing_params
+            logger.warning(f"LLM response did not contain valid JSON: {content}")
+            return existing_params
 
         except Exception as e:
             logger.exception(f"Failed to compile intent '{intent}': {e}")

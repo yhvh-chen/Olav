@@ -11,6 +11,10 @@ help:
 	@echo "make logs-api       - View API server logs"
 	@echo "make test           - Run E2E tests in container"
 	@echo "make test-unit      - Run unit tests locally"
+	@echo "make lint           - Run ruff linter"
+	@echo "make lint-fix       - Run ruff with auto-fix"
+	@echo "make format         - Format code with ruff"
+	@echo "make check          - Full quality check (lint + format)"
 	@echo "make health         - Check service health"
 	@echo "make clean          - Remove containers and volumes"
 	@echo "make restart        - Restart all services"
@@ -58,6 +62,27 @@ test-basic:
 # Run unit tests locally
 test-unit:
 	uv run pytest tests/unit/ -v
+
+# Lint and format checks
+lint:
+	uv run ruff check src/ tests/
+
+lint-fix:
+	uv run ruff check src/ tests/ --fix
+
+format:
+	uv run ruff format src/ tests/
+
+format-check:
+	uv run ruff format src/ tests/ --check
+
+# Type checking
+typecheck:
+	uv run mypy src/ --ignore-missing-imports
+
+# Full quality check (lint + format + type)
+check: lint-fix format
+	@echo "✓ Code quality checks passed"
 
 # Check health
 health:

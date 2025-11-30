@@ -74,14 +74,27 @@ class EnvSettings(BaseSettings):
     # ============================================
     server_host: str = "0.0.0.0"
     server_port: int = 8000
+    
+    # CORS Configuration (for WebGUI)
+    # Comma-separated list of allowed origins, or "*" for all (dev only)
+    cors_origins: str = "*"  # e.g., "http://localhost:3000,https://olav.company.com"
+    cors_allow_credentials: bool = True
+    cors_allow_methods: str = "*"  # e.g., "GET,POST,PUT,DELETE"
+    cors_allow_headers: str = "*"
+    
+    # API Rate Limiting (requests per minute per user)
+    api_rate_limit_rpm: int = 60
+    api_rate_limit_enabled: bool = False  # Enable in production
 
     # ============================================
-    # JWT Authentication Configuration
+    # Token Authentication Configuration (Simplified)
     # ============================================
-    jwt_secret_key: str = "olav-dev-secret-change-in-production"  # MUST override in production
-    jwt_algorithm: str = "HS256"
-    jwt_expiration_minutes: int = 60
-    jwt_refresh_threshold_minutes: int = 15
+    # Token is auto-generated on server startup
+    token_max_age_hours: int = 24  # Token valid for 24 hours
+    
+    # WebSocket Configuration (for real-time streaming)
+    websocket_heartbeat_interval: int = 30  # seconds
+    websocket_max_connections: int = 100
 
     # ============================================
     # Feature Flags

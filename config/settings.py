@@ -61,6 +61,46 @@ class LLMConfig:
     MAX_TOKENS = 16000
     EMBEDDING_MODEL = "text-embedding-3-small"
     EMBEDDING_DIMENSIONS = 1536
+    
+    # Fallback models for ModelFallbackMiddleware (LangChain 1.10)
+    # Format: ["provider:model_name", ...] in priority order
+    FALLBACK_MODELS: list[str] = ["openai:gpt-4o-mini"]
+
+
+class LLMRetryConfig:
+    """LLM retry/resilience settings (LangChain 1.10 Middleware).
+    
+    These settings configure ModelRetryMiddleware for automatic retry
+    with exponential backoff on transient errors.
+    """
+    # Maximum retry attempts for transient errors
+    MAX_RETRIES: int = 3
+    
+    # Exponential backoff settings
+    BACKOFF_FACTOR: float = 2.0  # Multiplier for each retry
+    INITIAL_DELAY: float = 1.0   # Initial delay in seconds
+    MAX_DELAY: float = 60.0      # Maximum delay cap in seconds
+    
+    # Add randomness to prevent thundering herd
+    JITTER: bool = True
+
+
+class ToolRetryConfig:
+    """Tool execution retry settings (for network tools).
+    
+    These settings configure retry behavior for SuzieQ, CLI, NETCONF tools
+    when encountering transient network errors.
+    """
+    # Maximum retry attempts
+    MAX_RETRIES: int = 3
+    
+    # Exponential backoff settings
+    BACKOFF_FACTOR: float = 2.0
+    INITIAL_DELAY: float = 1.0
+    MAX_DELAY: float = 30.0  # Lower than LLM since network calls are faster
+    
+    # Add randomness to prevent thundering herd
+    JITTER: bool = True
 
 
 # ============================================

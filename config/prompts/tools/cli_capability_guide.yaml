@@ -1,56 +1,74 @@
 _type: prompt
 input_variables: []
 template: |
-  # CLI 工具能力指南
+  # CLI Tool Capability Guide
   
-  CLI 工具用于在网络设备上执行命令行操作，作为其他工具的备用方案。
+  CLI tool executes command-line operations on network devices as a fallback when other tools cannot provide needed data.
   
-  ## 工具组合
+  ## Tool Set
   
-  - `cli_tool` - 执行 CLI 命令（通过 SSH/Nornir）
+  - `cli_tool` - Execute CLI commands (via SSH/Nornir)
   
-  ## 核心能力
+  ## Core Capabilities
   
-  ### 1. 命令执行
+  ### 1. Command Execution
   
-  - 支持多厂商设备（Cisco, Juniper, Arista 等）
-  - 自动处理分页（more 提示）
-  - 超时保护（默认 30 秒）
+  - Multi-vendor support (Cisco, Juniper, Arista, etc.)
+  - Auto-handles pagination (more prompts)
+  - Timeout protection (default 30 seconds)
   
-  ### 2. 安全约束
+  ### 2. Security Constraints
   
-  **允许的操作**：
-  - ✅ 状态查询命令（show, display, get）
-  - ✅ 诊断命令（ping, traceroute）
+  **Allowed Operations**:
+  - ✅ Status query commands (show, display, get)
+  - ✅ Diagnostic commands (ping, traceroute)
   
-  **禁止的操作**：
-  - ❌ 配置修改（configure, set, delete）
-  - ❌ 系统重启（reload, reboot）
-  - ❌ 文件操作（copy, delete）
+  **Forbidden Operations**:
+  - ❌ Config modifications (configure, set, delete)
+  - ❌ System reboot (reload, reboot)
+  - ❌ File operations (copy, delete)
   
-  ## 参数说明
+  ## Parameters
   
-  | 参数 | 必需 | 说明 |
-  |------|------|------|
-  | `device` | 是 | 目标设备主机名（必须在 NetBox 中存在） |
-  | `command` | 是 | 要执行的 CLI 命令 |
-  | `timeout` | 否 | 超时秒数（默认 30） |
+  | Parameter | Required | Description |
+  |-----------|----------|-------------|
+  | `device` | Yes | Target device hostname (must exist in NetBox) |
+  | `command` | Yes | CLI command to execute |
+  | `timeout` | No | Timeout in seconds (default 30) |
   
-  ## 使用时机
+  ## Chain of Thought - When to Use CLI
   
-  ### 应该使用 CLI 的场景
-  1. SuzieQ 没有采集到所需数据
-  2. 需要实时数据（如 ping 测试）
-  3. 需要厂商特有命令的输出
+  <thinking>
+  Step 1: Check if data exists in SuzieQ
+  - If yes → Use SuzieQ (faster, structured data)
+  - If no → Continue to Step 2
   
-  ### 不应该使用 CLI 的场景
-  1. 数据在 SuzieQ 中已存在（优先用 SuzieQ，更快）
-  2. 批量查询多台设备（使用 SuzieQ summarize）
-  3. 需要结构化数据（CLI 输出为纯文本）
+  Step 2: Determine operation type
+  - Real-time data needed (ping, traceroute)? → Use CLI
+  - Vendor-specific command output? → Use CLI
+  - Historical data analysis? → Use SuzieQ
   
-  ## 注意事项
+  Step 3: Consider performance
+  - CLI requires SSH connection (slower)
+  - CLI returns raw text (needs parsing)
+  - Batch queries across devices → prefer SuzieQ summarize
+  </thinking>
   
-  - ⚠️ **延迟较高** - 需要 SSH 连接，比 SuzieQ 慢
-  - ⚠️ **输出非结构化** - 返回原始文本，需要解析
-  - ⚠️ **命令黑名单** - 危险命令会被拦截
-  - ⚠️ **需要 HITL** - 写操作需要人工审批
+  ## Use Cases
+  
+  ### Should Use CLI
+  1. SuzieQ hasn't collected needed data
+  2. Real-time data required (e.g., ping tests)
+  3. Vendor-specific command output needed
+  
+  ### Should NOT Use CLI
+  1. Data exists in SuzieQ (use SuzieQ - faster)
+  2. Batch queries across multiple devices (use SuzieQ summarize)
+  3. Structured data needed (CLI output is raw text)
+  
+  ## Important Notes
+  
+  - ⚠️ **Higher latency** - Requires SSH connection, slower than SuzieQ
+  - ⚠️ **Unstructured output** - Returns raw text, needs parsing
+  - ⚠️ **Command blacklist** - Dangerous commands are blocked
+  - ⚠️ **HITL required** - Write operations need human approval

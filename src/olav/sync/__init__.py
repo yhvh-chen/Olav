@@ -56,21 +56,21 @@ from olav.sync.models import (
 from olav.sync.reconciler import NetBoxReconciler
 
 __all__ = [
-    # LLM-driven approach (recommended)
-    "LLMDiffEngine",
     "ComparisonResult",
-    "EntityDiff",
-    "FieldDiff",
-    "SimpleDiff",
-    "comparison_to_diffs",
     # Core components
     "DiffEngine",
     "DiffResult",
     "DiffSeverity",
     "DiffSource",
+    "EntityDiff",
     "EntityType",
+    "FieldDiff",
+    # LLM-driven approach (recommended)
+    "LLMDiffEngine",
     "NetBoxReconciler",
-    "ReconciliationReport",
     "ReconcileAction",
     "ReconcileResult",
+    "ReconciliationReport",
+    "SimpleDiff",
+    "comparison_to_diffs",
 ]

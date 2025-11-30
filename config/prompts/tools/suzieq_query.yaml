@@ -2,27 +2,44 @@ _type: prompt
 input_variables:
   - schema_tables
 template: |
-  # SuzieQ 查询工具
+  # SuzieQ Query Tool
   
-  查询 SuzieQ 历史网络数据（Schema-Aware 模式）。
+  Query SuzieQ historical network data (Schema-Aware mode).
   
-  ## 可用表（从 Schema 动态发现）
+  ## Available Tables (Dynamically Discovered from Schema)
   
   {schema_tables}
   
-  ## 参数说明
+  ## Parameters
   
-  - **table** (必需): 表名 - 必须使用上述发现的表名
-  - **method** (可选): 查询方法
-    - `get`: 获取原始记录（默认）
-    - `summarize`: 统计汇总
-  - **hostname** (可选): 按设备名过滤
-  - **namespace** (可选): 按命名空间过滤
-  - **max_age_hours** (可选): 数据时间范围，默认 24 小时
-  - **filters** (可选): 字段过滤，如 state="up"
+  - **table** (required): Table name - MUST use discovered table names from above
+  - **method** (optional): Query method
+    - `get`: Get raw records (default)
+    - `summarize`: Statistical summary
+  - **hostname** (optional): Filter by device name
+  - **namespace** (optional): Filter by namespace
+  - **max_age_hours** (optional): Data time range, default 24 hours
+  - **filters** (optional): Field filters, e.g., state="up"
   
-  ## 重要提示
+  ## Chain of Thought - Query Construction
   
-  - ✅ 只读工具 - 不会修改设备配置
-  - ⚠️ 必须先用 `suzieq_schema_search` 发现表名和字段
-  - ⚠️ 字段名大小写敏感
+  <thinking>
+  Step 1: Verify table exists in schema
+  - Check {schema_tables} for available tables
+  - Use exact table name (case-sensitive)
+  
+  Step 2: Determine appropriate method
+  - Detailed data → 'get'
+  - Overview/statistics → 'summarize'
+  
+  Step 3: Apply filters
+  - Specific device → hostname="device_name"
+  - Time range → max_age_hours=N
+  - Field filters → use schema-validated field names
+  </thinking>
+  
+  ## Important Notes
+  
+  - ✅ Read-only tool - Won't modify device configuration
+  - ⚠️ MUST use `suzieq_schema_search` first to discover table and field names
+  - ⚠️ Field names are case-sensitive

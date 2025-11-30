@@ -19,7 +19,7 @@ Usage:
 
     engine = LLMDiffEngine()
     diffs = await engine.compare(device="R1", netbox_data=nb, network_data=sq)
-    
+
     # Value transformation
     netbox_type = engine.map_interface_type("loopback", "Loopback0")
     speed_kbps = engine.normalize_speed(1000000000)  # 1Gbps in bps
@@ -231,12 +231,11 @@ class LLMDiffEngine:
 
         if speed_int < 1000:
             return speed_int * 1_000_000  # Gbps to kbps
-        elif speed_int < 1_000_000:
+        if speed_int < 1_000_000:
             return speed_int * 1000  # Mbps to kbps
-        elif speed_int < 1_000_000_000:
+        if speed_int < 1_000_000_000:
             return speed_int  # Already kbps
-        else:
-            return speed_int // 1000  # bps to kbps
+        return speed_int // 1000  # bps to kbps
 
     def normalize_mac(self, mac: str | None) -> str | None:
         """

@@ -1,40 +1,50 @@
 _type: prompt
 input_variables: []
 template: |
-  你是网络运维意图分类专家。将用户查询分类到以下类别之一：
+  You are a network operations intent classifier. Classify user queries into one of the following categories.
 
-  ## 分类类别
+  ## Classification Categories
 
-  - **suzieq**: 网络状态查询（BGP/OSPF/接口状态、路由表、邻居关系、MAC 地址、LLDP 拓扑）
-    - 示例: "查询 R1 BGP 邻居", "显示所有接口状态", "检查路由表"
+  - **suzieq**: Network state queries (BGP/OSPF/interface status, routing tables, neighbor relationships, MAC addresses, LLDP topology)
+    - Examples: "Query R1 BGP neighbors", "Show all interface status", "Check routing table"
   
-  - **netbox**: CMDB 资产管理（设备清单、IP 分配、站点/机架管理、设备信息）
-    - 示例: "添加新设备到 NetBox", "分配 IP 地址", "查看设备清单"
+  - **netbox**: CMDB asset management (device inventory, IP allocation, site/rack management, device info)
+    - Examples: "Add new device to NetBox", "Assign IP address", "View device inventory"
   
-  - **openconfig**: YANG/NETCONF 结构化配置操作（OpenConfig 路径查询、配置获取）
-    - 示例: "获取 OpenConfig 接口配置", "查询 YANG 模型路径"
+  - **openconfig**: YANG/NETCONF structured configuration operations (OpenConfig path queries, config retrieval)
+    - Examples: "Get OpenConfig interface config", "Query YANG model path"
   
-  - **cli**: SSH 命令行执行（show 命令、配置变更、直接 CLI 操作）
-    - 示例: "在 R1 执行 show ip route", "配置 VLAN 100"
+  - **cli**: SSH command line execution (show commands, config changes, direct CLI operations)
+    - Examples: "Run show ip route on R1", "Configure VLAN 100"
   
-  - **netconf**: NETCONF RPC 操作（get-config, edit-config, commit）
-    - 示例: "通过 NETCONF 获取配置", "使用 RPC 修改配置"
+  - **netconf**: NETCONF RPC operations (get-config, edit-config, commit)
+    - Examples: "Get config via NETCONF", "Modify config using RPC"
 
-  ## 分类指南
+  ## Chain of Thought Classification
 
-  1. 优先检查是否有明确的工具指示词 (netbox, netconf, yang, cli, ssh)
-  2. 查询类操作默认归类为 suzieq（最常用的数据源）
-  3. 配置变更操作根据具体指示归类为 cli 或 netconf
-  4. 资产管理操作归类为 netbox
-  5. 如果不确定，置信度设为 0.5，让后续流程处理
+  <thinking>
+  Step 1: Check for explicit tool indicators
+  - Does query contain keywords like: netbox, netconf, yang, cli, ssh?
+  - If yes → route to that specific category
 
-  ## 输出要求
+  Step 2: Determine operation type
+  - Is this a status/state query? → likely suzieq
+  - Is this a config change? → likely cli or netconf
+  - Is this asset management? → likely netbox
 
-  返回 JSON 格式：
-  ```json
-  {
-    "category": "suzieq|netbox|openconfig|cli|netconf",
-    "confidence": 0.0-1.0,
-    "reasoning": "分类理由（一句话）"
-  }
-  ```
+  Step 3: Apply priority rules
+  - Query operations default to suzieq (most common data source)
+  - Config changes route to cli or netconf based on specifics
+  - Asset operations route to netbox
+
+  Step 4: Set confidence
+  - Clear match: 0.8-1.0
+  - Partial match: 0.5-0.8
+  - Uncertain: 0.5 (let subsequent flow handle)
+  </thinking>
+
+  ## Output Format
+
+  ⚠️ IMPORTANT: Return pure JSON only, no markdown code blocks:
+
+  {"category": "suzieq", "confidence": 0.95, "reasoning": "User querying network status"}

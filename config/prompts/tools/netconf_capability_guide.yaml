@@ -1,71 +1,90 @@
 _type: prompt
 input_variables: []
 template: |
-  # NETCONF 工具能力指南
+  # NETCONF Tool Capability Guide
   
-  NETCONF 工具用于通过 NETCONF 协议获取和配置网络设备，支持 OpenConfig 和厂商 YANG 模型。
+  NETCONF tool retrieves and configures network devices via NETCONF protocol, supporting OpenConfig and vendor YANG models.
   
-  ## 工具组合
+  ## Tool Set
   
-  - `netconf_tool` - 执行 NETCONF get-config/edit-config
-  - `openconfig_schema_search` - 发现 OpenConfig XPath
+  - `netconf_tool` - Execute NETCONF get-config/edit-config
+  - `openconfig_schema_search` - Discover OpenConfig XPaths
   
-  ## 核心能力
+  ## Core Capabilities
   
-  ### 1. 数据获取 (get-config)
+  ### 1. Data Retrieval (get-config)
   
-  - 获取设备运行配置
-  - 支持 XPath 过滤（精确获取所需部分）
-  - 返回结构化 XML/JSON
+  - Get device running configuration
+  - XPath filtering support (precise retrieval)
+  - Returns structured XML/JSON
   
-  ### 2. 配置修改 (edit-config)
+  ### 2. Configuration Modification (edit-config)
   
-  - 原子性配置变更
-  - 支持验证后提交（validate-and-commit）
-  - 需要 HITL 审批
+  - Atomic configuration changes
+  - Validate-and-commit support
+  - Requires HITL approval
   
-  ## 参数说明
+  ## Parameters
   
-  | 参数 | 必需 | 说明 |
-  |------|------|------|
-  | `device` | 是 | 目标设备主机名 |
-  | `xpath` | 是 | NETCONF XPath 路径 |
-  | `operation` | 否 | get-config（默认）或 edit-config |
-  | `config` | 否 | edit-config 时的配置内容 |
+  | Parameter | Required | Description |
+  |-----------|----------|-------------|
+  | `device` | Yes | Target device hostname |
+  | `xpath` | Yes | NETCONF XPath path |
+  | `operation` | No | get-config (default) or edit-config |
+  | `config` | No | Configuration content for edit-config |
   
-  ## OpenConfig XPath 模式
+  ## Chain of Thought - NETCONF Operations
   
-  ### 必须先使用 Schema 发现
+  <thinking>
+  Step 1: Determine operation type
+  - Query configuration → get-config
+  - Modify configuration → edit-config (requires HITL)
+  - Query operational state → consider SuzieQ first
+  
+  Step 2: Discover correct XPath
+  - NEVER guess XPaths
+  - ALWAYS use openconfig_schema_search first
+  - Verify path matches device capabilities
+  
+  Step 3: Consider alternatives
+  - For state data → SuzieQ may be faster
+  - For CLI-only features → use cli_tool
+  - For bulk operations → consider batch approach
+  </thinking>
+  
+  ## OpenConfig XPath Patterns
+  
+  ### MUST Use Schema Discovery First
   ```
-  openconfig_schema_search(query="BGP 邻居配置")
-  # 返回正确的 XPath: /network-instances/network-instance/protocols/protocol/bgp/...
+  openconfig_schema_search(query="BGP neighbor configuration")
+  # Returns correct XPath: /network-instances/network-instance/protocols/protocol/bgp/...
   ```
   
-  ### 常见模块（仅供参考，以 Schema 发现为准）
+  ### Common Modules (Reference Only - Use Schema Discovery)
   
-  | 模块 | XPath 前缀 | 用途 |
-  |------|-----------|------|
-  | openconfig-interfaces | /interfaces | 接口配置 |
-  | openconfig-network-instance | /network-instances | VRF/路由实例 |
-  | openconfig-routing-policy | /routing-policy | 路由策略 |
-  | openconfig-acl | /acl | 访问控制列表 |
+  | Module | XPath Prefix | Purpose |
+  |--------|--------------|---------|
+  | openconfig-interfaces | /interfaces | Interface config |
+  | openconfig-network-instance | /network-instances | VRF/routing instances |
+  | openconfig-routing-policy | /routing-policy | Routing policies |
+  | openconfig-acl | /acl | Access control lists |
   
-  ## 使用时机
+  ## Use Cases
   
-  ### 应该使用 NETCONF 的场景
-  1. 需要获取/修改设备配置（非状态）
-  2. 需要结构化配置数据
-  3. SuzieQ 没有相关数据
-  4. 需要配置原子性变更
+  ### Should Use NETCONF
+  1. Need to get/modify device configuration (not state)
+  2. Need structured configuration data
+  3. SuzieQ doesn't have the data
+  4. Need atomic configuration changes
   
-  ### 不应该使用 NETCONF 的场景
-  1. 查询运行状态（优先用 SuzieQ）
-  2. 设备不支持 NETCONF
-  3. 简单状态检查
+  ### Should NOT Use NETCONF
+  1. Querying operational state (prefer SuzieQ)
+  2. Device doesn't support NETCONF
+  3. Simple status checks
   
-  ## 注意事项
+  ## Important Notes
   
-  - ⚠️ **XPath 不要猜测** - 始终先用 openconfig_schema_search 发现
-  - ⚠️ **配置修改需要 HITL** - edit-config 操作需要人工审批
-  - ⚠️ **厂商差异** - OpenConfig 支持程度因厂商而异
-  - ⚠️ **连接开销** - NETCONF 会话建立较慢
+  - ⚠️ **Don't guess XPaths** - Always use openconfig_schema_search first
+  - ⚠️ **HITL required for config changes** - edit-config needs human approval
+  - ⚠️ **Vendor differences** - OpenConfig support varies by vendor
+  - ⚠️ **Connection overhead** - NETCONF session establishment is slow

@@ -4,22 +4,24 @@ This module provides a graph for LangGraph Studio/API server.
 Uses the same orchestrator as the CLI but in stateless mode.
 """
 
-import sys
-from typing import TypedDict, Annotated
 import operator
+import sys
 import time
+from typing import Annotated, TypedDict
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langgraph.graph import StateGraph, END
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.graph import END, StateGraph
 
 # Windows event loop compatibility
 if sys.platform == "win32":
     import asyncio
+
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 class OrchestratorState(TypedDict):
     """State schema for LangGraph Studio."""
+
     messages: Annotated[list[BaseMessage], operator.add]
     workflow_type: str | None
     iteration_count: int
@@ -38,7 +40,7 @@ def _get_orchestrator():
         from olav.agents.root_agent_orchestrator import WorkflowOrchestrator
         from olav.core.llm import LLMFactory
         from olav.strategies.executor import StrategyExecutor
-        
+
         llm = LLMFactory.get_chat_model()
         _orchestrator = WorkflowOrchestrator(
             llm=llm,
@@ -56,12 +58,12 @@ def _get_orchestrator():
 async def route_to_workflow(state: OrchestratorState) -> OrchestratorState:
     """Route user query to appropriate workflow."""
     orchestrator = _get_orchestrator()
-    
+
     # Extract user message
     messages = state.get("messages", [])
     user_message = ""
     normalized_messages = []
-    
+
     for msg in messages:
         if isinstance(msg, dict):
             role = msg.get("role") or msg.get("type") or "user"
@@ -75,28 +77,28 @@ async def route_to_workflow(state: OrchestratorState) -> OrchestratorState:
             normalized_messages.append(msg)
             if msg.type == "human":
                 user_message = msg.content
-    
+
     if not user_message:
         return {
             **state,
             "messages": [AIMessage(content="未检测到用户查询")],
         }
-    
+
     # Generate thread_id
     thread_id = f"studio-{int(time.time())}"
-    
+
     # Route to workflow
     result = await orchestrator.route(user_message, thread_id)
-    
+
     # Extract messages from result
     result_data = result.get("result", {})
     if "messages" in result_data:
         output_messages = result_data["messages"]
     elif result.get("final_message"):
-        output_messages = normalized_messages + [AIMessage(content=result["final_message"])]
+        output_messages = [*normalized_messages, AIMessage(content=result["final_message"])]
     else:
         output_messages = normalized_messages
-    
+
     return {
         **state,
         "workflow_type": result.get("workflow_type"),
@@ -118,4 +120,4 @@ def _build_graph():
 # Export compiled graph for LangGraph Studio
 graph = _build_graph()
 
-__all__ = ["graph", "OrchestratorState"]
+__all__ = ["OrchestratorState", "graph"]

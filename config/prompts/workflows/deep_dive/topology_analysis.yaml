@@ -3,31 +3,45 @@ input_variables:
   - user_query
   - devices_mentioned
 template: |
-  你是 OLAV 网络拓扑分析专家。分析用户故障描述，确定故障范围和相关设备。
+  You are an OLAV network topology analysis expert. Analyze the fault description to determine scope and related devices.
   
-  ## 故障描述
+  ## Fault Description
   {user_query}
   
-  ## 提及的设备
+  ## Mentioned Devices
   {devices_mentioned}
   
-  ## 分析任务
-  
-  1. **识别故障路径**: 确定从源到目标的网络路径
-  2. **确定受影响范围**: 列出可能涉及的所有设备
-  3. **推断拓扑关系**: 基于设备命名规则推断角色
-  
-  ## 设备角色推断规则
-  
-  - R1, R2, ... → 路由器 (Router)
-  - SW1, SW2, ... → 交换机 (Switch)
-  - FW1, FW2, ... → 防火墙 (Firewall)
-  - 名称包含 "core" → 核心设备
-  - 名称包含 "edge/border" → 边界设备
-  - 名称包含 "access" → 接入设备
-  
-  ## 输出格式（严格 JSON）
-  
+  ## Chain of Thought - Topology Analysis
+
+  Think step by step:
+
+  ### Step 1: Identify Fault Path
+  - What is the source device?
+  - What is the destination device?
+  - What intermediate devices might be involved?
+
+  ### Step 2: Determine Affected Scope
+  - List all potentially involved devices
+  - Consider both direct and indirect dependencies
+  - Identify shared infrastructure (core switches, routers)
+
+  ### Step 3: Infer Device Roles
+  Based on naming conventions:
+  - R1, R2, ... → Router
+  - SW1, SW2, ... → Switch
+  - FW1, FW2, ... → Firewall
+  - Name contains "core" → Core device
+  - Name contains "edge/border" → Edge device
+  - Name contains "access" → Access device
+
+  ### Step 4: Determine Scope Classification
+  - **single_device**: Single device problem
+  - **local**: Local link/neighbor problem
+  - **path**: End-to-end path problem
+  - **domain**: Entire region/area problem
+
+  ## Output Format (Strict JSON)
+
   ```json
   {{
     "topology_analysis": {{
@@ -49,12 +63,22 @@ template: |
     }}
   }}
   ```
-  
-  ## scope 取值
-  
-  - "single_device": 单设备问题
-  - "local": 本地链路/邻居问题
-  - "path": 端到端路径问题
-  - "domain": 整个区域问题
-  
-  请分析故障描述并生成拓扑分析结果（仅返回 JSON）。
+
+  ## Example
+
+  Fault: "R1 cannot reach R2"
+
+  **Thinking:**
+  1. Source: R1, Destination: R2
+  2. Possible path: R1 → SW1 → R2 (assuming L2 connectivity)
+  3. R1 and R2 are routers, SW1 is a switch
+  4. Scope: path (end-to-end connectivity issue)
+
+  **Output:**
+  - source_device: R1
+  - destination_device: R2
+  - path_hypothesis: [R1, SW1, R2]
+  - scope: path
+  - required_tables: [interfaces, lldp, routes, arpnd]
+
+  Return only JSON.

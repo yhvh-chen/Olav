@@ -1,0 +1,42 @@
+{
+  "tool": "suzieq_query",
+  "parameters": {
+    "table": "interfaces",
+    "method": "summarize",
+    "max_age_hours": 24
+  },
+  "cached_at": 1764387123.4312034,
+  "cache_ttl": 300,
+  "tool_output": {
+    "source": "suzieq",
+    "device": "multi",
+    "data": [
+      {
+        "state_counts": {
+          "up": 29,
+          "down": 2
+        },
+        "adminState_counts": {
+          "up": 29,
+          "down": 2
+        },
+        "type_counts": {
+          "ethernet": 16,
+          "csr vnic": 8,
+          "loopback": 5,
+          "vlan": 2
+        },
+        "total_records": 31,
+        "unique_hosts": 6
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "table": "interfaces",
+      "method": "summarize",
+      "max_age_hours": 24,
+      "filters": {},
+      "elapsed_ms": 100
+    }
+  }
+}

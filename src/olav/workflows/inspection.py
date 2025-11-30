@@ -35,7 +35,6 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import logging
-from datetime import datetime
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -43,20 +42,16 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
 from olav.core.llm import LLMFactory
-from olav.core.prompt_manager import prompt_manager
 from olav.sync import (
     DiffEngine,
     DiffResult,
     EntityType,
     NetBoxReconciler,
     ReconciliationReport,
-    ReconcileAction,
 )
-from olav.sync.rules import get_hitl_summary, requires_hitl_approval
 from olav.tools.netbox_tool import NetBoxAPITool
-from olav.tools.suzieq_parquet_tool import suzieq_query
 
-from .base import BaseWorkflow, BaseWorkflowState, WorkflowType
+from .base import BaseWorkflow, BaseWorkflowState
 from .registry import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
@@ -64,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 class InspectionState(BaseWorkflowState):
     """State for inspection workflow."""
-    
+
     device_scope: list[str]  # Devices to inspect
     entity_types: list[str]  # Entity types to compare
     diff_report: dict | None  # DiffEngine report
@@ -149,7 +144,7 @@ class InspectionWorkflow(BaseWorkflow):
             "health check",
             "netbox",
         ]
-        
+
         if any(kw in query_lower for kw in inspection_keywords):
             return True, "匹配巡检/同步关键词"
 
@@ -157,7 +152,7 @@ class InspectionWorkflow(BaseWorkflow):
 
     def build_graph(self, checkpointer: BaseCheckpointSaver | None = None) -> StateGraph:
         """Build LangGraph for inspection workflow."""
-        
+
         # Define the graph
         workflow = StateGraph(InspectionState)
 
@@ -194,7 +189,7 @@ class InspectionWorkflow(BaseWorkflow):
         """Parse device scope and entity types from user query."""
         messages = state.get("messages", [])
         user_query = messages[-1].content if messages else ""
-        
+
         # Use LLM to extract scope
         system_prompt = """你是网络巡检助手。从用户查询中提取：
 1. 设备范围 (device_scope): 具体设备名列表，如 ["R1", "R2"]，如果是"所有"或未指定，返回 ["all"]
@@ -206,14 +201,17 @@ class InspectionWorkflow(BaseWorkflow):
 如果用户未指定，默认返回:
 {"device_scope": ["all"], "entity_types": ["interface", "ip_address", "device"]}
 """
-        
+
         try:
-            response = await self.llm.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_query),
-            ])
-            
+            response = await self.llm.ainvoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_query),
+                ]
+            )
+
             import json
+
             # Extract JSON from response
             content = response.content
             start = content.find("{")
@@ -225,12 +223,12 @@ class InspectionWorkflow(BaseWorkflow):
             else:
                 device_scope = ["all"]
                 entity_types = ["interface", "ip_address", "device"]
-                
+
         except Exception as e:
             logger.warning(f"Failed to parse scope with LLM: {e}")
             device_scope = ["all"]
             entity_types = ["interface", "ip_address", "device"]
-        
+
         # If "all", query NetBox for device list
         if device_scope == ["all"]:
             try:
@@ -241,13 +239,15 @@ class InspectionWorkflow(BaseWorkflow):
                 )
                 # result.data is a list from NetBoxAdapter
                 if not result.error and result.data:
-                    device_scope = [d["name"] for d in result.data if isinstance(d, dict) and "name" in d]
+                    device_scope = [
+                        d["name"] for d in result.data if isinstance(d, dict) and "name" in d
+                    ]
                 else:
                     device_scope = []
             except Exception as e:
                 logger.error(f"Failed to get device list from NetBox: {e}")
                 device_scope = []
-        
+
         # Resolve entity type enums
         type_map = {
             "interface": EntityType.INTERFACE,
@@ -256,7 +256,7 @@ class InspectionWorkflow(BaseWorkflow):
             "vlan": EntityType.VLAN,
         }
         resolved_types = [type_map[t] for t in entity_types if t in type_map]
-        
+
         return {
             "device_scope": device_scope,
             "entity_types": [t.value for t in resolved_types],
@@ -268,15 +268,14 @@ class InspectionWorkflow(BaseWorkflow):
         """Collect data from SuzieQ and NetBox, run DiffEngine."""
         device_scope = state.get("device_scope", [])
         entity_types_str = state.get("entity_types", ["interface", "ip_address", "device"])
-        
+
         if not device_scope:
             return {
                 "diff_report": None,
-                "messages": state["messages"] + [
-                    AIMessage(content="⚠️ 未找到设备，无法执行巡检。请检查 NetBox 设备清单。")
-                ],
+                "messages": state["messages"]
+                + [AIMessage(content="⚠️ 未找到设备，无法执行巡检。请检查 NetBox 设备清单。")],
             }
-        
+
         # Convert string back to EntityType
         type_map = {
             "interface": EntityType.INTERFACE,
@@ -285,34 +284,32 @@ class InspectionWorkflow(BaseWorkflow):
             "vlan": EntityType.VLAN,
         }
         entity_types = [type_map[t] for t in entity_types_str if t in type_map]
-        
+
         # Run DiffEngine comparison
         try:
             report = await self.diff_engine.compare_all(
                 devices=device_scope,
                 entity_types=entity_types,
             )
-            
+
             return {
                 "diff_report": report.to_dict(),
             }
-            
+
         except Exception as e:
             logger.error(f"DiffEngine comparison failed: {e}")
             return {
                 "diff_report": None,
-                "messages": state["messages"] + [
-                    AIMessage(content=f"❌ 数据对比失败: {str(e)}")
-                ],
+                "messages": state["messages"] + [AIMessage(content=f"❌ 数据对比失败: {e!s}")],
             }
 
     async def _generate_report(self, state: InspectionState) -> dict[str, Any]:
         """Generate inspection report."""
         diff_report_dict = state.get("diff_report")
-        
+
         if not diff_report_dict:
             return {}
-        
+
         # Reconstruct report for markdown generation
         report = ReconciliationReport(
             device_scope=diff_report_dict.get("device_scope", []),
@@ -324,47 +321,46 @@ class InspectionWorkflow(BaseWorkflow):
             summary_by_type=diff_report_dict.get("summary_by_type", {}),
             summary_by_severity=diff_report_dict.get("summary_by_severity", {}),
         )
-        
+
         # Reconstruct diffs
         for diff_dict in diff_report_dict.get("diffs", []):
             report.diffs.append(DiffResult.from_dict(diff_dict))
-        
+
         markdown_report = report.to_markdown()
-        
+
         return {
-            "messages": state["messages"] + [
-                AIMessage(content=f"📋 **巡检报告生成完成**\n\n{markdown_report}")
-            ],
+            "messages": state["messages"]
+            + [AIMessage(content=f"📋 **巡检报告生成完成**\n\n{markdown_report}")],
         }
 
     async def _hitl_approval(self, state: InspectionState) -> dict[str, Any]:
         """HITL approval for sync operations.
-        
+
         Uses LangGraph interrupt to pause and wait for user approval.
         """
-        from langgraph.types import interrupt
         from config.settings import AgentConfig
-        
+        from langgraph.types import interrupt
+
         diff_report_dict = state.get("diff_report")
         user_approval = state.get("user_approval")
-        
+
         # Check if there are any diffs to sync
         if not diff_report_dict or not diff_report_dict.get("diffs"):
             return {
                 "user_approval": "skip",
                 "dry_run": True,  # No sync needed
             }
-        
+
         diff_count = len(diff_report_dict.get("diffs", []))
         mismatched = diff_report_dict.get("mismatched", 0)
-        
+
         # If no mismatches, skip HITL
         if mismatched == 0:
             return {
                 "user_approval": "skip",
                 "dry_run": True,
             }
-        
+
         # YOLO mode: auto-approve
         if AgentConfig.YOLO_MODE and user_approval is None:
             logger.info("[YOLO] Auto-approving inspection sync...")
@@ -372,17 +368,17 @@ class InspectionWorkflow(BaseWorkflow):
                 "user_approval": "approved",
                 "dry_run": False,  # Execute actual sync
             }
-        
+
         # Already processed (resuming after interrupt)
         if user_approval in ("approved", "rejected", "skip"):
             return {
                 "user_approval": user_approval,
                 "dry_run": user_approval != "approved",
             }
-        
+
         # HITL: Request user approval via interrupt
         summary = diff_report_dict.get("summary_by_severity", {})
-        
+
         approval_message = (
             f"🔍 **巡检发现 {mismatched} 处差异需要同步**\n\n"
             f"- 严重: {summary.get('critical', 0)}\n"
@@ -391,38 +387,43 @@ class InspectionWorkflow(BaseWorkflow):
             f"是否将网络状态同步到 NetBox？\n"
             f"输入 Y 确认执行, N 取消:"
         )
-        
-        approval_response = interrupt({
-            "action": "approval_required",
-            "diff_count": diff_count,
-            "mismatched": mismatched,
-            "summary": summary,
-            "message": approval_message,
-        })
-        
+
+        approval_response = interrupt(
+            {
+                "action": "approval_required",
+                "diff_count": diff_count,
+                "mismatched": mismatched,
+                "summary": summary,
+                "message": approval_message,
+            }
+        )
+
         # Process approval response
         if isinstance(approval_response, dict):
-            if approval_response.get("approved") or approval_response.get("user_approval") == "approved":
+            if (
+                approval_response.get("approved")
+                or approval_response.get("user_approval") == "approved"
+            ):
                 return {
                     "user_approval": "approved",
                     "dry_run": False,  # Execute actual sync
                 }
-            else:
-                return {
-                    "user_approval": "rejected",
-                    "dry_run": True,  # Don't execute
-                }
-        else:
-            # String response - check for approval
             return {
-                "user_approval": "approved" if approval_response else "rejected",
-                "dry_run": not bool(approval_response),
+                "user_approval": "rejected",
+                "dry_run": True,  # Don't execute
             }
+        # String response - check for approval
+        return {
+            "user_approval": "approved" if approval_response else "rejected",
+            "dry_run": not bool(approval_response),
+        }
 
-    def _route_after_approval(self, state: InspectionState) -> Literal["apply_reconciliation", "final_summary"]:
+    def _route_after_approval(
+        self, state: InspectionState
+    ) -> Literal["apply_reconciliation", "final_summary"]:
         """Route based on approval decision."""
         user_approval = state.get("user_approval")
-        
+
         if user_approval == "approved":
             return "apply_reconciliation"
         # Skip or rejected - go directly to summary
@@ -433,24 +434,24 @@ class InspectionWorkflow(BaseWorkflow):
         diff_report_dict = state.get("diff_report")
         dry_run = state.get("dry_run", True)
         auto_correct = state.get("auto_correct", True)
-        
+
         if not diff_report_dict or not diff_report_dict.get("diffs"):
             return {"reconcile_results": []}
-        
+
         # Reconstruct report
         report = ReconciliationReport(
             device_scope=diff_report_dict.get("device_scope", []),
         )
         for diff_dict in diff_report_dict.get("diffs", []):
             report.diffs.append(DiffResult.from_dict(diff_dict))
-        
+
         # Configure reconciler
         self.reconciler.dry_run = dry_run
-        
+
         # User already approved at workflow level, so no need for per-item HITL
         # require_hitl=False means execute directly after user approval
         user_approved = state.get("user_approval") == "approved"
-        
+
         # Run reconciliation
         try:
             results = await self.reconciler.reconcile(
@@ -458,18 +459,16 @@ class InspectionWorkflow(BaseWorkflow):
                 auto_correct=auto_correct,
                 require_hitl=not user_approved,  # Skip per-item HITL if user already approved
             )
-            
+
             return {
                 "reconcile_results": [r.to_dict() for r in results],
             }
-            
+
         except Exception as e:
             logger.error(f"Reconciliation failed: {e}")
             return {
                 "reconcile_results": [],
-                "messages": state["messages"] + [
-                    AIMessage(content=f"⚠️ 同步操作失败: {str(e)}")
-                ],
+                "messages": state["messages"] + [AIMessage(content=f"⚠️ 同步操作失败: {e!s}")],
             }
 
     async def _final_summary(self, state: InspectionState) -> dict[str, Any]:
@@ -477,13 +476,13 @@ class InspectionWorkflow(BaseWorkflow):
         reconcile_results = state.get("reconcile_results", [])
         diff_report = state.get("diff_report", {})
         dry_run = state.get("dry_run", True)
-        
+
         # Count actions
         action_counts = {}
         for result in reconcile_results:
             action = result.get("action", "unknown")
             action_counts[action] = action_counts.get(action, 0) + 1
-        
+
         # Build summary
         summary_lines = [
             "## 🔍 巡检总结",
@@ -495,7 +494,7 @@ class InspectionWorkflow(BaseWorkflow):
             "",
             "### 同步操作结果" + (" (Dry Run)" if dry_run else ""),
         ]
-        
+
         action_emoji = {
             "auto_corrected": "✅",
             "hitl_pending": "⏳",
@@ -505,21 +504,23 @@ class InspectionWorkflow(BaseWorkflow):
             "skipped": "⏭️",
             "error": "❌",
         }
-        
+
         for action, count in action_counts.items():
             emoji = action_emoji.get(action, "")
             summary_lines.append(f"- {emoji} {action}: {count}")
-        
+
         if not action_counts:
             summary_lines.append("- 无需同步操作")
-        
+
         # HITL pending items
         hitl_pending = [r for r in reconcile_results if r.get("action") == "hitl_pending"]
         if hitl_pending:
-            summary_lines.extend([
-                "",
-                "### ⏳ 待 HITL 审批",
-            ])
+            summary_lines.extend(
+                [
+                    "",
+                    "### ⏳ 待 HITL 审批",
+                ]
+            )
             for r in hitl_pending[:5]:  # Show top 5
                 diff = r.get("diff", {})
                 summary_lines.append(
@@ -528,13 +529,11 @@ class InspectionWorkflow(BaseWorkflow):
                 )
             if len(hitl_pending) > 5:
                 summary_lines.append(f"  ... 及其他 {len(hitl_pending) - 5} 项")
-        
+
         summary = "\n".join(summary_lines)
-        
+
         return {
-            "messages": state["messages"] + [
-                AIMessage(content=summary)
-            ],
+            "messages": state["messages"] + [AIMessage(content=summary)],
         }
 
 
@@ -546,19 +545,19 @@ async def run_inspection(
 ) -> tuple[ReconciliationReport, list[dict]]:
     """
     Convenience function to run inspection directly.
-    
+
     Args:
         devices: Device list (None = all from NetBox)
         entity_types: Entity types to check
         dry_run: If True, don't make actual changes
         auto_correct: Apply auto-corrections for safe fields
-        
+
     Returns:
         Tuple of (report, reconcile_results)
     """
     workflow = InspectionWorkflow()
     workflow.reconciler.dry_run = dry_run
-    
+
     # Get devices from NetBox if not specified
     if devices is None:
         result = await workflow.netbox.execute(
@@ -570,7 +569,7 @@ async def run_inspection(
             devices = [d["name"] for d in result.data["results"]]
         else:
             devices = []
-    
+
     # Default entity types
     if entity_types is None:
         entity_types = [EntityType.INTERFACE, EntityType.IP_ADDRESS, EntityType.DEVICE]
@@ -582,18 +581,18 @@ async def run_inspection(
             "vlan": EntityType.VLAN,
         }
         entity_types = [type_map.get(t, EntityType.INTERFACE) for t in entity_types]
-    
+
     # Run comparison
     report = await workflow.diff_engine.compare_all(
         devices=devices,
         entity_types=entity_types,
     )
-    
+
     # Run reconciliation
     results = await workflow.reconciler.reconcile(
         report,
         auto_correct=auto_correct,
         require_hitl=True,
     )
-    
+
     return report, [r.to_dict() for r in results]

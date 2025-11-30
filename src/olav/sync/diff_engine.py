@@ -9,11 +9,15 @@ LLM-Driven Architecture:
     - LLM understands field mappings automatically (no manual mapping maintenance)
     - Pydantic models validate structured output
     - Supports any NetBox plugin without additional configuration
+
+Configuration:
+    - Field rules loaded from config/rules/sync_rules.yaml
+    - No hardcoded field lists (Schema-Aware principle)
 """
 
 import asyncio
 import logging
-from typing import Any, ClassVar
+from typing import Any
 
 from olav.sync.llm_diff import LLMDiffEngine
 from olav.sync.models import (
@@ -22,6 +26,12 @@ from olav.sync.models import (
     DiffSource,
     EntityType,
     ReconciliationReport,
+)
+from olav.sync.rules.loader import (
+    is_auto_correctable as check_auto_correctable,
+)
+from olav.sync.rules.loader import (
+    requires_hitl as check_requires_hitl,
 )
 from olav.tools.netbox_tool import NetBoxAPITool
 from olav.tools.suzieq_parquet_tool import suzieq_query
@@ -44,22 +54,11 @@ class DiffEngine:
     - SuzieQ Parquet (primary for state data)
     - CLI/NETCONF (fallback for real-time data)
     - OpenConfig YANG (structured config data)
+
+    Configuration:
+    - Field rules loaded from config/rules/sync_rules.yaml
+    - Use get_auto_correct_fields() and get_hitl_required_fields()
     """
-
-    # Fields that can be auto-corrected without HITL
-    AUTO_CORRECT_FIELDS: ClassVar[dict[str, list[str]]] = {
-        "interface": ["description", "mtu"],
-        "device": ["serial_number", "software_version", "platform"],
-        "ip_address": ["status", "dns_name"],
-    }
-
-    # Fields that require HITL approval
-    HITL_REQUIRED_FIELDS: ClassVar[dict[str, list[str]]] = {
-        "interface": ["enabled", "mode", "tagged_vlans", "untagged_vlan"],
-        "ip_address": ["address", "assigned_object"],
-        "vlan": ["vid", "name", "site"],
-        "bgp_peer": ["remote_as", "peer_address"],
-    }
 
     def __init__(
         self,
@@ -211,11 +210,18 @@ class DiffEngine:
                     logger.warning(f"NetBox IP query failed for {device}: {ip_result.error}")
                     continue
 
-                # Parse and compare
+                # Parse and compare using LLM
                 suzieq_ips = self._parse_suzieq_addresses(suzieq_result, device)
                 netbox_ips = self._parse_netbox_ips(ip_result.data)
 
-                self._diff_ip_addresses(device, suzieq_ips, netbox_ips, report)
+                await self._diff_with_llm(
+                    device=device,
+                    entity_type=EntityType.IP_ADDRESS,
+                    netbox_data=netbox_ips,
+                    network_data=suzieq_ips,
+                    report=report,
+                    endpoint="/api/ipam/ip-addresses/",
+                )
 
             except Exception as e:
                 logger.error(f"IP comparison failed for {device}: {e}")
@@ -284,11 +290,18 @@ class DiffEngine:
                     )
                     continue
 
-                # Parse and compare
+                # Parse and compare using LLM
                 suzieq_device = self._parse_suzieq_device(suzieq_result, device)
                 netbox_device = netbox_result.data[0]
 
-                self._diff_device(device, suzieq_device, netbox_device, report)
+                await self._diff_with_llm(
+                    device=device,
+                    entity_type=EntityType.DEVICE,
+                    netbox_data={device: netbox_device},
+                    network_data={device: suzieq_device},
+                    report=report,
+                    endpoint="/api/dcim/devices/",
+                )
 
             except Exception as e:
                 logger.error(f"Device comparison failed for {device}: {e}")
@@ -347,7 +360,17 @@ class DiffEngine:
                     if not vlan_result.error:
                         suzieq_vlans = self._parse_suzieq_vlans(suzieq_result, device)
                         netbox_vlans = self._parse_netbox_vlans(vlan_result.data)
-                        self._diff_vlans(device, suzieq_vlans, netbox_vlans, report)
+                        # Convert int keys to str for LLM comparison
+                        suzieq_vlans_str = {str(k): v for k, v in suzieq_vlans.items()}
+                        netbox_vlans_str = {str(k): v for k, v in netbox_vlans.items()}
+                        await self._diff_with_llm(
+                            device=device,
+                            entity_type=EntityType.VLAN,
+                            netbox_data=netbox_vlans_str,
+                            network_data=suzieq_vlans_str,
+                            report=report,
+                            endpoint="/api/ipam/vlans/",
+                        )
 
             except Exception as e:
                 logger.error(f"VLAN comparison failed for {device}: {e}")
@@ -388,10 +411,10 @@ class DiffEngine:
 
             # Convert LLM diffs to DiffResult objects
             for diff in diffs:
-                # Determine severity and auto-correctability
+                # Determine severity and auto-correctability using config-based rules
                 field_name = diff.field.split(".")[-1] if "." in diff.field else diff.field
-                auto_correct = field_name in self.AUTO_CORRECT_FIELDS.get(entity_type.value, [])
-                hitl_required = field_name in self.HITL_REQUIRED_FIELDS.get(entity_type.value, [])
+                auto_correct = check_auto_correctable(entity_type, field_name)
+                hitl_required = check_requires_hitl(entity_type, field_name)
 
                 severity = (
                     DiffSeverity.WARNING
@@ -531,10 +554,7 @@ class DiffEngine:
         interfaces = {}
 
         # Handle both list (from adapter) and dict (raw API response)
-        if isinstance(result, list):
-            items = result
-        else:
-            items = result.get("results", [])
+        items = result if isinstance(result, list) else result.get("results", [])
 
         for iface in items:
             name = iface.get("name", "")
@@ -595,10 +615,7 @@ class DiffEngine:
         addresses = {}
 
         # Handle both list (from adapter) and dict (raw API response)
-        if isinstance(result, list):
-            items = result
-        else:
-            items = result.get("results", [])
+        items = result if isinstance(result, list) else result.get("results", [])
 
         for ip in items:
             addr = ip.get("address", "")
@@ -669,10 +686,7 @@ class DiffEngine:
         vlans = {}
 
         # Handle both list (from adapter) and dict (raw API response)
-        if isinstance(result, list):
-            items = result
-        else:
-            items = result.get("results", [])
+        items = result if isinstance(result, list) else result.get("results", [])
 
         for vlan in items:
             vid = vlan.get("vid")
@@ -688,302 +702,6 @@ class DiffEngine:
 
     # ========== Diff Helpers ==========
 
-    def _diff_interfaces(
-        self,
-        device: str,
-        suzieq: dict[str, dict],
-        netbox: dict[str, dict],
-        report: ReconciliationReport,
-    ) -> None:
-        """Generate diffs for interfaces."""
-        all_interfaces = set(suzieq.keys()) | set(netbox.keys())
-
-        for ifname in all_interfaces:
-            sq_data = suzieq.get(ifname)
-            nb_data = netbox.get(ifname)
-
-            if sq_data and not nb_data:
-                # Interface in network but not NetBox
-                report.missing_in_netbox += 1
-                report.total_entities += 1
-                report.add_diff(
-                    DiffResult(
-                        entity_type=EntityType.INTERFACE,
-                        device=device,
-                        field="existence",
-                        network_value="present",
-                        netbox_value="missing",
-                        severity=DiffSeverity.WARNING,
-                        source=DiffSource.SUZIEQ,
-                        auto_correctable=False,
-                        identifier=ifname,
-                        additional_context={
-                            "description": sq_data.get("description", ""),
-                            "mtu": sq_data.get("mtu"),
-                            "enabled": sq_data.get("adminState", "up") == "up",
-                            "type": sq_data.get("type"),
-                            "speed": sq_data.get("speed"),
-                        },
-                    )
-                )
-            elif nb_data and not sq_data:
-                # Interface in NetBox but not network
-                report.missing_in_network += 1
-                report.total_entities += 1
-                report.add_diff(
-                    DiffResult(
-                        entity_type=EntityType.INTERFACE,
-                        device=device,
-                        field="existence",
-                        network_value="missing",
-                        netbox_value=ifname,
-                        severity=DiffSeverity.INFO,
-                        source=DiffSource.SUZIEQ,
-                        auto_correctable=False,
-                        netbox_id=nb_data.get("id"),
-                        netbox_endpoint="/api/dcim/interfaces/",
-                        identifier=ifname,
-                    )
-                )
-            else:
-                # Both exist - compare fields
-                report.total_entities += 1
-                has_diff = False
-
-                # Compare MTU
-                if sq_data.get("mtu") and nb_data.get("mtu"):
-                    if sq_data["mtu"] != nb_data["mtu"]:
-                        has_diff = True
-                        report.add_diff(
-                            DiffResult(
-                                entity_type=EntityType.INTERFACE,
-                                device=device,
-                                field=f"{ifname}.mtu",
-                                network_value=sq_data["mtu"],
-                                netbox_value=nb_data["mtu"],
-                                severity=DiffSeverity.INFO,
-                                source=DiffSource.SUZIEQ,
-                                auto_correctable=True,
-                                netbox_id=nb_data.get("id"),
-                                netbox_endpoint="/api/dcim/interfaces/",
-                            )
-                        )
-
-                # Compare enabled/adminState
-                nb_enabled = nb_data.get("enabled", True)
-                sq_admin = sq_data.get("adminState", "up") == "up"
-                if nb_enabled != sq_admin:
-                    has_diff = True
-                    report.add_diff(
-                        DiffResult(
-                            entity_type=EntityType.INTERFACE,
-                            device=device,
-                            field=f"{ifname}.enabled",
-                            network_value=sq_admin,
-                            netbox_value=nb_enabled,
-                            severity=DiffSeverity.WARNING,
-                            source=DiffSource.SUZIEQ,
-                            auto_correctable=False,  # HITL required
-                            netbox_id=nb_data.get("id"),
-                            netbox_endpoint="/api/dcim/interfaces/",
-                        )
-                    )
-
-                if not has_diff:
-                    report.add_match()
-
-    def _diff_ip_addresses(
-        self,
-        device: str,
-        suzieq: dict[str, dict],
-        netbox: dict[str, dict],
-        report: ReconciliationReport,
-    ) -> None:
-        """Generate diffs for IP addresses."""
-        # Normalize IP formats for comparison
-        sq_normalized = {self._normalize_ip(k): v for k, v in suzieq.items()}
-        nb_normalized = {self._normalize_ip(k): v for k, v in netbox.items()}
-
-        all_ips = set(sq_normalized.keys()) | set(nb_normalized.keys())
-
-        for ip in all_ips:
-            sq_data = sq_normalized.get(ip)
-            nb_data = nb_normalized.get(ip)
-
-            if sq_data and not nb_data:
-                report.missing_in_netbox += 1
-                report.total_entities += 1
-                report.add_diff(
-                    DiffResult(
-                        entity_type=EntityType.IP_ADDRESS,
-                        device=device,
-                        field="existence",
-                        network_value="present",
-                        netbox_value="missing",
-                        severity=DiffSeverity.WARNING,
-                        source=DiffSource.SUZIEQ,
-                        auto_correctable=False,  # Adding IPs requires HITL
-                        identifier=ip,
-                        additional_context={"interface": sq_data.get("interface")},
-                    )
-                )
-            elif nb_data and not sq_data:
-                report.missing_in_network += 1
-                report.total_entities += 1
-                report.add_diff(
-                    DiffResult(
-                        entity_type=EntityType.IP_ADDRESS,
-                        device=device,
-                        field="existence",
-                        network_value="missing",
-                        netbox_value=ip,
-                        severity=DiffSeverity.INFO,
-                        source=DiffSource.SUZIEQ,
-                        auto_correctable=False,
-                        netbox_id=nb_data.get("id"),
-                        netbox_endpoint="/api/ipam/ip-addresses/",
-                        identifier=ip,
-                    )
-                )
-            else:
-                report.add_match()
-
-    def _diff_device(
-        self,
-        device: str,
-        suzieq: dict[str, Any],
-        netbox: dict[str, Any],
-        report: ReconciliationReport,
-    ) -> None:
-        """Generate diffs for device attributes."""
-        report.total_entities += 1
-        has_diff = False
-        netbox_id = netbox.get("id")
-
-        # Compare software version
-        sq_version = suzieq.get("version")
-        nb_version = netbox.get("custom_fields", {}).get("software_version")
-
-        if sq_version and nb_version and sq_version != nb_version:
-            has_diff = True
-            report.add_diff(
-                DiffResult(
-                    entity_type=EntityType.DEVICE,
-                    device=device,
-                    field="software_version",
-                    network_value=sq_version,
-                    netbox_value=nb_version,
-                    severity=DiffSeverity.INFO,
-                    source=DiffSource.SUZIEQ,
-                    auto_correctable=True,
-                    netbox_id=netbox_id,
-                    netbox_endpoint="/api/dcim/devices/",
-                )
-            )
-
-        # Compare serial number
-        sq_serial = suzieq.get("serial")
-        nb_serial = netbox.get("serial")
-
-        if sq_serial and nb_serial and sq_serial != nb_serial:
-            has_diff = True
-            report.add_diff(
-                DiffResult(
-                    entity_type=EntityType.DEVICE,
-                    device=device,
-                    field="serial",
-                    network_value=sq_serial,
-                    netbox_value=nb_serial,
-                    severity=DiffSeverity.WARNING,
-                    source=DiffSource.SUZIEQ,
-                    auto_correctable=True,
-                    netbox_id=netbox_id,
-                    netbox_endpoint="/api/dcim/devices/",
-                )
-            )
-
-        # Compare model/platform
-        sq_model = suzieq.get("model")
-        nb_platform = netbox.get("platform", {})
-        nb_model = nb_platform.get("name") if nb_platform else None
-
-        if sq_model and nb_model and sq_model.lower() != nb_model.lower():
-            has_diff = True
-            report.add_diff(
-                DiffResult(
-                    entity_type=EntityType.DEVICE,
-                    device=device,
-                    field="platform",
-                    network_value=sq_model,
-                    netbox_value=nb_model,
-                    severity=DiffSeverity.INFO,
-                    source=DiffSource.SUZIEQ,
-                    auto_correctable=False,  # Platform change is significant
-                    netbox_id=netbox_id,
-                    netbox_endpoint="/api/dcim/devices/",
-                )
-            )
-
-        if not has_diff:
-            report.add_match()
-
-    def _diff_vlans(
-        self,
-        device: str,
-        suzieq: dict[int, dict],
-        netbox: dict[int, dict],
-        report: ReconciliationReport,
-    ) -> None:
-        """Generate diffs for VLANs."""
-        all_vlans = set(suzieq.keys()) | set(netbox.keys())
-
-        for vid in all_vlans:
-            sq_data = suzieq.get(vid)
-            nb_data = netbox.get(vid)
-
-            if sq_data and not nb_data:
-                report.missing_in_netbox += 1
-                report.total_entities += 1
-                report.add_diff(
-                    DiffResult(
-                        entity_type=EntityType.VLAN,
-                        device=device,
-                        field="existence",
-                        network_value=f"VLAN {vid}",
-                        netbox_value="missing",
-                        severity=DiffSeverity.WARNING,
-                        source=DiffSource.SUZIEQ,
-                        auto_correctable=False,
-                        additional_context={"name": sq_data.get("name")},
-                    )
-                )
-            elif nb_data and not sq_data:
-                report.missing_in_network += 1
-                report.total_entities += 1
-            else:
-                # Compare VLAN names
-                report.total_entities += 1
-                sq_name = sq_data.get("name", "")
-                nb_name = nb_data.get("name", "")
-
-                if sq_name and nb_name and sq_name != nb_name:
-                    report.add_diff(
-                        DiffResult(
-                            entity_type=EntityType.VLAN,
-                            device=device,
-                            field=f"vlan{vid}.name",
-                            network_value=sq_name,
-                            netbox_value=nb_name,
-                            severity=DiffSeverity.INFO,
-                            source=DiffSource.SUZIEQ,
-                            auto_correctable=False,
-                            netbox_id=nb_data.get("id"),
-                            netbox_endpoint="/api/ipam/vlans/",
-                        )
-                    )
-                else:
-                    report.add_match()
-
     def _normalize_ip(self, ip: str) -> str:
         """Normalize IP address format for comparison."""
         # Remove /32 for host addresses, normalize spacing
@@ -993,13 +711,9 @@ class DiffEngine:
         return ip
 
     def is_auto_correctable(self, diff: DiffResult) -> bool:
-        """Check if a diff can be auto-corrected."""
-        entity_fields = self.AUTO_CORRECT_FIELDS.get(diff.entity_type.value, [])
-        field_name = diff.field.split(".")[-1]  # Get last part of field path
-        return field_name in entity_fields
+        """Check if a diff can be auto-corrected using config rules."""
+        return check_auto_correctable(diff.entity_type, diff.field)
 
     def requires_hitl(self, diff: DiffResult) -> bool:
-        """Check if a diff requires HITL approval."""
-        entity_fields = self.HITL_REQUIRED_FIELDS.get(diff.entity_type.value, [])
-        field_name = diff.field.split(".")[-1]
-        return field_name in entity_fields or diff.field == "existence"
+        """Check if a diff requires HITL approval using config rules."""
+        return check_requires_hitl(diff.entity_type, diff.field) or diff.field == "existence"

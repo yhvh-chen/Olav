@@ -15,6 +15,7 @@ from typing import Any
 
 class EntityType(str, Enum):
     """Types of entities that can be compared."""
+
     INTERFACE = "interface"
     IP_ADDRESS = "ip_address"
     VLAN = "vlan"
@@ -26,13 +27,15 @@ class EntityType(str, Enum):
 
 class DiffSeverity(str, Enum):
     """Severity levels for differences."""
-    INFO = "info"           # Informational only
-    WARNING = "warning"     # Should be reviewed
-    CRITICAL = "critical"   # Requires immediate attention
+
+    INFO = "info"  # Informational only
+    WARNING = "warning"  # Should be reviewed
+    CRITICAL = "critical"  # Requires immediate attention
 
 
 class DiffSource(str, Enum):
     """Source of network data."""
+
     SUZIEQ = "suzieq"
     OPENCONFIG = "openconfig"
     CLI = "cli"
@@ -40,6 +43,7 @@ class DiffSource(str, Enum):
 
 class ReconcileAction(str, Enum):
     """Actions taken during reconciliation."""
+
     AUTO_CORRECTED = "auto_corrected"
     HITL_PENDING = "hitl_pending"
     HITL_APPROVED = "hitl_approved"
@@ -53,7 +57,7 @@ class ReconcileAction(str, Enum):
 class DiffResult:
     """
     Single difference between network state and NetBox.
-    
+
     Attributes:
         entity_type: Type of entity (interface, ip_address, etc.)
         device: Device hostname
@@ -68,6 +72,7 @@ class DiffResult:
         identifier: Entity identifier (interface name, IP address, etc.)
         additional_context: Extra context for decision making
     """
+
     entity_type: EntityType
     device: str
     field: str
@@ -80,7 +85,7 @@ class DiffResult:
     netbox_endpoint: str | None = None
     identifier: str | None = None  # e.g., interface name "GigabitEthernet0/0"
     additional_context: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -97,7 +102,7 @@ class DiffResult:
             "identifier": self.identifier,
             "additional_context": self.additional_context,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DiffResult":
         """Create from dictionary."""
@@ -121,7 +126,7 @@ class DiffResult:
 class ReconciliationReport:
     """
     Complete reconciliation report for a set of devices.
-    
+
     Attributes:
         timestamp: When the comparison was performed
         device_scope: List of devices that were compared
@@ -134,6 +139,7 @@ class ReconciliationReport:
         summary_by_type: Count of diffs by entity type
         summary_by_severity: Count of diffs by severity
     """
+
     timestamp: datetime = field(default_factory=datetime.now)
     device_scope: list[str] = field(default_factory=list)
     total_entities: int = 0
@@ -144,25 +150,25 @@ class ReconciliationReport:
     diffs: list[DiffResult] = field(default_factory=list)
     summary_by_type: dict[str, int] = field(default_factory=dict)
     summary_by_severity: dict[str, int] = field(default_factory=dict)
-    
+
     def add_diff(self, diff: DiffResult) -> None:
         """Add a diff result and update summaries."""
         self.diffs.append(diff)
         self.mismatched += 1
-        
+
         # Update type summary
         type_key = diff.entity_type.value
         self.summary_by_type[type_key] = self.summary_by_type.get(type_key, 0) + 1
-        
+
         # Update severity summary
         sev_key = diff.severity.value
         self.summary_by_severity[sev_key] = self.summary_by_severity.get(sev_key, 0) + 1
-    
+
     def add_match(self) -> None:
         """Record a matching entity."""
         self.matched += 1
         self.total_entities += 1
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -177,7 +183,7 @@ class ReconciliationReport:
             "summary_by_type": self.summary_by_type,
             "summary_by_severity": self.summary_by_severity,
         }
-    
+
     def to_markdown(self) -> str:
         """Generate markdown report."""
         lines = [
@@ -193,15 +199,15 @@ class ReconciliationReport:
             "",
             "## By Entity Type",
         ]
-        
+
         for entity_type, count in self.summary_by_type.items():
             lines.append(f"- {entity_type}: {count}")
-        
+
         lines.extend(["", "## By Severity"])
         for severity, count in self.summary_by_severity.items():
             emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🔴"}.get(severity, "")
             lines.append(f"- {emoji} {severity}: {count}")
-        
+
         if self.diffs:
             lines.extend(["", "## Differences", ""])
             lines.append("| Device | Type | Field | Network | NetBox | Severity | Auto-Fix |")
@@ -219,10 +225,10 @@ class ReconciliationReport:
                     f"| {diff.device} | {diff.entity_type.value} | {diff.field} | "
                     f"{network_val} | {netbox_val} | {diff.severity.value} | {auto} |"
                 )
-            
+
             if len(self.diffs) > 50:
                 lines.append(f"\n*... and {len(self.diffs) - 50} more differences*")
-        
+
         return "\n".join(lines)
 
 
@@ -230,7 +236,7 @@ class ReconciliationReport:
 class ReconcileResult:
     """
     Result of a reconciliation operation.
-    
+
     Attributes:
         diff: The original difference
         action: Action that was taken
@@ -238,12 +244,13 @@ class ReconcileResult:
         message: Human-readable result message
         netbox_response: Raw NetBox API response (if applicable)
     """
+
     diff: DiffResult
     action: ReconcileAction
     success: bool
     message: str
     netbox_response: dict[str, Any] | None = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {

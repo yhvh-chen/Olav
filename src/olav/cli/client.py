@@ -19,7 +19,6 @@ import sys
 from typing import Any, Literal
 
 import httpx
-from langchain_core.messages import BaseMessage
 from langserve import RemoteRunnable
 from pydantic import BaseModel
 from rich.console import Console
@@ -249,7 +248,7 @@ class OLAVClient:
 
             result = await create_workflow_orchestrator(expert_mode=expert_mode)
             # Unpack tuple: (orchestrator, stateful_graph, stateless_graph, checkpointer_manager)
-            orchestrator_instance, stateful_graph, stateless_graph, checkpointer_mgr = result
+            orchestrator_instance, stateful_graph, _stateless_graph, checkpointer_mgr = result
 
             # IMPORTANT: Keep checkpointer_manager reference to prevent connection close
             self.checkpointer_manager = checkpointer_mgr
@@ -267,9 +266,7 @@ class OLAVClient:
             self.console.print(f"[red]❌ Failed to initialize local orchestrator: {e}[/red]")
             raise
 
-    async def resume(
-        self, thread_id: str, user_input: str, workflow_type: str
-    ) -> ExecutionResult:
+    async def resume(self, thread_id: str, user_input: str, workflow_type: str) -> ExecutionResult:
         """Resume an interrupted workflow with user approval/modification.
 
         Args:
@@ -406,21 +403,29 @@ class OLAVClient:
                     ):
                         # Process streaming chunks - LangGraph returns {node_name: {state}}
                         # Extract messages from any node's state
-                        for node_name, node_state in chunk.items():
+                        for _node_name, node_state in chunk.items():
                             if isinstance(node_state, dict):
                                 if "messages" in node_state:
                                     messages_buffer = node_state["messages"]
                                     # Display latest AI message
                                     for msg in reversed(messages_buffer):
-                                        msg_type = msg.get("type") if isinstance(msg, dict) else getattr(msg, "type", None)
+                                        msg_type = (
+                                            msg.get("type")
+                                            if isinstance(msg, dict)
+                                            else getattr(msg, "type", None)
+                                        )
                                         if msg_type == "ai":
-                                            content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+                                            content = (
+                                                msg.get("content", "")
+                                                if isinstance(msg, dict)
+                                                else getattr(msg, "content", "")
+                                            )
                                             if content:
                                                 final_message_content = content
                                                 live.update(Markdown(content))
                                             break
                                 # Also check for final_message in result
-                                if "final_message" in node_state and node_state["final_message"]:
+                                if node_state.get("final_message"):
                                     final_message_content = node_state["final_message"]
                                     live.update(Markdown(final_message_content))
 
@@ -464,7 +469,7 @@ class OLAVClient:
 
     async def _execute_local(self, query: str, thread_id: str, stream: bool) -> ExecutionResult:
         """Execute query via local orchestrator.
-        
+
         Uses orchestrator_instance.route() for proper HITL interrupt detection.
         """
         if not self.orchestrator_instance:
@@ -474,29 +479,30 @@ class OLAVClient:
         try:
             # Use orchestrator.route() for proper interrupt handling
             result = await self.orchestrator_instance.route(query, thread_id)
-            
+
             # Extract messages from result
             messages_buffer = []
             inner_result = result.get("result", {})
             if inner_result and "messages" in inner_result:
                 messages_buffer = inner_result["messages"]
-            
+
             # Convert BaseMessage to dict
             messages_dict = []
             for msg in messages_buffer:
                 if hasattr(msg, "type") and hasattr(msg, "content"):
                     messages_dict.append({"type": msg.type, "content": msg.content})
-            
+
             # Get final message
             final_message = result.get("final_message", "")
             if final_message and not any(m.get("type") == "ai" for m in messages_dict):
                 messages_dict.append({"type": "ai", "content": final_message})
-            
+
             # Display final message if available
             if final_message:
                 from rich.markdown import Markdown
+
                 self.console.print(Markdown(final_message))
-            
+
             # Check for HITL interrupt
             is_interrupted = result.get("interrupted", False)
             workflow_type = result.get("workflow_type")

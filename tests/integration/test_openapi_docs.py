@@ -9,6 +9,7 @@ Validates:
 
 import httpx
 import json
+import pytest
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -85,15 +86,16 @@ def test_openapi_schema():
             )
             console.print(syntax)
         
-        return True
+        # Test passes if we get here
+        assert True
     
     except httpx.ConnectError:
         console.print("[bold red]✗ Server not running at http://localhost:8000[/bold red]")
         console.print("[yellow]Start server with: uv run python -m olav.server.app[/yellow]")
-        return False
+        pytest.fail("Server not running at http://localhost:8000")
     except Exception as e:
         console.print(f"[bold red]✗ Error: {e}[/bold red]")
-        return False
+        pytest.fail(f"OpenAPI schema test failed: {e}")
 
 
 def test_swagger_ui():
@@ -110,14 +112,14 @@ def test_swagger_ui():
             title="Swagger UI",
             border_style="green"
         ))
-        return True
+        assert True
     
     except httpx.ConnectError:
         console.print("[bold red]✗ Server not running[/bold red]")
-        return False
+        pytest.fail("Server not running - cannot access Swagger UI")
     except Exception as e:
         console.print(f"[bold red]✗ Error: {e}[/bold red]")
-        return False
+        pytest.fail(f"Swagger UI test failed: {e}")
 
 
 def test_redoc():
@@ -134,14 +136,14 @@ def test_redoc():
             title="ReDoc",
             border_style="green"
         ))
-        return True
+        assert True
     
     except httpx.ConnectError:
         console.print("[bold red]✗ Server not running[/bold red]")
-        return False
+        pytest.fail("Server not running - cannot access ReDoc")
     except Exception as e:
         console.print(f"[bold red]✗ Error: {e}[/bold red]")
-        return False
+        pytest.fail(f"ReDoc test failed: {e}")
 
 
 def main():

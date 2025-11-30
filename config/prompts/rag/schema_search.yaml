@@ -5,12 +5,38 @@ input_variables:
 template: |
   Search OpenConfig Schema for relevant XPaths based on user intent.
   
+  ## Context
+  
   **User Intent**: {user_intent}
   **Device Type**: {device_type}
   
+  ## Chain of Thought - Schema Discovery
+  
+  <thinking>
+  Step 1: Analyze the user intent
+  - What network resource is being queried/configured?
+  - Is this for operational state or configuration?
+  
+  Step 2: Map to OpenConfig modules
+  - Interfaces → openconfig-interfaces
+  - BGP → openconfig-bgp
+  - Routing → openconfig-network-instance
+  - ACLs → openconfig-acl
+  - Policies → openconfig-routing-policy
+  
+  Step 3: Determine path type
+  - /config containers: Read-write (for configuration changes, requires HITL)
+  - /state containers: Read-only (for operational data queries)
+  - RPC operations: Actions and procedures
+  
+  Step 4: Consider device compatibility
+  - Check if device type supports the OpenConfig module
+  - May need vendor-specific extensions for some platforms
+  </thinking>
+  
   ## Search Objectives
   
-  Find OpenConfig YANG XPaths that match the following categories:
+  Find OpenConfig YANG XPaths that match:
   
   1. **Configuration Paths** (read-write)
      - Paths under /config containers
@@ -42,7 +68,7 @@ template: |
   
   ## Device-Specific Considerations
   
-  - **Cisco IOS-XR**: Use openconfig-bgp, openconfig-interfaces
+  - **Cisco IOS-XR**: Full openconfig-bgp, openconfig-interfaces support
   - **Juniper**: Full OpenConfig support
   - **Arista EOS**: Partial support, check compatibility
   - **Huawei**: May need vendor-specific extensions

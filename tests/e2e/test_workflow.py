@@ -114,6 +114,6 @@ class TestToolsIntegration:
         from olav.tools.opensearch_tool import OpenConfigSchemaTool, EpisodicMemoryTool, search_openconfig_schema, search_episodic_memory
         assert OpenConfigSchemaTool is not None
         assert EpisodicMemoryTool is not None
-        # Wrappers exist
-        assert callable(search_openconfig_schema)
-        assert callable(search_episodic_memory)
+        # Wrappers exist (StructuredTool from @tool decorator)
+        assert search_openconfig_schema is not None
+        assert search_episodic_memory is not None

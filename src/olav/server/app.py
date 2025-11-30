@@ -33,8 +33,8 @@ from .auth import (
     CurrentUser,
     Token,
     User,
-    authenticate_user,
-    create_access_token,
+    generate_access_token,
+    get_access_token,
 )
 
 # Configure logging
@@ -106,23 +106,6 @@ async def ensure_orchestrator_initialized(app: FastAPI) -> None:
 # ============================================
 # Request/Response Models
 # ============================================
-class LoginRequest(BaseModel):
-    """Login endpoint request body."""
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {"username": "admin", "password": "admin123"},
-                {"username": "operator", "password": "operator123"},
-                {"username": "viewer", "password": "viewer123"},
-            ]
-        }
-    )
-
-    username: str = Field(..., description="Username")
-    password: str = Field(..., description="Password")
-
-
 class HealthResponse(BaseModel):
     """Health check response."""
 
@@ -171,6 +154,41 @@ class StatusResponse(BaseModel):
     user: User
 
 
+class PublicConfigResponse(BaseModel):
+    """Public configuration exposed to WebGUI (non-sensitive only)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "version": "0.4.0-beta",
+                "environment": "production",
+                "features": {
+                    "expert_mode": False,
+                    "agentic_rag_enabled": True,
+                    "deep_dive_memory_enabled": True,
+                },
+                "ui": {
+                    "default_language": "zh-CN",
+                    "streaming_enabled": True,
+                    "websocket_heartbeat_seconds": 30,
+                },
+                "limits": {
+                    "max_query_length": 2000,
+                    "session_timeout_minutes": 60,
+                },
+                "workflows": ["query_diagnostic", "device_execution", "netbox_management", "deep_dive"],
+            }
+        }
+    )
+
+    version: str = Field(..., description="Application version")
+    environment: str = Field(..., description="Deployment environment (local/docker)")
+    features: dict = Field(..., description="Enabled feature flags")
+    ui: dict = Field(..., description="UI-related configuration")
+    limits: dict = Field(..., description="Resource limits and constraints")
+    workflows: list[str] = Field(..., description="Available workflow types")
+
+
 # ============================================
 # Application Lifecycle
 # ============================================
@@ -189,7 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         # Initialize orchestrator & underlying Postgres checkpointer (async)
         result = await create_workflow_orchestrator(expert_mode=expert_mode)
-        orch_obj, stateful_graph, stateless_graph, checkpointer_manager = (
+        orch_obj, _stateful_graph, stateless_graph, checkpointer_manager = (
             result  # (WorkflowOrchestrator, stateful_graph, stateless_graph, context manager)
         )
 
@@ -259,6 +277,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         checkpointer = None
 
     logger.info("🎉 OLAV API Server is ready!")
+    
+    # Generate and print access token with URL
+    token = generate_access_token()
+    host = settings.server_host
+    port = settings.server_port
+    # Use localhost for display if bound to 0.0.0.0
+    display_host = "localhost" if host == "0.0.0.0" else host
+    # WebGUI port: 3100 (both dev and Docker)
+    webgui_port = 3100
+    webgui_url = f"http://{display_host}:{webgui_port}?token={token}"
+    api_docs_url = f"http://{display_host}:{port}/docs"
+    
+    logger.info("=" * 60)
+    logger.info("🔑 ACCESS TOKEN (valid for 24 hours):")
+    logger.info(f"   {token}")
+    logger.info("")
+    logger.info("🌐 WebGUI URL (click to open):")
+    logger.info(f"   {webgui_url}")
+    logger.info("")
+    logger.info(f"📖 API Docs: {api_docs_url}")
+    logger.info("=" * 60)
 
     yield  # Server running
 
@@ -280,19 +319,19 @@ def create_app() -> FastAPI:
             "**OLAV** (Omni-Layer Autonomous Verifier) provides LangServe-based HTTP/WebSocket "
             "endpoints for enterprise network diagnostics, configuration management, and compliance auditing.\n\n"
             "## Features\n"
-            "- 🔐 **JWT Authentication** with role-based access control (RBAC)\n"
+            "- 🔐 **Token Authentication** (auto-generated on startup)\n"
             "- 🔄 **Streaming Workflows** via Server-Sent Events (SSE)\n"
             "- 🤖 **AI-Powered Diagnostics** using LangGraph orchestrator\n"
             "- 🛡️ **HITL Safety** (Human-in-the-Loop) for write operations\n"
             "- 📊 **Multi-Workflow Support**: Query, Execution, NetBox, Deep Dive\n\n"
             "## Quick Start\n"
-            "1. Login: `POST /auth/login` with username/password\n"
-            "2. Execute: `POST /orchestrator/stream` with JWT token\n"
-            "3. Monitor: `GET /health` for server status\n\n"
+            "1. Copy the access token printed on server startup\n"
+            "2. Use the WebGUI URL with token parameter, or\n"
+            "3. Add header: `Authorization: Bearer <token>`\n\n"
             "## Authentication\n"
-            "All workflow endpoints require JWT Bearer token:\n"
+            "All workflow endpoints require Bearer token:\n"
             "```\n"
-            "Authorization: Bearer eyJ0eXAi...\n"
+            "Authorization: Bearer <token-from-startup>\n"
             "```\n\n"
             "See `/docs` for interactive API testing."
         ),
@@ -301,7 +340,7 @@ def create_app() -> FastAPI:
         openapi_tags=[
             {
                 "name": "auth",
-                "description": "🔐 Authentication operations (login, token management)",
+                "description": "🔐 Authentication and user info",
             },
             {
                 "name": "monitoring",
@@ -324,13 +363,20 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # CORS middleware (configure for production)
+    # CORS middleware (configured from settings)
+    # Parse comma-separated origins or use "*" for all
+    cors_origins = settings.cors_origins
+    if cors_origins == "*":
+        allow_origins = ["*"]
+    else:
+        allow_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Restrict in production
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=allow_origins,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=settings.cors_allow_methods.split(",") if settings.cors_allow_methods != "*" else ["*"],
+        allow_headers=settings.cors_allow_headers.split(",") if settings.cors_allow_headers != "*" else ["*"],
     )
 
     # ============================================
@@ -398,66 +444,77 @@ def create_app() -> FastAPI:
             orchestrator_ready=orchestrator is not None,
         )
 
-    @app.post(
-        "/auth/login",
-        response_model=Token,
-        tags=["auth"],
-        summary="User authentication",
+    # ============================================
+    # Public Configuration Endpoint (for WebGUI)
+    # ============================================
+    @app.get(
+        "/config",
+        response_model=PublicConfigResponse,
+        tags=["monitoring"],
+        summary="Get public configuration for WebGUI",
         responses={
             200: {
-                "description": "Login successful, returns JWT access token",
+                "description": "Public configuration (non-sensitive)",
                 "content": {
                     "application/json": {
                         "example": {
-                            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-                            "token_type": "bearer",
-                        }
-                    }
-                },
-            },
-            401: {
-                "description": "Invalid credentials",
-                "content": {
-                    "application/json": {
-                        "example": {
-                            "detail": "Incorrect username or password",
+                            "version": "0.4.0-beta",
+                            "environment": "production",
+                            "features": {
+                                "expert_mode": False,
+                                "agentic_rag_enabled": True,
+                            },
+                            "ui": {
+                                "default_language": "zh-CN",
+                                "streaming_enabled": True,
+                            },
+                            "limits": {
+                                "max_query_length": 2000,
+                                "session_timeout_minutes": 60,
+                            },
+                            "workflows": ["query_diagnostic", "device_execution", "netbox_management", "deep_dive"],
                         }
                     }
                 },
             },
         },
     )
-    async def login(credentials: LoginRequest) -> Token:
+    async def get_public_config() -> PublicConfigResponse:
         """
-        Authenticate user and return JWT access token.
+        Get public configuration for WebGUI initialization.
 
-        **Default demo users**:
-        - `admin` / `admin123` - Full administrative access
-        - `operator` / `operator123` - Execute workflows with HITL approval
-        - `viewer` / `viewer123` - Read-only query access
+        This endpoint exposes **non-sensitive** settings that the frontend
+        needs for proper initialization and feature detection.
 
-        **Token Details**:
-        - Expiration: 60 minutes (configurable via `JWT_EXPIRATION_MINUTES`)
-        - Algorithm: HS256
-        - Usage: Include in `Authorization: Bearer <token>` header
+        **No authentication required** - safe for public access.
 
-        **Example Request**:
-        ```bash
-        curl -X POST http://localhost:8000/auth/login \\
-          -H "Content-Type: application/json" \\
-          -d '{"username": "admin", "password": "admin123"}'
-        ```
+        **Use Cases**:
+        - Feature flag detection (enable/disable UI elements)
+        - Timeout/limit configuration
+        - Available workflow discovery
+        - Environment detection (dev/prod styling)
         """
-        user = authenticate_user(credentials.username, credentials.password)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        access_token = create_access_token(data={"sub": user.username, "role": user.role})
-        return Token(access_token=access_token)
+        return PublicConfigResponse(
+            version="0.4.0-beta",
+            environment=settings.environment,
+            features={
+                "expert_mode": settings.expert_mode,
+                "agentic_rag_enabled": settings.enable_agentic_rag,
+                "deep_dive_memory_enabled": settings.enable_deep_dive_memory,
+                "dynamic_router_enabled": settings.use_dynamic_router,
+            },
+            ui={
+                "default_language": "zh-CN",
+                "streaming_enabled": settings.stream_stateless,
+                "websocket_heartbeat_seconds": settings.websocket_heartbeat_interval,
+            },
+            limits={
+                "max_query_length": 2000,
+                "session_timeout_minutes": settings.jwt_expiration_minutes,
+                "rate_limit_rpm": settings.api_rate_limit_rpm if settings.api_rate_limit_enabled else None,
+            },
+            workflows=["query_diagnostic", "device_execution", "netbox_management", "deep_dive"],
+        )
 
     # ============================================
     # Protected Endpoints (Require Auth)
@@ -529,9 +586,9 @@ def create_app() -> FastAPI:
                 },
             },
             401: {
-                "description": "Missing or invalid JWT token",
+                "description": "Missing or invalid token",
                 "content": {
-                    "application/json": {"example": {"detail": "Could not validate credentials"}}
+                    "application/json": {"example": {"detail": "Invalid or expired token"}}
                 },
             },
         },
@@ -540,17 +597,16 @@ def create_app() -> FastAPI:
         """
         Get current authenticated user information.
 
-        **Required**: Bearer token from `/auth/login`
+        **Required**: Bearer token from server startup
 
         Useful for:
         - Verifying token validity
-        - Checking current user role and permissions
-        - Token expiration monitoring
+        - WebGUI authentication check
 
         **Example Request**:
         ```bash
         curl http://localhost:8000/me \\
-          -H "Authorization: Bearer eyJ0eXAi..."
+          -H "Authorization: Bearer <token-from-startup>"
         ```
         """
         return current_user
@@ -672,6 +728,222 @@ def create_app() -> FastAPI:
                 "error": str(e) or "",
             }
             return JSONResponse(status_code=200, content=fallback)
+
+    # ============================================
+    # Enhanced Streaming Endpoint with Thinking Events
+    # ============================================
+    from fastapi.responses import StreamingResponse
+    import json as json_module
+
+    class StreamEventType:
+        """Stream event types for WebGUI."""
+        TOKEN = "token"           # Final response token
+        THINKING = "thinking"     # LLM reasoning process
+        TOOL_START = "tool_start" # Tool invocation started
+        TOOL_END = "tool_end"     # Tool invocation completed
+        INTERRUPT = "interrupt"   # HITL approval required
+        ERROR = "error"           # Error occurred
+        DONE = "done"             # Stream completed
+
+    @app.post(
+        "/orchestrator/stream/events",
+        tags=["orchestrator"],
+        summary="Stream workflow with structured events",
+        responses={
+            200: {
+                "description": "Server-Sent Events stream with thinking process",
+                "content": {
+                    "text/event-stream": {
+                        "example": 'data: {"type": "thinking", "thinking": {"step": "hypothesis", "content": "分析 BGP 邻居状态..."}}\n\n'
+                    }
+                },
+            },
+        },
+    )
+    async def orchestrator_stream_events(
+        payload: WorkflowInvokePayload,
+        current_user: CurrentUser,
+    ):
+        """Stream workflow execution with structured events.
+
+        Returns Server-Sent Events (SSE) with the following event types:
+        - `thinking`: LLM reasoning process (hypothesis, verification, conclusion)
+        - `tool_start`: Tool invocation started
+        - `tool_end`: Tool invocation completed with result
+        - `token`: Final response tokens
+        - `interrupt`: HITL approval required
+        - `error`: Error occurred
+        - `done`: Stream completed
+
+        **Example Event**:
+        ```
+        data: {"type": "thinking", "thinking": {"step": "hypothesis", "content": "检查 BGP 会话状态..."}}
+
+        data: {"type": "tool_start", "tool": {"name": "suzieq_query", "display_name": "SuzieQ 查询", "args": {"table": "bgp"}}}
+
+        data: {"type": "token", "content": "BGP 邻居状态正常"}
+
+        data: {"type": "done"}
+        ```
+        """
+        orch_obj = getattr(app.state, "orchestrator_obj", None)
+        if orch_obj is None:
+            async def error_stream():
+                yield f"data: {json_module.dumps({'type': 'error', 'error': {'code': 'NOT_INITIALIZED', 'message': 'Orchestrator not initialized'}})}\n\n"
+            return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+        # Extract user query
+        user_query = ""
+        for m in reversed(payload.input.messages):
+            if m.role == "user":
+                user_query = m.content
+                break
+        if not user_query and payload.input.messages:
+            user_query = payload.input.messages[-1].content
+
+        # Thread ID
+        thread_id = None
+        if payload.config and payload.config.configurable:
+            thread_id = payload.config.configurable.get("thread_id")
+        if not thread_id:
+            import time
+            thread_id = f"stream-{int(time.time())}"
+
+        # Tool display names (Chinese)
+        tool_display_names = {
+            "suzieq_query": "SuzieQ 查询",
+            "suzieq_schema_search": "SuzieQ 模式搜索",
+            "netbox_api_call": "NetBox API",
+            "cli_executor": "CLI 执行",
+            "netconf_tool": "NETCONF",
+            "rag_search": "知识库搜索",
+            "episodic_memory_search": "历史记忆搜索",
+        }
+
+        async def event_stream():
+            """Generate SSE events from orchestrator execution."""
+            from langchain_core.messages import AIMessage, ToolMessage
+
+            seen_tool_ids = set()
+            tool_start_times = {}
+
+            try:
+                # Get the stateful graph for streaming
+                stateful_graph = getattr(orch_obj, "_stateful_graph", None)
+                if stateful_graph is None:
+                    yield f"data: {json_module.dumps({'type': 'error', 'error': {'code': 'NO_GRAPH', 'message': 'Stateful graph not available'}})}\n\n"
+                    return
+
+                # Stream with values mode to get state updates
+                config = {"configurable": {"thread_id": thread_id}}
+
+                async for chunk in stateful_graph.astream(
+                    {"messages": [{"role": "user", "content": user_query}]},
+                    config=config,
+                    stream_mode="values",
+                ):
+                    if not isinstance(chunk, dict) or "messages" not in chunk:
+                        continue
+
+                    messages = chunk.get("messages", [])
+                    if not isinstance(messages, list):
+                        continue
+
+                    # Process recent messages
+                    for msg in messages[-5:]:
+                        # Detect tool calls (thinking indicator)
+                        if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tool_call in msg.tool_calls:
+                                tool_name = tool_call.get("name")
+                                tool_id = tool_call.get("id")
+                                tool_args = tool_call.get("args", {})
+
+                                if tool_name and tool_id and tool_id not in seen_tool_ids:
+                                    seen_tool_ids.add(tool_id)
+                                    import time
+                                    tool_start_times[tool_id] = time.time()
+
+                                    # Emit thinking event
+                                    thinking_event = {
+                                        "type": "thinking",
+                                        "thinking": {
+                                            "step": "reasoning",
+                                            "content": f"正在调用 {tool_display_names.get(tool_name, tool_name)}...",
+                                        }
+                                    }
+                                    yield f"data: {json_module.dumps(thinking_event, ensure_ascii=False)}\n\n"
+
+                                    # Emit tool_start event
+                                    tool_event = {
+                                        "type": "tool_start",
+                                        "tool": {
+                                            "id": tool_id,
+                                            "name": tool_name,
+                                            "display_name": tool_display_names.get(tool_name, tool_name),
+                                            "args": tool_args,
+                                        }
+                                    }
+                                    yield f"data: {json_module.dumps(tool_event, ensure_ascii=False)}\n\n"
+
+                        # Detect tool results
+                        if isinstance(msg, ToolMessage):
+                            tool_id = getattr(msg, "tool_call_id", None)
+                            if tool_id and tool_id in tool_start_times:
+                                import time
+                                duration_ms = int((time.time() - tool_start_times[tool_id]) * 1000)
+
+                                tool_end_event = {
+                                    "type": "tool_end",
+                                    "tool": {
+                                        "id": tool_id,
+                                        "name": getattr(msg, "name", "unknown"),
+                                        "duration_ms": duration_ms,
+                                        "success": not bool(getattr(msg, "status", None) == "error"),
+                                    }
+                                }
+                                yield f"data: {json_module.dumps(tool_end_event, ensure_ascii=False)}\n\n"
+
+                        # Detect final AI response (no tool calls = final answer)
+                        if isinstance(msg, AIMessage) and msg.content:
+                            if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                # This is a final response, emit as tokens
+                                token_event = {
+                                    "type": "token",
+                                    "content": msg.content,
+                                }
+                                yield f"data: {json_module.dumps(token_event, ensure_ascii=False)}\n\n"
+
+                # Check for interrupt state
+                if chunk.get("interrupted"):
+                    interrupt_event = {
+                        "type": "interrupt",
+                        "execution_plan": chunk.get("execution_plan"),
+                    }
+                    yield f"data: {json_module.dumps(interrupt_event, ensure_ascii=False)}\n\n"
+
+                # Done
+                yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
+
+            except Exception as e:
+                logger.exception(f"Stream error: {e}")
+                error_event = {
+                    "type": "error",
+                    "error": {
+                        "code": "STREAM_ERROR",
+                        "message": str(e),
+                    }
+                }
+                yield f"data: {json_module.dumps(error_event, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
 
     return app
 

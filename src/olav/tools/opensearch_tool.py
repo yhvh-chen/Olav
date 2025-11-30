@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
+
+from langchain_core.tools import tool
 
 from olav.core.memory import OpenSearchMemory
 from olav.tools.adapters import OpenSearchAdapter
 from olav.tools.base import BaseTool, ToolOutput, ToolRegistry
-from langchain_core.tools import tool
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -318,8 +319,11 @@ ToolRegistry.register(EpisodicMemoryTool())
 # Compatibility Wrappers (@tool) expected by existing workflows
 # ---------------------------------------------------------------------------
 
+
 @tool
-async def search_openconfig_schema(intent: str, device_type: str = "network-instance", max_results: int = 5) -> dict[str, Any]:
+async def search_openconfig_schema(
+    intent: str, device_type: str = "network-instance", max_results: int = 5
+) -> dict[str, Any]:
     """Search OpenConfig YANG schema index for XPaths matching intent.
 
     Delegates to refactored OpenConfigSchemaTool and adapts ToolOutput
@@ -336,8 +340,11 @@ async def search_openconfig_schema(intent: str, device_type: str = "network-inst
         "metadata": result.metadata,
     }
 
+
 @tool
-async def search_episodic_memory(intent: str, max_results: int = 3, only_successful: bool = True) -> dict[str, Any]:
+async def search_episodic_memory(
+    intent: str, max_results: int = 3, only_successful: bool = True
+) -> dict[str, Any]:
     """Search episodic memory index for historical successful intent→XPath mappings.
 
     Delegates to refactored EpisodicMemoryTool and returns simplified dict
@@ -346,7 +353,9 @@ async def search_episodic_memory(intent: str, max_results: int = 3, only_success
     impl = ToolRegistry.get_tool("episodic_memory_search")
     if impl is None:
         return {"success": False, "error": "episodic_memory_search tool not registered"}
-    result = await impl.execute(intent=intent, max_results=max_results, only_successful=only_successful)
+    result = await impl.execute(
+        intent=intent, max_results=max_results, only_successful=only_successful
+    )
     return {
         "success": result.error is None,
         "error": result.error,

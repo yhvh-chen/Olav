@@ -27,25 +27,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_settings() -> "EnvSettings":
+def _get_settings() -> EnvSettings:
     """Get settings lazily to allow mocking in tests."""
     from olav.core.settings import settings
+
     return settings
 
 
 class CacheBackend(ABC):
     """Abstract base class for cache backends.
-    
+
     Defines the interface for all cache implementations.
     """
 
     @abstractmethod
     async def get(self, key: str) -> Any | None:
         """Get value from cache.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             Cached value or None if not found/expired
         """
@@ -59,12 +60,12 @@ class CacheBackend(ABC):
         ttl: int | None = None,
     ) -> bool:
         """Set value in cache.
-        
+
         Args:
             key: Cache key
             value: Value to cache (must be JSON-serializable)
             ttl: Time-to-live in seconds (None = use default)
-            
+
         Returns:
             True if set successfully
         """
@@ -73,10 +74,10 @@ class CacheBackend(ABC):
     @abstractmethod
     async def delete(self, key: str) -> bool:
         """Delete value from cache.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             True if deleted, False if not found
         """
@@ -85,10 +86,10 @@ class CacheBackend(ABC):
     @abstractmethod
     async def exists(self, key: str) -> bool:
         """Check if key exists in cache.
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             True if key exists and not expired
         """
@@ -97,10 +98,10 @@ class CacheBackend(ABC):
     @abstractmethod
     async def clear_namespace(self, namespace: str) -> int:
         """Clear all keys in a namespace.
-        
+
         Args:
             namespace: Key prefix to clear (e.g., "schema:" clears all schema cache)
-            
+
         Returns:
             Number of keys deleted
         """
@@ -109,7 +110,7 @@ class CacheBackend(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         """Check if cache backend is healthy.
-        
+
         Returns:
             True if connected and operational
         """
@@ -118,16 +119,16 @@ class CacheBackend(ABC):
 
 class RedisCache(CacheBackend):
     """Redis-based cache implementation.
-    
+
     Uses redis-py async client for distributed caching.
     Automatically serializes/deserializes JSON values.
-    
+
     Key namespacing:
     - "schema:suzieq" -> SuzieQ schema cache
     - "schema:openconfig" -> OpenConfig schema cache
     - "tool:abc123" -> Tool result cache
     - "session:xyz789" -> Session state cache
-    
+
     Example:
         >>> cache = RedisCache("redis://localhost:6379")
         >>> await cache.set("schema:suzieq", schema_dict, ttl=3600)
@@ -141,7 +142,7 @@ class RedisCache(CacheBackend):
         key_prefix: str = "olav:",
     ) -> None:
         """Initialize Redis cache.
-        
+
         Args:
             redis_url: Redis connection URL (e.g., "redis://localhost:6379")
             default_ttl: Default TTL in seconds (default: 3600 = 1 hour)
@@ -155,17 +156,17 @@ class RedisCache(CacheBackend):
 
     async def _get_client(self) -> Any:
         """Get or create Redis client.
-        
+
         Returns:
             Redis async client
-            
+
         Raises:
             ConnectionError: If Redis connection fails
         """
         if self._client is None:
             try:
                 import redis.asyncio as redis_async
-                
+
                 self._client = redis_async.from_url(
                     self._redis_url,
                     encoding="utf-8",
@@ -177,20 +178,22 @@ class RedisCache(CacheBackend):
                 logger.info(f"Redis cache connected: {self._redis_url}")
             except ImportError as e:
                 logger.error("redis package not installed. Run: uv add redis")
-                raise ConnectionError("redis package not available") from e
+                msg = "redis package not available"
+                raise ConnectionError(msg) from e
             except Exception as e:
                 logger.error(f"Redis connection failed: {e}")
                 self._connected = False
-                raise ConnectionError(f"Cannot connect to Redis: {e}") from e
-        
+                msg = f"Cannot connect to Redis: {e}"
+                raise ConnectionError(msg) from e
+
         return self._client
 
     def _make_key(self, key: str) -> str:
         """Create full cache key with prefix.
-        
+
         Args:
             key: User-provided key
-            
+
         Returns:
             Full key with prefix (e.g., "olav:schema:suzieq")
         """
@@ -198,10 +201,10 @@ class RedisCache(CacheBackend):
 
     def _serialize(self, value: Any) -> str:
         """Serialize value to JSON string.
-        
+
         Args:
             value: Value to serialize
-            
+
         Returns:
             JSON string
         """
@@ -209,10 +212,10 @@ class RedisCache(CacheBackend):
 
     def _deserialize(self, data: str | None) -> Any | None:
         """Deserialize JSON string to value.
-        
+
         Args:
             data: JSON string or None
-            
+
         Returns:
             Deserialized value or None
         """
@@ -226,10 +229,10 @@ class RedisCache(CacheBackend):
 
     async def get(self, key: str) -> Any | None:
         """Get value from Redis cache.
-        
+
         Args:
             key: Cache key (without prefix)
-            
+
         Returns:
             Cached value or None if not found/expired
         """
@@ -238,12 +241,12 @@ class RedisCache(CacheBackend):
             full_key = self._make_key(key)
             data = await client.get(full_key)
             value = self._deserialize(data)
-            
+
             if value is not None:
                 logger.debug(f"Cache HIT: {key}")
             else:
                 logger.debug(f"Cache MISS: {key}")
-            
+
             return value
         except ConnectionError:
             logger.warning(f"Redis unavailable, cache MISS: {key}")
@@ -259,12 +262,12 @@ class RedisCache(CacheBackend):
         ttl: int | None = None,
     ) -> bool:
         """Set value in Redis cache.
-        
+
         Args:
             key: Cache key (without prefix)
             value: Value to cache (must be JSON-serializable)
             ttl: Time-to-live in seconds (None = use default)
-            
+
         Returns:
             True if set successfully
         """
@@ -273,7 +276,7 @@ class RedisCache(CacheBackend):
             full_key = self._make_key(key)
             data = self._serialize(value)
             expire = ttl if ttl is not None else self._default_ttl
-            
+
             await client.set(full_key, data, ex=expire)
             logger.debug(f"Cache SET: {key} (TTL: {expire}s)")
             return True
@@ -286,10 +289,10 @@ class RedisCache(CacheBackend):
 
     async def delete(self, key: str) -> bool:
         """Delete value from Redis cache.
-        
+
         Args:
             key: Cache key (without prefix)
-            
+
         Returns:
             True if deleted, False if not found
         """
@@ -297,7 +300,7 @@ class RedisCache(CacheBackend):
             client = await self._get_client()
             full_key = self._make_key(key)
             deleted = await client.delete(full_key)
-            
+
             if deleted:
                 logger.debug(f"Cache DELETE: {key}")
             return deleted > 0
@@ -310,10 +313,10 @@ class RedisCache(CacheBackend):
 
     async def exists(self, key: str) -> bool:
         """Check if key exists in Redis cache.
-        
+
         Args:
             key: Cache key (without prefix)
-            
+
         Returns:
             True if key exists and not expired
         """
@@ -329,17 +332,17 @@ class RedisCache(CacheBackend):
 
     async def clear_namespace(self, namespace: str) -> int:
         """Clear all keys matching namespace pattern.
-        
+
         Args:
             namespace: Key prefix to clear (e.g., "schema:" clears "olav:schema:*")
-            
+
         Returns:
             Number of keys deleted
         """
         try:
             client = await self._get_client()
             pattern = f"{self._key_prefix}{namespace}*"
-            
+
             # Use SCAN to find keys (safer than KEYS for production)
             deleted_count = 0
             cursor = 0
@@ -349,7 +352,7 @@ class RedisCache(CacheBackend):
                     deleted_count += await client.delete(*keys)
                 if cursor == 0:
                     break
-            
+
             logger.info(f"Cache CLEAR namespace '{namespace}': {deleted_count} keys deleted")
             return deleted_count
         except ConnectionError:
@@ -361,7 +364,7 @@ class RedisCache(CacheBackend):
 
     async def health_check(self) -> bool:
         """Check Redis connection health.
-        
+
         Returns:
             True if connected and operational
         """
@@ -384,10 +387,10 @@ class RedisCache(CacheBackend):
 
 class NoOpCache(CacheBackend):
     """No-operation cache backend for testing or when Redis unavailable.
-    
+
     All operations succeed but don't persist data.
     Useful as fallback when Redis is not configured.
-    
+
     Example:
         >>> cache = NoOpCache()
         >>> await cache.set("key", "value")  # Returns True but doesn't persist
@@ -434,15 +437,15 @@ CacheNamespace = Literal["schema:", "tool:", "session:", "memory:"]
 
 class CacheManager:
     """High-level cache manager with namespace support.
-    
+
     Provides type-safe caching operations with automatic namespace prefixing.
-    
+
     Namespaces:
     - schema: Schema caching (SuzieQ, OpenConfig)
     - tool: Tool result caching
     - session: Session state caching
     - memory: Episodic memory caching
-    
+
     Example:
         >>> manager = CacheManager(RedisCache("redis://localhost:6379"))
         >>> await manager.set_schema("suzieq", schema_dict)
@@ -455,28 +458,28 @@ class CacheManager:
         default_ttls: dict[CacheNamespace, int] | None = None,
     ) -> None:
         """Initialize cache manager.
-        
+
         Args:
             backend: Cache backend implementation
             default_ttls: Namespace-specific default TTLs (optional)
         """
         self.backend = backend
         self._default_ttls: dict[CacheNamespace, int] = {
-            "schema:": 3600,      # 1 hour for schemas
-            "tool:": 300,         # 5 minutes for tool results
-            "session:": 1800,     # 30 minutes for sessions
-            "memory:": 7200,      # 2 hours for episodic memory
+            "schema:": 3600,  # 1 hour for schemas
+            "tool:": 300,  # 5 minutes for tool results
+            "session:": 1800,  # 30 minutes for sessions
+            "memory:": 7200,  # 2 hours for episodic memory
         }
         if default_ttls:
             self._default_ttls.update(default_ttls)
 
     def _make_namespaced_key(self, namespace: CacheNamespace, key: str) -> str:
         """Create namespaced key.
-        
+
         Args:
             namespace: Cache namespace
             key: Key within namespace
-            
+
         Returns:
             Namespaced key (e.g., "schema:suzieq")
         """
@@ -485,10 +488,10 @@ class CacheManager:
     # Schema caching methods
     async def get_schema(self, schema_type: str) -> dict[str, Any] | None:
         """Get cached schema.
-        
+
         Args:
             schema_type: Schema type ("suzieq", "openconfig")
-            
+
         Returns:
             Cached schema dict or None
         """
@@ -502,12 +505,12 @@ class CacheManager:
         ttl: int | None = None,
     ) -> bool:
         """Cache schema.
-        
+
         Args:
             schema_type: Schema type ("suzieq", "openconfig")
             schema: Schema dictionary
             ttl: TTL in seconds (None = use default)
-            
+
         Returns:
             True if cached successfully
         """
@@ -517,10 +520,10 @@ class CacheManager:
 
     async def invalidate_schema(self, schema_type: str) -> bool:
         """Invalidate cached schema.
-        
+
         Args:
             schema_type: Schema type to invalidate
-            
+
         Returns:
             True if invalidated
         """
@@ -530,10 +533,10 @@ class CacheManager:
     # Tool result caching methods
     async def get_tool_result(self, cache_key: str) -> dict[str, Any] | None:
         """Get cached tool result.
-        
+
         Args:
             cache_key: Tool result cache key (usually hash of tool_name + params)
-            
+
         Returns:
             Cached result or None
         """
@@ -547,12 +550,12 @@ class CacheManager:
         ttl: int | None = None,
     ) -> bool:
         """Cache tool result.
-        
+
         Args:
             cache_key: Tool result cache key
             result: Tool execution result
             ttl: TTL in seconds (None = use default)
-            
+
         Returns:
             True if cached successfully
         """
@@ -563,10 +566,10 @@ class CacheManager:
     # Session state caching methods
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get cached session state.
-        
+
         Args:
             session_id: Session identifier
-            
+
         Returns:
             Session state or None
         """
@@ -580,12 +583,12 @@ class CacheManager:
         ttl: int | None = None,
     ) -> bool:
         """Cache session state.
-        
+
         Args:
             session_id: Session identifier
             state: Session state dict
             ttl: TTL in seconds (None = use default)
-            
+
         Returns:
             True if cached successfully
         """
@@ -596,7 +599,7 @@ class CacheManager:
     # Utility methods
     async def clear_all_schemas(self) -> int:
         """Clear all cached schemas.
-        
+
         Returns:
             Number of schemas cleared
         """
@@ -604,7 +607,7 @@ class CacheManager:
 
     async def clear_all_tool_results(self) -> int:
         """Clear all cached tool results.
-        
+
         Returns:
             Number of results cleared
         """
@@ -612,7 +615,7 @@ class CacheManager:
 
     async def health_check(self) -> bool:
         """Check cache backend health.
-        
+
         Returns:
             True if healthy
         """
@@ -625,18 +628,18 @@ _cache_manager: CacheManager | None = None
 
 def get_cache_manager() -> CacheManager:
     """Get global CacheManager singleton.
-    
+
     Creates RedisCache from settings.redis_url if available,
     falls back to NoOpCache if Redis not configured.
-    
+
     Returns:
         Global CacheManager instance
     """
     global _cache_manager
-    
+
     if _cache_manager is None:
         settings = _get_settings()
-        
+
         if settings.redis_url:
             try:
                 backend = RedisCache(settings.redis_url)
@@ -647,31 +650,31 @@ def get_cache_manager() -> CacheManager:
         else:
             logger.info("Redis URL not configured, using NoOpCache")
             backend = NoOpCache()
-        
+
         _cache_manager = CacheManager(backend)
-    
+
     return _cache_manager
 
 
 async def init_cache() -> CacheManager:
     """Initialize and verify cache connection.
-    
+
     Call this at application startup to verify Redis connectivity.
-    
+
     Returns:
         Initialized CacheManager
-        
+
     Example:
         >>> cache = await init_cache()
         >>> if await cache.health_check():
         ...     print("Cache ready")
     """
     manager = get_cache_manager()
-    
+
     healthy = await manager.health_check()
     if healthy:
         logger.info("✓ Cache backend healthy")
     else:
         logger.warning("✗ Cache backend unhealthy (using fallback)")
-    
+
     return manager

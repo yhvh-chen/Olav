@@ -179,7 +179,8 @@ class SyslogSearchTool(BaseTool):
                     "severity": r.get("severity") or r.get("pri"),  # Fluent Bit uses "pri"
                     "facility": r.get("facility"),
                     "program": r.get("program"),
-                    "message": r.get("message") or r.get("raw_message"),  # Fluent Bit uses "message"
+                    "message": r.get("message")
+                    or r.get("raw_message"),  # Fluent Bit uses "message"
                 }
                 for r in results
             ]

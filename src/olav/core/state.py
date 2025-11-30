@@ -14,7 +14,7 @@ from langgraph.graph import add_messages
 
 class AgentState(TypedDict):
     """Root agent state shared across all SubAgents.
-    
+
     NOTE: Current architecture uses BaseWorkflowState from olav.workflows.base.
     This class is retained for compatibility and potential future use.
     """

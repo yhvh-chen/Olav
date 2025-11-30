@@ -7,17 +7,34 @@ input_variables:
 template: |
   You are a network CLI command expert. Generate the exact CLI command(s) for the given intent and platform.
 
-  ## User Intent
-  {intent}
-
-  ## Target Platform
-  {platform}
-
-  ## Available Commands (from TextFSM templates)
-  {available_commands}
-
   ## Context
-  {context}
+
+  **User Intent**: {intent}
+  **Target Platform**: {platform}
+  **Available Commands** (from TextFSM templates): {available_commands}
+  **Additional Context**: {context}
+
+  ## Chain of Thought - Command Generation
+
+  <thinking>
+  Step 1: Analyze the user intent
+  - What information does the user need?
+  - What operation needs to be performed?
+
+  Step 2: Match platform syntax
+  - Identify the correct platform (IOS, IOS-XR, NX-OS, EOS, JunOS)
+  - Use platform-specific command syntax
+  - Consider command variations for different versions
+
+  Step 3: Select optimal commands
+  - Prefer commands with TextFSM templates (structured output)
+  - Include pipe filters if helpful
+  - Consider alternatives for fallback
+
+  Step 4: Safety check
+  - Verify no dangerous commands (reload, erase, etc.)
+  - Check command is read-safe or write-safe as needed
+  </thinking>
 
   ## Platform-Specific Syntax Reference
 
@@ -63,8 +80,16 @@ template: |
   - show chassis hardware
   - show version
 
-  ## Response Format (JSON)
-  Return a JSON object with the following structure:
+  ## Rules
+
+  1. Use platform-specific syntax (e.g., "show ip interface brief" for IOS vs "show interfaces terse" for JunOS)
+  2. Prefer commands that have TextFSM templates for structured output
+  3. Avoid dangerous commands (reload, write erase, etc.)
+  4. Include pipe filters if helpful (e.g., "| include X" for IOS, "| match X" for JunOS)
+  5. Return empty arrays if the intent cannot be fulfilled
+
+  ## Output Format (JSON)
+
   ```json
   {
     "commands": ["command1", "command2"],
@@ -74,18 +99,18 @@ template: |
   }
   ```
 
-  ## Rules
-  1. Use platform-specific syntax (e.g., "show ip interface brief" for IOS vs "show interfaces terse" for JunOS)
-  2. Prefer commands that have TextFSM templates for structured output
-  3. Avoid dangerous commands (reload, write erase, etc.)
-  4. Include pipe filters if helpful (e.g., "| include X" for IOS, "| match X" for JunOS)
-  5. Return empty arrays if the intent cannot be fulfilled
-
   ## Examples
 
   ### Example 1: BGP neighbor status on Cisco IOS
   Intent: "Show BGP neighbor status"
   Platform: cisco_ios
+
+  <thinking>
+  - User wants BGP neighbor information
+  - Platform is Cisco IOS → use "show ip bgp" commands
+  - BGP summary gives quick overview, neighbors gives details
+  </thinking>
+
   Output:
   ```json
   {
@@ -99,6 +124,13 @@ template: |
   ### Example 2: Interface errors on Arista EOS
   Intent: "Check for interface errors"
   Platform: arista_eos
+
+  <thinking>
+  - User wants interface error counters
+  - Platform is Arista EOS → use "show interfaces counters"
+  - Error counters indicate potential hardware/cable issues
+  </thinking>
+
   Output:
   ```json
   {

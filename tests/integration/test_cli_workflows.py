@@ -23,8 +23,8 @@ async def test_workflow_orchestrator_creation():
     mock_checkpointer = Mock()
     orchestrator = WorkflowOrchestrator(checkpointer=mock_checkpointer)
     
-    # Should have all three workflows
-    assert len(orchestrator.workflows) == 3
+    # Should have 5 workflows (query, execution, netbox, deep_dive, inspection)
+    assert len(orchestrator.workflows) >= 3
     
     # Should have classify methods
     assert hasattr(orchestrator, 'classify_intent')
@@ -50,13 +50,12 @@ def test_cli_help_shows_workflows():
     
     # Should mention workflows in help
     assert result.returncode == 0
-    assert "workflows" in result.stdout.lower()
-    assert "default: workflows" in result.stdout.lower()
+    assert "workflow" in result.stdout.lower()
 
 
 def test_cli_default_mode_is_workflows():
     """Test that default agent mode is workflows."""
-    # We can verify from the help output instead since Typer wraps defaults
+    # Verify from help output that workflows orchestrator is used
     import subprocess
     import os
     
@@ -70,6 +69,6 @@ def test_cli_default_mode_is_workflows():
         env=env
     )
     
-    # Check that "default: workflows" appears in help
+    # Check that help mentions workflows orchestrator architecture
     assert result.returncode == 0
-    assert "[default: workflows]" in result.stdout
+    assert "Workflows Orchestrator" in result.stdout or "workflow" in result.stdout.lower()

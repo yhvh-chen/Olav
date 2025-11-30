@@ -72,8 +72,19 @@ class TestSuzieQTool:
     
     @pytest.fixture
     def suzieq_tool(self, mock_parquet_dir):
-        """Create SuzieQTool instance with mock directory."""
-        return SuzieQTool(parquet_dir=mock_parquet_dir)
+        """Create SuzieQTool instance with mock directory and schema loader."""
+        tool = SuzieQTool(parquet_dir=mock_parquet_dir)
+        # Mock schema_loader.get_key_fields to return test defaults
+        async def mock_get_key_fields(table: str):
+            key_fields = {
+                "bgp": ["hostname", "peer", "afi", "safi"],
+                "interfaces": ["hostname", "ifname"],
+                "routes": ["hostname", "vrf", "prefix"],
+                "device": ["hostname"],
+            }
+            return key_fields.get(table, ["hostname"])
+        tool.schema_loader.get_key_fields = mock_get_key_fields
+        return tool
     
     def test_initialization(self, suzieq_tool, mock_parquet_dir):
         """Test tool initialization."""
@@ -309,7 +320,7 @@ class TestSuzieQTool:
         # Should exclude 2-hour-old record
         assert len(filtered) < len(sample_bgp_df)
     
-    def test_deduplicate_latest_state_bgp(self, suzieq_tool):
+    async def test_deduplicate_latest_state_bgp(self, suzieq_tool):
         """Test deduplication for BGP table."""
         current_time_ms = int(time.time() * 1000)
         df = pd.DataFrame([
@@ -317,12 +328,12 @@ class TestSuzieQTool:
             {"hostname": "R1", "peer": "10.0.0.2", "afi": "ipv4", "safi": "unicast", "state": "Established", "timestamp": current_time_ms - 1800000},
         ])
         
-        deduped = suzieq_tool._deduplicate_latest_state(df, "bgp")
+        deduped = await suzieq_tool._deduplicate_latest_state(df, "bgp")
         
         assert len(deduped) == 1
         assert deduped.iloc[0]["state"] == "Established"
     
-    def test_deduplicate_latest_state_active_priority(self, suzieq_tool):
+    async def test_deduplicate_latest_state_active_priority(self, suzieq_tool):
         """Test active=True records are prioritized."""
         current_time_ms = int(time.time() * 1000)
         df = pd.DataFrame([
@@ -330,7 +341,7 @@ class TestSuzieQTool:
             {"hostname": "R1", "peer": "10.0.0.2", "afi": "ipv4", "safi": "unicast", "active": False, "timestamp": current_time_ms},
         ])
         
-        deduped = suzieq_tool._deduplicate_latest_state(df, "bgp")
+        deduped = await suzieq_tool._deduplicate_latest_state(df, "bgp")
         
         # Should only have active record
         assert all(deduped["active"] == True)

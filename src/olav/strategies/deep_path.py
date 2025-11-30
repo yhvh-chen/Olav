@@ -21,18 +21,17 @@ Key Difference from Fast Path:
 - Fast Path: Single tool call, deterministic
 - Deep Path: Iterative reasoning, hypothesis-driven, adaptive
 
-Refactored: Uses LangChain with_structured_output() with JSON parsing fallback.
+Refactored: Uses LangChain with_structured_output() - no fallback parsing needed.
 """
 
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
+from olav.core.json_utils import robust_structured_output
 from olav.tools.base import ToolOutput, ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -210,73 +209,6 @@ class DeepPathStrategy:
                 logger.debug(f"Loaded capability guide for: {tool_prefix}")
 
         return guides
-
-    def _parse_json_response(self, content: str, model_class: type[BaseModel]) -> BaseModel | None:
-        """Robustly parse JSON from LLM response with multiple fallback strategies.
-
-        Handles common LLM output issues:
-        1. Markdown code blocks (```json ... ```)
-        2. Extra text before/after JSON
-        3. Single quotes instead of double quotes
-        4. Trailing commas
-
-        Args:
-            content: Raw LLM response content
-            model_class: Pydantic model class to validate against
-
-        Returns:
-            Parsed model instance, or None if all strategies fail
-        """
-        raw_content = content.strip()
-
-        # Strategy 1: Clean markdown code blocks
-        if "```" in raw_content:
-            match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw_content, re.DOTALL)
-            if match:
-                raw_content = match.group(1).strip()
-
-        # Strategy 2: Find JSON object boundaries
-        if not raw_content.startswith("{") and not raw_content.startswith("["):
-            start = raw_content.find("{")
-            if start == -1:
-                start = raw_content.find("[")
-            end = max(raw_content.rfind("}"), raw_content.rfind("]"))
-            if start != -1 and end != -1 and end > start:
-                raw_content = raw_content[start : end + 1]
-
-        # Strategy 3: Try direct Pydantic parsing
-        try:
-            return model_class.model_validate_json(raw_content)
-        except Exception:
-            pass
-
-        # Strategy 4: Fix common JSON issues and parse
-        try:
-            fixed = raw_content
-            # Remove trailing commas before } or ]
-            fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
-            data = json.loads(fixed)
-            return model_class.model_validate(data)
-        except Exception:
-            pass
-
-        # Strategy 5: Try extracting fields manually for simple models
-        try:
-            # For models with 'tool' and 'parameters' fields
-            tool_match = re.search(r'"tool"\s*:\s*"([^"]+)"', raw_content)
-            params_match = re.search(r'"parameters"\s*:\s*(\{[^}]+\})', raw_content)
-            if tool_match:
-                data = {
-                    "tool": tool_match.group(1),
-                    "parameters": json.loads(params_match.group(1)) if params_match else {},
-                    "reasoning": "Extracted via regex fallback",
-                }
-                return model_class.model_validate(data)
-        except Exception:
-            pass
-
-        logger.warning(f"All JSON parsing strategies failed for {model_class.__name__}")
-        return None
 
     async def execute(
         self, user_query: str, context: dict[str, Any] | None = None
@@ -479,12 +411,19 @@ class DeepPathStrategy:
 - netconf_tool: NETCONF get-config
 
 ⚠️ 如果使用 suzieq_query，必须使用 Schema Discovery 中发现的表名！
+
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"tool_calls": [{{"tool": "suzieq_query", "parameters": {{"table": "bgp"}}, "reasoning": "查询 BGP 状态"}}]}}
 """
 
         try:
-            # Use with_structured_output for reliable JSON parsing
-            structured_llm = self.llm.with_structured_output(ToolCallPlanList)
-            result: ToolCallPlanList = await structured_llm.ainvoke([SystemMessage(content=prompt)])
+            # Use robust_structured_output for reliable JSON parsing
+            result = await robust_structured_output(
+                llm=self.llm,
+                output_class=ToolCallPlanList,
+                prompt=prompt,
+            )
 
             for call in result.tool_calls:
                 observation = ObservationStep(
@@ -501,27 +440,7 @@ class DeepPathStrategy:
                 state.observations.append(observation)
 
         except Exception as e:
-            logger.warning(f"with_structured_output failed: {e}, trying fallback parser")
-            # Try fallback: invoke without structured output and parse manually
-            try:
-                raw_response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-                raw_content = raw_response.content if hasattr(raw_response, "content") else str(raw_response)
-                parsed = self._parse_json_response(raw_content, ToolCallPlanList)
-                if parsed:
-                    for call in parsed.tool_calls:
-                        observation = ObservationStep(
-                            step_number=len(state.observations) + 1,
-                            tool=call.tool,
-                            parameters=call.parameters,
-                            interpretation=call.reasoning,
-                        )
-                        tool_output = await self._execute_tool(call.tool, call.parameters)
-                        observation.tool_output = tool_output
-                        state.observations.append(observation)
-                else:
-                    raise ValueError("Fallback parser also failed")
-            except Exception as fallback_e:
-                logger.error(f"Failed to parse initial observation plan: {fallback_e}")
+            logger.error(f"Failed to parse initial observation plan: {e}")
             # Fallback: use schema search to discover available tables
             observation = ObservationStep(
                 step_number=1,
@@ -557,12 +476,18 @@ class DeepPathStrategy:
 ## 任务
 分析数据，提出 2-3 个关于根本原因的假设。按置信度排序（最可能的在前）。
 
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"hypotheses": [{{"description": "假设描述", "reasoning": "推理过程", "verification_plan": "验证计划", "confidence": 0.8}}]}}
 """
 
         try:
-            # Use with_structured_output for reliable JSON parsing
-            structured_llm = self.llm.with_structured_output(HypothesesList)
-            result: HypothesesList = await structured_llm.ainvoke([SystemMessage(content=prompt)])
+            # Use robust_structured_output for reliable JSON parsing
+            result = await robust_structured_output(
+                llm=self.llm,
+                output_class=HypothesesList,
+                prompt=prompt,
+            )
 
             state.hypotheses = [
                 Hypothesis(
@@ -578,26 +503,7 @@ class DeepPathStrategy:
             state.hypotheses.sort(key=lambda h: h.confidence, reverse=True)
 
         except Exception as e:
-            logger.warning(f"with_structured_output failed for hypotheses: {e}, trying fallback")
-            try:
-                raw_response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-                raw_content = raw_response.content if hasattr(raw_response, "content") else str(raw_response)
-                parsed = self._parse_json_response(raw_content, HypothesesList)
-                if parsed:
-                    state.hypotheses = [
-                        Hypothesis(
-                            description=h.description,
-                            reasoning=h.reasoning,
-                            verification_plan=h.verification_plan,
-                            confidence=h.confidence,
-                        )
-                        for h in parsed.hypotheses
-                    ]
-                    state.hypotheses.sort(key=lambda h: h.confidence, reverse=True)
-                else:
-                    raise ValueError("Fallback parser also failed")
-            except Exception as fallback_e:
-                logger.error(f"Failed to parse hypotheses: {fallback_e}")
+            logger.error(f"Failed to parse hypotheses: {e}")
             # Fallback hypothesis
             state.hypotheses = [
                 Hypothesis(
@@ -646,13 +552,18 @@ class DeepPathStrategy:
 根据验证计划，决定需要执行的工具调用。如果有 Schema Discovery 结果，使用发现的表名。
 
 ⚠️ 如果使用 suzieq_query，必须使用 Schema Discovery 中发现的表名！
+
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"tool": "suzieq_query", "parameters": {{"table": "bgp"}}, "reasoning": "验证假设的工具调用"}}
 """
 
         try:
-            # Use with_structured_output for reliable JSON parsing
-            structured_llm = self.llm.with_structured_output(VerificationPlan)
-            verification: VerificationPlan = await structured_llm.ainvoke(
-                [SystemMessage(content=prompt)]
+            # Use robust_structured_output for reliable JSON parsing
+            verification = await robust_structured_output(
+                llm=self.llm,
+                output_class=VerificationPlan,
+                prompt=prompt,
             )
 
             observation = ObservationStep(
@@ -672,26 +583,7 @@ class DeepPathStrategy:
             await self._update_hypothesis_confidence(state)
 
         except Exception as e:
-            logger.warning(f"with_structured_output failed for verification: {e}, trying fallback")
-            try:
-                raw_response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-                raw_content = raw_response.content if hasattr(raw_response, "content") else str(raw_response)
-                parsed = self._parse_json_response(raw_content, VerificationPlan)
-                if parsed:
-                    observation = ObservationStep(
-                        step_number=len(state.observations) + 1,
-                        tool=parsed.tool,
-                        parameters=parsed.parameters,
-                        interpretation=parsed.reasoning,
-                    )
-                    tool_output = await self._execute_tool(parsed.tool, parsed.parameters)
-                    observation.tool_output = tool_output
-                    state.observations.append(observation)
-                    await self._update_hypothesis_confidence(state)
-                else:
-                    raise ValueError("Fallback parser also failed")
-            except Exception as fallback_e:
-                logger.error(f"Failed to verify hypothesis: {fallback_e}")
+            logger.error(f"Failed to verify hypothesis: {e}")
 
     async def _update_hypothesis_confidence(self, state: ReasoningState) -> None:
         """
@@ -716,12 +608,18 @@ class DeepPathStrategy:
 ## 任务
 分析验证结果是否支持假设。更新置信度。
 
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"supports_hypothesis": true, "updated_confidence": 0.85, "reasoning": "分析结果说明..."}}
 """
 
         try:
-            # Use with_structured_output for reliable JSON parsing
-            structured_llm = self.llm.with_structured_output(ConfidenceUpdate)
-            update: ConfidenceUpdate = await structured_llm.ainvoke([SystemMessage(content=prompt)])
+            # Use robust_structured_output for reliable JSON parsing
+            update = await robust_structured_output(
+                llm=self.llm,
+                output_class=ConfidenceUpdate,
+                prompt=prompt,
+            )
 
             if update.supports_hypothesis:
                 state.current_hypothesis.confidence = update.updated_confidence
@@ -733,23 +631,7 @@ class DeepPathStrategy:
             )
 
         except Exception as e:
-            logger.warning(f"with_structured_output failed for confidence: {e}, trying fallback")
-            try:
-                raw_response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-                raw_content = raw_response.content if hasattr(raw_response, "content") else str(raw_response)
-                parsed = self._parse_json_response(raw_content, ConfidenceUpdate)
-                if parsed:
-                    if parsed.supports_hypothesis:
-                        state.current_hypothesis.confidence = parsed.updated_confidence
-                    else:
-                        state.current_hypothesis.confidence *= 0.5
-                    logger.info(
-                        f"Updated hypothesis confidence to {state.current_hypothesis.confidence:.2f}"
-                    )
-                else:
-                    raise ValueError("Fallback parser also failed")
-            except Exception as fallback_e:
-                logger.error(f"Failed to update hypothesis confidence: {fallback_e}")
+            logger.error(f"Failed to update hypothesis confidence: {e}")
 
     async def _synthesize_conclusion(self, state: ReasoningState) -> None:
         """
@@ -782,31 +664,26 @@ class DeepPathStrategy:
 2. 支持证据
 3. 建议的解决方案（如果适用）
 
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"conclusion": "详细的结论，包含根本原因、证据和建议（2-3 段话）", "confidence": 0.85}}
 """
 
         try:
-            # Use with_structured_output for reliable JSON parsing
-            structured_llm = self.llm.with_structured_output(ConclusionOutput)
-            result: ConclusionOutput = await structured_llm.ainvoke([SystemMessage(content=prompt)])
+            # Use robust_structured_output for reliable JSON parsing
+            result = await robust_structured_output(
+                llm=self.llm,
+                output_class=ConclusionOutput,
+                prompt=prompt,
+            )
 
             state.conclusion = result.conclusion
             state.confidence = result.confidence
 
         except Exception as e:
-            logger.warning(f"with_structured_output failed for conclusion: {e}, trying fallback")
-            try:
-                raw_response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-                raw_content = raw_response.content if hasattr(raw_response, "content") else str(raw_response)
-                parsed = self._parse_json_response(raw_content, ConclusionOutput)
-                if parsed:
-                    state.conclusion = parsed.conclusion
-                    state.confidence = parsed.confidence
-                else:
-                    raise ValueError("Fallback parser also failed")
-            except Exception as fallback_e:
-                logger.error(f"Failed to synthesize conclusion: {fallback_e}")
-                state.conclusion = f"基于 {len(state.observations)} 次观察，问题分析尚未完成。"
-                state.confidence = 0.5
+            logger.error(f"Failed to synthesize conclusion: {e}")
+            state.conclusion = f"基于 {len(state.observations)} 次观察，问题分析尚未完成。"
+            state.confidence = 0.5
 
     async def _execute_tool(self, tool_name: str, parameters: dict[str, Any]) -> ToolOutput:
         """

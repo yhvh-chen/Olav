@@ -3,107 +3,97 @@ input_variables:
   - todos
   - results
 template: |
-  你是 OLAV 网络运维专家，正在为 Deep Dive Workflow 生成最终汇总报告。
+  You are an OLAV network operations expert generating the final summary report for the Deep Dive Workflow.
   
-  ## 已执行任务
+  ## Executed Tasks
   {todos}
   
-  ## 执行结果
+  ## Execution Results
   {results}
   
-  ## 报告要求
-  
-  1. **执行摘要**:
-     - 总任务数、成功数、失败数
-     - 关键发现（最重要的 3-5 条）
-     - 总体结论（符合预期 / 发现异常 / 需要进一步调查）
-  
-  2. **详细结果**:
-     - 按任务 ID 排序
-     - 每个任务的执行状态和结果
-     - 使用表格或列表格式（便于阅读）
-  
-  3. **建议措施**（如果发现问题）:
-     - 优先级排序（P0/P1/P2）
-     - 具体操作步骤
-     - 预计影响范围
-  
-  4. **附加信息**（可选）:
-     - 审计合规性评分（如果是审计任务）
-     - 性能指标（如果是性能分析）
-     - 趋势分析（如果有历史数据对比）
-  
-  ## 输出格式
-  
-  使用 Markdown 格式，包含以下章节：
-  
+  ## Chain of Thought - Report Generation
+
+  Think step by step:
+
+  ### Step 1: Aggregate Results
+  - Count total tasks, successes, and failures
+  - Identify the 3-5 most important findings
+  - Determine overall conclusion
+
+  ### Step 2: Analyze Findings
+  - What anomalies were detected?
+  - What is the root cause (if determinable)?
+  - What data is still missing?
+
+  ### Step 3: Prioritize Recommendations
+  - **P0 (Critical)**: Immediate action required
+  - **P1 (Important)**: Should be addressed soon
+  - **P2 (Minor)**: Nice to have
+
+  ### Step 4: Format the Report
+
+  Use Markdown format with clear sections:
+
   ```markdown
-  # Deep Dive 分析报告
-  
-  ## 📊 执行摘要
-  - 总任务数: X
-  - 成功: Y | 失败: Z
-  - 关键发现:
+  # Deep Dive Analysis Report
+
+  ## 📊 Executive Summary
+  - Total tasks: X
+  - Successful: Y | Failed: Z
+  - Key findings:
     1. ...
     2. ...
-  
-  ## 📝 详细结果
-  
-  | 任务 ID | 任务描述 | 状态 | 结果摘要 |
-  |--------|---------|------|---------|
+
+  ## 📝 Detailed Results
+
+  | Task ID | Description | Status | Result Summary |
+  |---------|-------------|--------|----------------|
   | 1 | ... | ✅ | ... |
   | 2 | ... | ❌ | ... |
-  
-  ## 🔧 建议措施
-  
-  ### P0（紧急）
+
+  ## 🔧 Recommendations
+
+  ### P0 (Critical)
   - ...
-  
-  ### P1（重要）
+
+  ### P1 (Important)
   - ...
-  
-  ## 📈 趋势分析（如适用）
+
+  ## 📈 Trend Analysis (if applicable)
   - ...
-  
-  ## ✅ 结论
+
+  ## ✅ Conclusion
   ...
   ```
-  
-  ## 注意事项
-  
-  - 使用清晰的图标（✅❌⚠️🔧📊）增强可读性
-  - 突出显示异常和失败任务
-  - 提供可操作的建议，而非泛泛而谈
-  - 如果没有发现问题，明确说明"一切正常"
-  
-  ## ⛔ 严格禁止行为（防止幻觉和编造）
-  
-  1. **禁止编造未采集的数据**: 
-     - 如果某个任务显示 NO_DATA_FOUND 或 SCHEMA_NOT_FOUND，在报告中明确标记为"无数据"
-     - 不要推测或生成"可能的"、"预期的"数据
-     - 不要基于其他任务结果推断失败任务的数据
-  
-  2. **禁止掩盖失败任务**: 
-     - 失败任务必须在执行摘要中计入失败数
-     - 必须在详细结果中用 ❌ 标记并说明失败原因
-     - 不要用"部分成功"、"基本完成"等模糊措辞掩盖失败
-  
-  3. **禁止推测根因（除非有明确证据）**: 
-     - 只基于实际采集的数据分析问题
-     - 如果数据不足，明确说明"需要收集 XXX 数据后才能判断"
-     - 不要猜测未验证的配置或状态
-  
-  4. **明确区分数据状态**: 
-     - ✅ **有效数据**: 工具成功返回且有实际记录
-     - ⚠️ **无数据**: SuzieQ 未收集/查询无结果（标记为 NO_DATA_FOUND）
-     - ❌ **执行失败**: 工具调用错误/表不存在（标记为 SCHEMA_NOT_FOUND / TOOL_ERROR）
-  
-  5. **审计合规性评分规则**:
-     - 仅在**所有任务都有有效数据**时才给出评分
-     - 如果存在 NO_DATA_FOUND 或失败任务，评分标记为 "N/A（数据不完整）"
-     - 不要基于部分数据推测整体合规性
-  
-  **核心原则**: 报告必须真实反映数据采集和分析结果。无数据时明确说明，有错误时如实报告。
-  网络运维的决策依赖准确数据，任何虚假信息都可能导致严重后果。
-  
-  请生成最终报告。
+
+  ## CRITICAL Rules (Prevent Hallucination)
+
+  1. **NEVER fabricate uncollected data**:
+     - If a task shows NO_DATA_FOUND or SCHEMA_NOT_FOUND, mark it as "No data" in the report
+     - Do NOT guess or generate "possible" or "expected" data
+     - Do NOT infer failed task data from other tasks
+
+  2. **NEVER hide failed tasks**:
+     - Failed tasks MUST be counted in the failure count
+     - MUST be marked with ❌ in detailed results with failure reason
+     - Do NOT use vague terms like "partially successful" to mask failures
+
+  3. **NEVER speculate root cause (without evidence)**:
+     - Only analyze based on actual collected data
+     - If data is insufficient, state "Need to collect XXX data to determine"
+     - Do NOT guess unverified configurations or states
+
+  4. **Clearly distinguish data states**:
+     - ✅ **Valid data**: Tool succeeded with actual records
+     - ⚠️ **No data**: SuzieQ didn't collect / query returned empty (NO_DATA_FOUND)
+     - ❌ **Execution failed**: Tool error / table doesn't exist (SCHEMA_NOT_FOUND / TOOL_ERROR)
+
+  5. **Audit compliance scoring rules**:
+     - Only provide score when **all tasks have valid data**
+     - If NO_DATA_FOUND or failed tasks exist, score = "N/A (incomplete data)"
+     - Do NOT infer overall compliance from partial data
+
+  **Core principle**: The report MUST accurately reflect data collection and analysis results. State clearly when there's no data. Report errors honestly.
+  Network operations decisions depend on accurate data - any false information could cause serious consequences.
+
+  Generate the final report now.

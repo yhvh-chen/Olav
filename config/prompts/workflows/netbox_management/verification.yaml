@@ -3,40 +3,67 @@ input_variables:
   - operation_plan
   - execution_result
 template: |
-  验证 NetBox API 操作是否成功。
+  Verify that the NetBox API operation was successful.
 
-  ## 操作计划
+  ## Operation Plan
   {operation_plan}
 
-  ## 执行结果
+  ## Execution Result
   {execution_result}
 
-  ## 验证策略
+  ## Chain of Thought - Verification Process
 
-  1. **检查 HTTP 状态码**:
-     - 200/201: 成功
-     - 400: 请求参数错误
-     - 404: 资源不存在
-     - 500: 服务器错误
+  Think step by step:
 
-  2. **验证返回数据**:
-     - POST: 检查返回的 ID
-     - GET: 检查返回的对象列表
-     - PUT/PATCH: 检查更新后的字段值
-     - DELETE: 确认资源已删除
+  ### Step 1: Check HTTP Status Code
+  - **200/201**: Success
+  - **400**: Bad request (invalid parameters)
+  - **404**: Resource not found
+  - **409**: Conflict (duplicate entry)
+  - **500**: Server error
 
-  3. **二次查询验证** (可选):
-     - 使用 GET 请求查询刚创建/更新的对象
-     - 确认数据一致性
+  ### Step 2: Validate Response Data
+  Depending on operation type:
+  - **POST**: Check if ID was returned, verify created fields match request
+  - **GET**: Check if expected objects are in the response list
+  - **PUT/PATCH**: Check if updated fields have new values
+  - **DELETE**: Confirm resource no longer exists
 
-  ## 示例
+  ### Step 3: Secondary Verification (Optional)
+  Perform a follow-up GET request to confirm:
+  ```
+  netbox_api_call(method="GET", endpoint="/dcim/devices/{{id}}/")
+  → Verify: name, site, status match expected values
+  ```
 
-  operation_plan = {{"method": "POST", "endpoint": "/dcim/devices/", "payload": {{"name": "router-new-01", ...}}}}
-  execution_result = {{"status_code": 201, "data": {{"id": 123, "name": "router-new-01", ...}}}}
+  ### Step 4: Report Results
+  - **SUCCESS**: Operation completed, data verified
+  - **PARTIAL**: Operation completed but some fields differ
+  - **FAILURE**: Operation failed with error code/message
+
+  ## Example
+
+  Operation: POST /dcim/devices/ with name="router-new-01"
+  Execution Result: {{"status_code": 201, "data": {{"id": 123, "name": "router-new-01"}}}}
+
+  **Thinking:**
+  1. Status code 201 = Created successfully
+  2. Response contains ID = 123
+  3. Name matches request
+  4. Perform secondary verification
+
+  **Verification:**
+  ```
+  Check status: 201 ✓
+  Check ID returned: 123 ✓
+  Check name: "router-new-01" ✓
   
-  验证:
-  1. 状态码 201 ✓
-  2. 返回 ID = 123 ✓
-  3. 二次查询: netbox_api_call(method="GET", endpoint="/dcim/devices/123/")
-     → name = "router-new-01" ✓
-  4. validation_result = {{"status": "success", "device_id": 123}}
+  Secondary: netbox_api_call(method="GET", endpoint="/dcim/devices/123/")
+  → name = "router-new-01" ✓
+  → site = "Beijing" ✓
+  ```
+
+  **Result:**
+  - Status: SUCCESS ✅
+  - Device ID: 123
+  - Verification: All fields match expected values

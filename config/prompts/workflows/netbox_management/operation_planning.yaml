@@ -3,48 +3,75 @@ input_variables:
   - user_query
   - api_endpoint
 template: |
-  生成 NetBox API 操作计划。
+  Generate a NetBox API operation plan.
 
-  ## 用户请求
+  ## User Request
   {user_query}
 
-  ## API 端点
+  ## API Endpoint
   {api_endpoint}
 
-  ## 规划步骤
+  ## Chain of Thought - Planning Process
 
-  1. **确定操作类型**:
-     - GET: 查询（无需审批）
-     - POST: 创建（需要审批）
-     - PUT/PATCH: 更新（需要审批）
-     - DELETE: 删除（需要审批）
+  Think step by step:
 
-  2. **构建 Payload**:
-     - 从用户请求中提取参数
-     - 使用 schema 发现的必填字段
-     - 验证数据格式（IP地址、VLAN ID范围等）
+  ### Step 1: Determine Operation Type
+  - **GET**: Query/read (no approval needed)
+  - **POST**: Create new resource (requires HITL approval)
+  - **PUT/PATCH**: Update existing resource (requires HITL approval)
+  - **DELETE**: Remove resource (requires HITL approval)
 
-  3. **历史记忆**:
-     - search_episodic_memory(query="类似操作成功案例")
-     - 学习之前的最佳实践
+  ### Step 2: Extract Parameters from Request
+  - What values did the user provide? (name, IP, site, etc.)
+  - What values need to be looked up? (device_type ID, site ID, etc.)
+  - Are there any default values to apply?
 
-  4. **输出 operation_plan**:
-     - method: GET/POST/PUT/DELETE
-     - endpoint: /dcim/devices/
-     - payload: {{...}}
-     - expected_result: 设备 ID、IP 分配结果等
+  ### Step 3: Build the Payload
+  - Use the schema's required fields
+  - Fill in values from user request
+  - Query related resources if IDs are needed:
+    - `netbox_api_call(method="GET", endpoint="/dcim/sites/", params={{"name": "Beijing"}})`
+    - Extract the ID from the response
 
-  ## 示例
+  ### Step 4: Historical Memory (Optional)
+  - Use `search_episodic_memory` for similar successful operations
+  - Learn from previous best practices
 
-  用户: 添加设备 router-new-01 到 Beijing 站点
-  规划:
-  1. api_endpoint = "/dcim/devices/"
-  2. method = "POST"
-  3. payload = {{
-       "name": "router-new-01",
-       "device_type": 1,  # 需要先查询 device_type
-       "site": 2,  # 需要先查询 site ID
-       "device_role": 3,  # 需要先查询 role ID
-       "status": "active"
-     }}
-  4. operation_plan = {{\"method\": \"POST\", \"endpoint\": \"/dcim/devices/\", \"payload\": {{{{...}}}}}}
+  ### Step 5: Output Operation Plan
+  ```json
+  {{
+    "method": "POST",
+    "endpoint": "/dcim/devices/",
+    "payload": {{
+      "name": "router-new-01",
+      "device_type": 1,
+      "site": 2,
+      "device_role": 3,
+      "status": "active"
+    }},
+    "expected_result": "Device created with ID"
+  }}
+  ```
+
+  ## Example
+
+  User: Add device router-new-01 to Beijing site
+
+  **Thinking:**
+  1. Operation: POST (create new device)
+  2. Need to look up: device_type ID, site ID, device_role ID
+  3. User provided: name = "router-new-01", site = "Beijing"
+
+  **Lookups:**
+  ```
+  netbox_api_call(method="GET", endpoint="/dcim/sites/", params={{"name": "Beijing"}})
+  → site_id = 2
+  
+  netbox_api_call(method="GET", endpoint="/dcim/device-types/", params={{"model": "ISR4451"}})
+  → device_type_id = 1
+  ```
+
+  **Operation Plan:**
+  - method: POST
+  - endpoint: /dcim/devices/
+  - payload: {{"name": "router-new-01", "device_type": 1, "site": 2, "device_role": 3, "status": "active"}}

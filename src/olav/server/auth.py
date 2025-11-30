@@ -1,48 +1,89 @@
-"""JWT Authentication and RBAC for OLAV API Server.
+"""Simplified Token Authentication for OLAV API Server.
 
-Provides:
-- JWT token generation and validation
-- User model and password hashing
-- RBAC (Role-Based Access Control) dependency injection
+Single-token mode:
+- Token can be set via OLAV_API_TOKEN environment variable (for multi-worker mode)
+- Or auto-generated on server startup (for single-worker mode)
+- Printed as clickable URL for easy access
+- No username/password required
 """
 
+import os
+import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from olav.core.settings import settings
 
 # ============================================
-# Configuration (from centralized settings)
+# Single Access Token (Environment or Generated)
 # ============================================
-SECRET_KEY = settings.jwt_secret_key
-ALGORITHM = settings.jwt_algorithm
-ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_expiration_minutes
+# For multi-worker deployments, set OLAV_API_TOKEN environment variable
+# Otherwise, token is generated fresh on each worker start
+_access_token: str | None = os.environ.get("OLAV_API_TOKEN")
+_token_created_at: datetime | None = datetime.now(UTC) if _access_token else None
+_token_from_env: bool = _access_token is not None
 
-# Password hashing - using pbkdf2_sha256 instead of bcrypt (avoids 72-byte limit issues)
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-
-class CustomHTTPBearer(HTTPBearer):
-    """HTTPBearer subclass that maps missing credentials (default 403) to 401.
-
-    FastAPI's default HTTPBearer raises 403 for missing Authorization header.
-    Tests and conventional API semantics expect 401 Unauthorized instead.
+def generate_access_token() -> str:
+    """Generate or return the access token for this server session.
+    
+    If OLAV_API_TOKEN is set in environment, returns that (for multi-worker mode).
+    Otherwise generates a new token (for single-worker mode).
     """
+    global _access_token, _token_created_at, _token_from_env
+    
+    # If token already set from environment, return it
+    if _token_from_env and _access_token:
+        return _access_token
+    
+    # Generate new token
+    _access_token = secrets.token_urlsafe(32)
+    _token_created_at = datetime.now(UTC)
+    return _access_token
 
-    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials:  # type: ignore[override]
+
+def get_access_token() -> str | None:
+    """Get the current access token."""
+    return _access_token
+
+
+def get_token_age_minutes() -> int | None:
+    """Get token age in minutes."""
+    if _token_created_at is None:
+        return None
+    delta = datetime.now(UTC) - _token_created_at
+    return int(delta.total_seconds() / 60)
+
+
+def validate_token(token: str) -> bool:
+    """Validate if the provided token matches the server token."""
+    if _access_token is None:
+        return False
+    
+    # Check token expiration (configurable, default 24 hours)
+    if _token_created_at:
+        max_age = timedelta(hours=getattr(settings, 'token_max_age_hours', 24))
+        if datetime.now(UTC) - _token_created_at > max_age:
+            return False
+    
+    return secrets.compare_digest(token, _access_token)
+
+
+# ============================================
+# FastAPI Security
+# ============================================
+class CustomHTTPBearer(HTTPBearer):
+    """HTTPBearer that returns 401 (not 403) for missing credentials."""
+
+    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials:
         try:
             return await super().__call__(request)
-        except HTTPException as exc:  # Map 'Not authenticated' 403 to 401
-            if (
-                exc.status_code == status.HTTP_403_FORBIDDEN
-                and str(exc.detail).lower() == "not authenticated"
-            ):
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Not authenticated",
@@ -51,7 +92,6 @@ class CustomHTTPBearer(HTTPBearer):
             raise
 
 
-# HTTP Bearer token scheme (customized)
 security = CustomHTTPBearer()
 
 
@@ -59,123 +99,16 @@ security = CustomHTTPBearer()
 # Data Models
 # ============================================
 class User(BaseModel):
-    """User model with role-based permissions."""
-
-    username: str
-    role: Literal["admin", "operator", "viewer"] = "viewer"
+    """Simplified user model (single admin user)."""
+    username: str = "admin"
+    role: str = "admin"
     disabled: bool = False
 
 
-class TokenData(BaseModel):
-    """JWT token payload."""
-
-    username: str
-    role: str
-
-
 class Token(BaseModel):
-    """API response for login endpoint."""
-
+    """Token response model."""
     access_token: str
     token_type: str = "bearer"
-
-
-# ============================================
-# In-Memory User Database (Demo)
-# ============================================
-# TODO: Replace with PostgreSQL/Redis in production
-# Password hashes generated with pbkdf2_sha256 (avoids bcrypt 72-byte limit)
-FAKE_USERS_DB = {
-    "admin": {
-        "username": "admin",
-        # Password: admin123
-        "hashed_password": "$pbkdf2-sha256$29000$8J4TovT.vzfmfK81Zqw1xg$JR7l3nIu2/0ntfi89BTB58IccchYFgGAoniBJZq73lo",
-        "role": "admin",
-        "disabled": False,
-    },
-    "operator": {
-        "username": "operator",
-        # Password: operator123
-        "hashed_password": "$pbkdf2-sha256$29000$C2HM.b/XOocQAqCUEiIE4A$3rgnacNNJDHMhObafjNdG2NLaOF8MVYhRNPhaWOeVl4",
-        "role": "operator",
-        "disabled": False,
-    },
-    "viewer": {
-        "username": "viewer",
-        # Password: viewer123
-        "hashed_password": "$pbkdf2-sha256$29000$iNF6T.k9J2RMiTEmJGSsNQ$uBUeBJr1die7gU3FWsp8zaMaOdLNQ57BkaoSycG1bPI",
-        "role": "viewer",
-        "disabled": False,
-    },
-}
-
-
-# ============================================
-# Password Utilities
-# ============================================
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify plaintext password against hash."""
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password: str) -> str:
-    """Hash plaintext password."""
-    return pwd_context.hash(password)
-
-
-# ============================================
-# User Authentication
-# ============================================
-def get_user(username: str) -> User | None:
-    """Retrieve user from database."""
-    if username in FAKE_USERS_DB:
-        user_dict = FAKE_USERS_DB[username]
-        return User(**user_dict)
-    return None
-
-
-def authenticate_user(username: str, password: str) -> User | None:
-    """Authenticate user with username/password."""
-    user_dict = FAKE_USERS_DB.get(username)
-    if not user_dict:
-        return None
-    if not verify_password(password, user_dict["hashed_password"]):
-        return None
-    return User(**user_dict)
-
-
-# ============================================
-# JWT Token Operations
-# ============================================
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """Generate JWT access token."""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
-    else:
-        expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt: str = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-
-def decode_access_token(token: str) -> TokenData:
-    """Decode and validate JWT token."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str | None = payload.get("sub")
-        role: str | None = payload.get("role")
-        if username is None or role is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
-            )
-        return TokenData(username=username, role=role)
-    except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {e}",
-        ) from e
 
 
 # ============================================
@@ -184,44 +117,18 @@ def decode_access_token(token: str) -> TokenData:
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> User:
-    """Dependency: Extract and validate current user from JWT token."""
+    """Validate token and return admin user."""
     token = credentials.credentials
-    token_data = decode_access_token(token)
-
-    user = get_user(username=token_data.username)
-    if user is None:
+    
+    if not validate_token(token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    if user.disabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
-        )
-    return user
+    
+    return User()
 
 
-async def require_role(
-    required_role: Literal["admin", "operator", "viewer"],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
-    """Dependency factory: Require specific role for endpoint access."""
-    role_hierarchy = {"viewer": 1, "operator": 2, "admin": 3}
-
-    if role_hierarchy[current_user.role] < role_hierarchy[required_role]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Insufficient permissions. Required role: {required_role}",
-        )
-    return current_user
-
-
-# ============================================
-# Convenience Dependencies
-# ============================================
+# Convenience type alias
 CurrentUser = Annotated[User, Depends(get_current_user)]
-AdminUser = Annotated[User, Depends(lambda u=Depends(get_current_user): require_role("admin", u))]
-OperatorUser = Annotated[
-    User, Depends(lambda u=Depends(get_current_user): require_role("operator", u))
-]

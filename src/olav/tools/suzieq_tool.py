@@ -171,7 +171,7 @@ class SuzieQTool:
                     df = df[df[field] == value]
 
             # Deduplicate to latest state
-            df = self._deduplicate_latest_state(df, table)
+            df = await self._deduplicate_latest_state(df, table)
 
             # Execute method
             if method == "summarize":
@@ -238,24 +238,20 @@ class SuzieQTool:
         )
         return filtered
 
-    def _deduplicate_latest_state(self, df: pd.DataFrame, table: str) -> pd.DataFrame:
-        """Deduplicate by keeping latest timestamp for each entity."""
+    async def _deduplicate_latest_state(self, df: pd.DataFrame, table: str) -> pd.DataFrame:
+        """Deduplicate by keeping latest timestamp for each entity.
+
+        Key fields are loaded dynamically from OpenSearch suzieq-schema-fields index.
+        Falls back to sensible defaults if schema unavailable.
+        """
         # Prioritize active=True records
         if "active" in df.columns:
             df_active = df[df["active"]]
             if not df_active.empty:
                 df = df_active
 
-        # Define unique key columns per table
-        unique_keys = {
-            "bgp": ["hostname", "peer", "afi", "safi"],
-            "interfaces": ["hostname", "ifname"],
-            "routes": ["hostname", "vrf", "prefix"],
-            "lldp": ["hostname", "ifname"],
-            "device": ["hostname"],
-        }
-
-        key_cols = unique_keys.get(table, ["hostname"])
+        # Get key fields dynamically from schema
+        key_cols = await self.schema_loader.get_key_fields(table)
 
         if "timestamp" in df.columns and all(col in df.columns for col in key_cols):
             df = df.sort_values("timestamp", ascending=False)

@@ -20,6 +20,7 @@ Environment Variables:
     OLAV_ETL_FORCE_OPENCONFIG: Set to "true" to force reset openconfig-schema index
     OLAV_ETL_FORCE_NETBOX: Set to "true" to force reset netbox-schema index
     OLAV_ETL_FORCE_EPISODIC: Set to "true" to force reset olav-episodic-memory index
+    OLAV_ETL_FORCE_SYSLOG: Set to "true" to force reset syslog-raw index
     OPENCONFIG_DIR: Path to OpenConfig YANG repository (optional)
 """
 
@@ -223,6 +224,33 @@ def init_episodic_memory(force: bool = False) -> bool:
         return False
 
 
+def init_syslog_index(force: bool = False) -> bool:
+    """Initialize syslog-raw index for device log collection.
+
+    Args:
+        force: If True, delete and recreate index
+
+    Returns:
+        True if successful
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("📦 Initializing Syslog Index")
+    logger.info("=" * 60)
+
+    try:
+        # Import and run syslog index ETL
+        from olav.etl import init_syslog_index as syslog_etl
+
+        syslog_etl.main(force=force)
+
+        logger.info("  ✓ Syslog index ready")
+        return True
+
+    except Exception as e:
+        logger.error(f"  ✗ Syslog index init failed: {e}")
+        return False
+
+
 def show_index_status() -> None:
     """Show status of all OLAV indexes."""
     logger.info("\n" + "=" * 60)
@@ -234,6 +262,7 @@ def show_index_status() -> None:
         "openconfig-schema",
         "netbox-schema",
         "olav-episodic-memory",
+        "syslog-raw",
     ]
 
     try:
@@ -304,6 +333,11 @@ Examples:
         help="Initialize episodic memory index",
     )
     parser.add_argument(
+        "--syslog",
+        action="store_true",
+        help="Initialize syslog-raw index for device logs",
+    )
+    parser.add_argument(
         "--status",
         action="store_true",
         help="Show index status only (no initialization)",
@@ -321,7 +355,9 @@ Examples:
 
     # Determine which components to initialize
     # If no specific flags, initialize all
-    init_all = not any([args.postgres, args.suzieq, args.openconfig, args.netbox, args.episodic])
+    init_all = not any(
+        [args.postgres, args.suzieq, args.openconfig, args.netbox, args.episodic, args.syslog]
+    )
 
     logger.info("=" * 60)
     logger.info("🚀 OLAV ETL Initialization")
@@ -330,7 +366,7 @@ Examples:
     logger.info(f"OpenSearch URL: {settings.opensearch_url}")
 
     # Show component-specific force flags if any are set
-    for comp in ["SUZIEQ", "OPENCONFIG", "NETBOX", "EPISODIC"]:
+    for comp in ["SUZIEQ", "OPENCONFIG", "NETBOX", "EPISODIC", "SYSLOG"]:
         comp_force = _get_force_flag(comp, global_force)
         if comp_force and not global_force:
             logger.info(f"  {comp} force reset: {comp_force} (from OLAV_ETL_FORCE_{comp})")
@@ -356,6 +392,10 @@ Examples:
     if init_all or args.episodic:
         force_episodic = _get_force_flag("EPISODIC", global_force)
         results["Episodic Memory"] = init_episodic_memory(force_episodic)
+
+    if init_all or args.syslog:
+        force_syslog = _get_force_flag("SYSLOG", global_force)
+        results["Syslog Index"] = init_syslog_index(force_syslog)
 
     # Show final status
     show_index_status()

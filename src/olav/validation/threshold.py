@@ -240,7 +240,7 @@ class ThresholdValidator:
             return actual, expected
 
         # If types already match, no coercion needed
-        if type(actual) == type(expected):
+        if type(actual) is type(expected):
             return actual, expected
 
         # Try numeric coercion

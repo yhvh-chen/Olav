@@ -58,7 +58,3 @@ docs/
 # Git
 .git/
 .gitignore
-
-# Docker
-docker-compose.yml
-Dockerfile*

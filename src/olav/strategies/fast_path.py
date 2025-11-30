@@ -27,8 +27,15 @@ Caching (Phase B.2):
 - Cache key: SHA256 hash of (tool_name + parameters)
 - Reduces duplicate LLM calls by 10-20%
 - Cache TTL: 300 seconds (configurable)
+
+Resilience (LangChain 1.10):
+- ToolRetryMiddleware: Automatic retry for transient network errors
+- Exponential backoff with jitter to prevent thundering herd
+
+Refactored: Uses LangChain with_structured_output() - no fallback parsing needed.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -40,6 +47,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
+from olav.core.json_utils import robust_structured_output
 from olav.core.llm_intent_classifier import classify_intent_with_llm
 from olav.core.memory_writer import MemoryWriter
 from olav.core.middleware import FilesystemMiddleware
@@ -76,9 +84,18 @@ class ParameterExtraction(BaseModel):
     LLM converts natural language to tool-compatible parameters.
     """
 
-    tool: Literal["suzieq_query", "netbox_api", "netbox_api_call", "cli_execute", "cli_tool",
-                  "netconf_execute", "netconf_tool", "openconfig_schema_search",
-                  "netbox_schema_search", "suzieq_schema_search"]
+    tool: Literal[
+        "suzieq_query",
+        "netbox_api",
+        "netbox_api_call",
+        "cli_execute",
+        "cli_tool",
+        "netconf_execute",
+        "netconf_tool",
+        "openconfig_schema_search",
+        "netbox_schema_search",
+        "suzieq_schema_search",
+    ]
     parameters: dict[str, Any] = Field(description="Tool-specific parameters")
     confidence: float = Field(
         description="Confidence that Fast Path is appropriate (0.0-1.0)", ge=0.0, le=1.0
@@ -92,26 +109,71 @@ class ParameterExtraction(BaseModel):
 # See: olav.core.llm_intent_classifier (imported at top)
 
 # Minimal keyword patterns for fast fallback (reduced from ~50 to ~15 keywords)
+# Extended with CLI-specific keywords for config queries that SuzieQ doesn't cover
 INTENT_PATTERNS_FALLBACK: dict[str, list[str]] = {
     "netbox": ["netbox", "cmdb", "资产", "设备清单", "inventory"],
     "openconfig": ["openconfig", "yang", "xpath"],
-    "cli": ["cli", "ssh", "命令行"],
+    "cli": [
+        "cli",
+        "ssh",
+        "命令行",
+        "show run",
+        "running-config",
+        # Config items NOT collected by SuzieQ - need CLI/NETCONF
+        "syslog",
+        "logging",
+        "日志服务",
+        "日志配置",
+        "ntp",
+        "时间同步",
+        "clock",
+        "snmp",
+        "snmp-server",
+        "监控配置",
+        "aaa",
+        "tacacs",
+        "radius",
+        "认证",
+        "授权",
+        "banner",
+        "motd",
+        "登录提示",
+        "username",
+        "用户",
+        "密码",
+        "acl",
+        "access-list",
+        "访问控制",
+        "line vty",
+        "console",
+        "终端配置",
+    ],
     "netconf": ["netconf", "rpc", "edit-config"],
     "suzieq": ["bgp", "ospf", "interface", "route", "状态", "status"],
+}
+
+# Fallback tool chain when primary schema has no match
+# Maps intent category to ordered list of fallback tools
+FALLBACK_TOOL_CHAIN: dict[str, list[str]] = {
+    "suzieq": ["cli_tool", "netconf_tool"],  # SuzieQ no data → try CLI/NETCONF
+    "netbox": ["suzieq_query", "cli_tool"],  # NetBox no match → try SuzieQ/CLI
+    "openconfig": ["cli_tool", "netconf_tool"],  # OpenConfig no path → try CLI
+    "cli": [],  # CLI is already fallback
+    "netconf": ["cli_tool"],  # NETCONF fails → try CLI
 }
 
 
 def classify_intent(query: str) -> tuple[str, float]:
     """
     Classify user query intent to determine tool category.
-    
+
     DEPRECATED: This is a synchronous fallback using keyword matching.
     For async context, use classify_intent_async() which uses LLM for
     more accurate, context-aware classification.
-    
+
     Args:
         query: User's natural language query
-        
+
     Returns:
         Tuple of (tool_category, confidence)
         Categories: "netbox", "openconfig", "cli", "netconf", "suzieq"
@@ -147,13 +209,13 @@ def classify_intent(query: str) -> tuple[str, float]:
 async def classify_intent_async(query: str) -> tuple[str, float]:
     """
     Async intent classification using LLM with keyword fallback.
-    
+
     Uses LLMIntentClassifier for dynamic, context-aware classification.
     Falls back to keyword matching if LLM call fails.
-    
+
     Args:
         query: User's natural language query
-        
+
     Returns:
         Tuple of (tool_category, confidence)
         Categories: "netbox", "openconfig", "cli", "netconf", "suzieq"
@@ -252,7 +314,7 @@ class FastPathStrategy:
 
     def _load_tool_capability_guides(self) -> dict[str, str]:
         """Load tool capability guides from config/prompts/tools/.
-        
+
         Returns:
             Dict mapping tool prefix to capability guide content
         """
@@ -270,10 +332,10 @@ class FastPathStrategy:
 
     def _get_tool_category(self, tool_name: str) -> str:
         """Map tool name to intent category.
-        
+
         Args:
             tool_name: Name of the tool (e.g., "suzieq_query", "netbox_api")
-            
+
         Returns:
             Intent category: "suzieq", "netbox", "openconfig", "cli", "netconf"
         """
@@ -297,16 +359,16 @@ class FastPathStrategy:
         self, query: str, intent_category: str
     ) -> dict[str, Any] | None:
         """Discover schema based on intent category.
-        
+
         Different schema sources for different intents:
         - suzieq: SuzieQ schema (tables like bgp, ospf, interfaces)
         - netbox: NetBox schema (endpoints like /dcim/devices/)
         - openconfig: OpenConfig YANG paths
-        
+
         Args:
             query: User query for semantic search
             intent_category: Classified intent category
-            
+
         Returns:
             Schema context dict or None if discovery fails
         """
@@ -318,6 +380,7 @@ class FastPathStrategy:
             if intent_category == "netbox":
                 # Search NetBox schema for relevant endpoints
                 from olav.tools.netbox_tool import NetBoxSchemaSearchTool
+
                 netbox_tool = NetBoxSchemaSearchTool()
                 result = await netbox_tool.execute(query=query)
 
@@ -329,6 +392,7 @@ class FastPathStrategy:
             if intent_category == "openconfig":
                 # Search OpenConfig schema for XPaths
                 from olav.tools.opensearch_tool import OpenConfigSchemaTool
+
                 oc_tool = OpenConfigSchemaTool()
                 result = await oc_tool.execute(intent=query)
 
@@ -367,12 +431,107 @@ class FastPathStrategy:
         try:
             # Step 0: Intent Classification using LLM (with keyword fallback)
             intent_category, intent_confidence = await classify_intent_async(user_query)
-            logger.info(f"Intent classified as '{intent_category}' (confidence: {intent_confidence:.2f})")
+            logger.info(
+                f"Intent classified as '{intent_category}' (confidence: {intent_confidence:.2f})"
+            )
 
             # Step 1: Schema Discovery based on intent category
             schema_context = await self._discover_schema_for_intent(user_query, intent_category)
             if schema_context:
-                logger.info(f"Schema-Aware: discovered {len(schema_context)} entries for {intent_category}")
+                logger.info(
+                    f"Schema-Aware: discovered {len(schema_context)} entries for {intent_category}"
+                )
+
+            # Step 1.5: Check schema relevance (Fallback Chain)
+            # If discovered schema doesn't match query semantically, use fallback tool
+            use_fallback = False
+            fallback_reason = None
+            if intent_category in ("suzieq", "openconfig"):
+                is_relevant, fallback_reason = self._check_schema_relevance(
+                    user_query, schema_context, intent_category
+                )
+                if not is_relevant:
+                    logger.warning(
+                        f"Schema mismatch detected: {fallback_reason}. Triggering fallback."
+                    )
+                    use_fallback = True
+
+            if use_fallback:
+                # Direct fallback execution (bypass LLM parameter extraction)
+                fallback_tool, fallback_params = self._get_fallback_tool(
+                    intent_category, user_query
+                )
+                logger.info(f"Fallback: using {fallback_tool} instead of {intent_category} tools")
+
+                # Check if this is an "all devices" query that needs batch execution
+                device_param = fallback_params.get("device", "")
+                if device_param == "__ALL_DEVICES__" or fallback_params.get("batch_mode"):
+                    logger.info(
+                        "Fallback detected 'all devices' query - signaling for batch workflow"
+                    )
+                    return {
+                        "success": False,
+                        "reason": "batch_execution_required",
+                        "fallback_required": True,
+                        "batch_hint": {
+                            "tool": fallback_tool,
+                            "command": fallback_params.get("command"),
+                            "xpath": fallback_params.get("xpath"),
+                            "all_devices": True,
+                        },
+                        "message": "Query requires execution on all devices - use batch workflow",
+                    }
+
+                # Check for unknown device
+                if device_param == "__UNKNOWN__":
+                    logger.warning("Fallback could not determine device from query")
+                    return {
+                        "success": False,
+                        "reason": "device_not_specified",
+                        "fallback_required": True,
+                        "message": "Could not determine which device to query. Please specify a device name.",
+                    }
+
+                # Execute fallback tool directly
+                tool_output = await self._execute_tool(fallback_tool, fallback_params)
+
+                if tool_output.error:
+                    logger.error(f"Fallback tool execution failed: {tool_output.error}")
+                    return {
+                        "success": False,
+                        "reason": "fallback_tool_error",
+                        "error": tool_output.error,
+                        "tool_output": tool_output,
+                        "fallback_info": {
+                            "original_category": intent_category,
+                            "fallback_tool": fallback_tool,
+                            "fallback_reason": fallback_reason,
+                        },
+                    }
+
+                # Format answer for fallback result
+                fallback_extraction = ParameterExtraction(
+                    tool=fallback_tool,
+                    parameters=fallback_params,
+                    confidence=0.7,  # Lower confidence for fallback
+                    reasoning=f"Fallback from {intent_category}: {fallback_reason}",
+                )
+                formatted = await self._format_answer(user_query, tool_output, fallback_extraction)
+
+                return {
+                    "success": True,
+                    "answer": formatted.answer,
+                    "tool_output": tool_output,
+                    "metadata": {
+                        "strategy": "fast_path_fallback",
+                        "original_category": intent_category,
+                        "fallback_tool": fallback_tool,
+                        "fallback_reason": fallback_reason,
+                        "confidence": 0.7,
+                        "data_fields_used": formatted.data_used,
+                        "answer_confidence": formatted.confidence,
+                    },
+                }
 
             # Step 2: Search episodic memory (RAG optimization)
             # Only use if tool category matches intent classification
@@ -394,7 +553,11 @@ class FastPathStrategy:
                     elif schema_context:
                         # Also validate against schema if available
                         memory_table = memory_pattern.get("parameters", {}).get("table")
-                        if memory_table and intent_category == "suzieq" and memory_table not in schema_context:
+                        if (
+                            memory_table
+                            and intent_category == "suzieq"
+                            and memory_table not in schema_context
+                        ):
                             logger.warning(
                                 f"Episodic memory suggests table '{memory_table}' but schema "
                                 f"suggests {list(schema_context.keys())}. Ignoring memory."
@@ -438,7 +601,46 @@ class FastPathStrategy:
                 f"(confidence: {extraction.confidence:.2f})"
             )
 
-            # Step 2: Execute tool
+            # Step 2: Check for "all devices" before execution
+            # CLI and NETCONF tools don't support "all" - need batch workflow
+            device_param = extraction.parameters.get("device", "")
+            if extraction.tool in ("cli_tool", "netconf_tool") and device_param in (
+                "all",
+                "__ALL_DEVICES__",
+            ):
+                # Check if query implies all devices
+                all_devices_patterns = [
+                    "所有设备",
+                    "全部设备",
+                    "all device",
+                    "每个设备",
+                    "各设备",
+                    "所有路由器",
+                    "所有交换机",
+                    "all router",
+                    "all switch",
+                ]
+                query_lower = user_query.lower()
+                is_all_devices = any(p in query_lower for p in all_devices_patterns)
+
+                if is_all_devices:
+                    logger.info(
+                        "Fast Path detected 'all devices' for CLI/NETCONF - signaling batch workflow"
+                    )
+                    return {
+                        "success": False,
+                        "reason": "batch_execution_required",
+                        "fallback_required": True,
+                        "batch_hint": {
+                            "tool": extraction.tool,
+                            "command": extraction.parameters.get("command"),
+                            "xpath": extraction.parameters.get("xpath"),
+                            "all_devices": True,
+                        },
+                        "message": "Query requires execution on all devices - use batch workflow",
+                    }
+
+            # Step 3: Execute tool
             tool_output = await self._execute_tool(extraction.tool, extraction.parameters)
 
             if tool_output.error:
@@ -489,13 +691,13 @@ class FastPathStrategy:
     async def _discover_schema(self, user_query: str) -> dict[str, Any] | None:
         """
         Schema-Aware discovery: search schema to find correct tables/fields.
-        
-        This is CRITICAL for avoiding table name guessing errors like 
+
+        This is CRITICAL for avoiding table name guessing errors like
         using 'ospf' instead of 'ospfNbr'.
-        
+
         Args:
             user_query: User's natural language query
-            
+
         Returns:
             Dict mapping table names to their schema info, or None if not applicable
         """
@@ -508,6 +710,7 @@ class FastPathStrategy:
 
             # Execute schema search
             from olav.tools.base import ToolOutput
+
             result = await schema_tool.execute(query=user_query)
 
             if isinstance(result, ToolOutput) and result.data:
@@ -538,15 +741,212 @@ class FastPathStrategy:
             logger.warning(f"Schema discovery failed: {e}")
             return None
 
+    def _check_schema_relevance(
+        self,
+        user_query: str,
+        schema_context: dict[str, Any] | None,
+        intent_category: str,
+    ) -> tuple[bool, str | None]:
+        """
+        Check if discovered schema is relevant to user query.
+
+        This prevents using SuzieQ tables like 'bgp' or 'interfaces' when
+        the user is asking about 'syslog' which SuzieQ doesn't collect.
+
+        Args:
+            user_query: Original user query
+            schema_context: Discovered schema (tables/endpoints/paths)
+            intent_category: Classified intent category
+
+        Returns:
+            Tuple of (is_relevant, fallback_reason)
+            - is_relevant: True if schema matches query semantically
+            - fallback_reason: Explanation if not relevant (for logging)
+        """
+        if not schema_context:
+            return False, "No schema discovered"
+
+        query_lower = user_query.lower()
+
+        # Extract key terms from query for matching
+        # These are the terms we expect to find in schema results
+        query_terms = set()
+        for word in query_lower.split():
+            # Skip common stop words
+            if len(word) > 2 and word not in {
+                "the",
+                "all",
+                "for",
+                "and",
+                "查询",
+                "检查",
+                "显示",
+                "配置",
+            }:
+                query_terms.add(word)
+
+        # Check if any schema table/endpoint name matches query terms
+        schema_names = set(schema_context.keys())
+        schema_names_lower = {name.lower() for name in schema_names}
+
+        # Direct match: query term appears in schema name
+        direct_matches = query_terms & schema_names_lower
+        if direct_matches:
+            logger.debug(f"Schema relevance: direct match found {direct_matches}")
+            return True, None
+
+        # Semantic mapping for common network concepts
+        semantic_map = {
+            # Query terms → Expected schema tables
+            "syslog": ["syslog", "logging"],
+            "logging": ["syslog", "logging"],
+            "日志": ["syslog", "logging"],
+            "ntp": ["ntp", "clock", "time"],
+            "时间": ["ntp", "clock", "time"],
+            "snmp": ["snmp"],
+            "监控": ["snmp"],
+            "aaa": ["aaa", "tacacs", "radius"],
+            "认证": ["aaa", "tacacs", "radius"],
+            "acl": ["acl", "access-list", "firewall"],
+            "访问控制": ["acl", "access-list"],
+            "bgp": ["bgp"],
+            "ospf": ["ospf", "ospfNbr", "ospfIf"],
+            "interface": ["interfaces", "interface"],
+            "接口": ["interfaces", "interface"],
+            "route": ["routes", "route"],
+            "路由": ["routes", "route"],
+            "vlan": ["vlan", "vlans"],
+        }
+
+        # Check semantic relevance
+        for term in query_terms:
+            expected_schemas = semantic_map.get(term, [])
+            if expected_schemas:
+                # Check if any expected schema is in discovered schema
+                for expected in expected_schemas:
+                    if any(expected in name.lower() for name in schema_names):
+                        logger.debug(f"Schema relevance: semantic match {term} → {expected}")
+                        return True, None
+
+                # Expected schema not found - this is a mismatch
+                logger.info(
+                    f"Schema mismatch: query term '{term}' expects {expected_schemas}, "
+                    f"but schema has {list(schema_names)}"
+                )
+                return False, f"Query requires '{term}' but schema has {list(schema_names)[:3]}"
+
+        # Default: if no specific term matched, trust the schema discovery
+        # This handles generic queries like "check R1 status"
+        return True, None
+
+    def _get_fallback_tool(
+        self,
+        intent_category: str,
+        user_query: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Get fallback tool and parameters when primary schema has no match.
+
+        Uses FALLBACK_TOOL_CHAIN to determine next tool to try.
+        Extracts basic parameters (device names) from query.
+
+        Args:
+            intent_category: Original intent category
+            user_query: User query for parameter extraction
+
+        Returns:
+            Tuple of (tool_name, parameters)
+        """
+        fallback_chain = FALLBACK_TOOL_CHAIN.get(intent_category, ["cli_tool"])
+        fallback_tool = fallback_chain[0] if fallback_chain else "cli_tool"
+
+        # Extract device names from query (simple regex)
+        import re
+
+        device_pattern = r"\b([A-Z][A-Za-z0-9_-]*\d+|R\d+|SW\d+|Switch-?\w+|Router-?\w+)\b"
+        devices = re.findall(device_pattern, user_query)
+
+        # Check if query implies "all devices" operation
+        all_devices_patterns = [
+            "所有设备",
+            "全部设备",
+            "all device",
+            "每个设备",
+            "各设备",
+            "所有路由器",
+            "所有交换机",
+            "all router",
+            "all switch",
+        ]
+        query_lower = user_query.lower()
+        is_all_devices = any(p in query_lower for p in all_devices_patterns)
+
+        # If "all devices" and no specific device mentioned, get device list from tool registry
+        device_param = devices[0] if devices else None
+        if not device_param and is_all_devices:
+            # Try to get device list from NetBox/inventory
+            try:
+                # Use tool registry to get available devices
+                if hasattr(self.tool_registry, "get_device_list"):
+                    device_list = self.tool_registry.get_device_list()
+                    if device_list:
+                        device_param = device_list  # Pass as list for batch execution
+            except Exception as e:
+                logger.warning(f"Failed to get device list for fallback: {e}")
+
+        # Build parameters based on fallback tool
+        if fallback_tool == "cli_tool":
+            # Determine CLI command based on query keywords
+            if "syslog" in query_lower or "logging" in query_lower or "日志" in query_lower:
+                command = "show logging"
+            elif "ntp" in query_lower or "时间" in query_lower:
+                command = "show ntp status"
+            elif "snmp" in query_lower:
+                command = "show snmp"
+            elif "aaa" in query_lower or "认证" in query_lower:
+                command = "show aaa"
+            elif "acl" in query_lower or "访问" in query_lower:
+                command = "show access-lists"
+            else:
+                command = "show running-config"
+
+            # If still no device and it's an "all devices" query, signal that
+            # the query needs batch execution (return special marker)
+            if device_param is None and is_all_devices:
+                # For "all devices" queries without explicit device list,
+                # return a special marker that indicates batch execution needed
+                params = {
+                    "device": "__ALL_DEVICES__",  # Special marker
+                    "command": command,
+                    "batch_mode": True,
+                }
+            else:
+                params = {
+                    "device": device_param if device_param else "__UNKNOWN__",
+                    "command": command,
+                }
+        elif fallback_tool == "netconf_tool":
+            # Use generic system xpath for config queries
+            params = {
+                "device": device_param if device_param else "__ALL_DEVICES__",
+                "xpath": "/system",
+            }
+        else:
+            params = {}
+
+        logger.info(f"Fallback to {fallback_tool} with params: {params}")
+        return fallback_tool, params
+
     async def _extract_parameters(
-        self, user_query: str,
+        self,
+        user_query: str,
         context: dict[str, Any] | None = None,
         schema_context: dict[str, Any] | None = None,
         intent_category: str | None = None,
     ) -> ParameterExtraction:
         """
         Extract structured parameters from natural language query.
-        
+
         Uses Schema-Aware pattern with Intent-Guided tool selection:
         1. Intent category guides which tool family to prefer
         2. Schema context provides exact table/endpoint names
@@ -575,10 +975,12 @@ class FastPathStrategy:
         if schema_context:
             if intent_category == "netbox":
                 # NetBox endpoint format
-                schema_items = "\n".join([
-                    f"    - {endpoint}: {info.get('description', '')}"
-                    for endpoint, info in list(schema_context.items())[:5]
-                ])
+                schema_items = "\n".join(
+                    [
+                        f"    - {endpoint}: {info.get('description', '')}"
+                        for endpoint, info in list(schema_context.items())[:5]
+                    ]
+                )
                 schema_section = f"""
 ## 🎯 NetBox Schema Discovery 结果
 意图分类：**NetBox 设备/IP查询**（优先使用 netbox_api_call）
@@ -589,10 +991,12 @@ class FastPathStrategy:
 """
             elif intent_category == "openconfig":
                 # OpenConfig XPath format
-                schema_items = "\n".join([
-                    f"    - {xpath}: {info.get('description', '')}"
-                    for xpath, info in list(schema_context.items())[:10]
-                ])
+                schema_items = "\n".join(
+                    [
+                        f"    - {xpath}: {info.get('description', '')}"
+                        for xpath, info in list(schema_context.items())[:10]
+                    ]
+                )
                 schema_section = f"""
 ## 🎯 OpenConfig Schema Discovery 结果
 意图分类：**OpenConfig 配置路径查询**（使用 openconfig_schema_search 或 netconf_tool）
@@ -603,10 +1007,12 @@ class FastPathStrategy:
 """
             else:
                 # SuzieQ table format (default)
-                schema_tables = "\n".join([
-                    f"    - {table}: {info.get('description', '')} (fields: {', '.join(info.get('fields', [])[:5])}...)"
-                    for table, info in schema_context.items()
-                ])
+                schema_tables = "\n".join(
+                    [
+                        f"    - {table}: {info.get('description', '')} (fields: {', '.join(info.get('fields', [])[:5])}...)"
+                        for table, info in schema_context.items()
+                    ]
+                )
                 schema_section = f"""
 ## 🎯 SuzieQ Schema Discovery 结果
 意图分类：**网络状态查询**（优先使用 suzieq_query）
@@ -660,10 +1066,13 @@ class FastPathStrategy:
         else:
             tool_order = ["suzieq_query", "netbox_api_call", "cli_tool", "netconf_tool"]
 
-        tools_desc = "\n".join([
-            f"- **{t}** {'(推荐)' if t == preferred_tool else ''}: {all_tools.get(t, '')}"
-            for t in tool_order if t in all_tools
-        ])
+        tools_desc = "\n".join(
+            [
+                f"- **{t}** {'(推荐)' if t == preferred_tool else ''}: {all_tools.get(t, '')}"
+                for t in tool_order
+                if t in all_tools
+            ]
+        )
 
         context_str = ""
         if context:
@@ -685,119 +1094,43 @@ class FastPathStrategy:
 3. 提取工具所需的精确参数
 4. 评估该查询是否适合 Fast Path（简单查询 confidence 高，复杂诊断 confidence 低）
 
-返回 JSON：
-{{{{
-    "tool": "<选择的工具名>",
-    "parameters": {{"<参数名>": "<参数值>"}},
-    "confidence": 0.95,
-    "reasoning": "<解释为什么选择该工具和参数>"
-}}}}
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"tool": "suzieq_query", "parameters": {{"table": "bgp", "method": "get"}}, "confidence": 0.9, "reasoning": "查询BGP状态"}}
 """
 
-        response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-        extraction = self._parse_json_response(response.content, "parameter extraction")
+        try:
+            # Use robust_structured_output for reliable JSON parsing
+            # Handles markdown-wrapped JSON and multiple fallback strategies
+            extraction = await robust_structured_output(
+                llm=self.llm,
+                output_class=ParameterExtraction,
+                prompt=prompt,
+            )
+        except Exception as e:
+            logger.error(f"Failed to extract parameters: {e}")
+            extraction = ParameterExtraction(
+                tool="suzieq_query",
+                parameters={},
+                confidence=0.3,
+                reasoning=f"Parse error: {e}",
+            )
 
         logger.debug(f"Extracted: {extraction.tool} with params {extraction.parameters}")
         return extraction
-
-    def _parse_json_response(self, content: str, context: str = "response") -> ParameterExtraction:
-        """
-        Robustly parse JSON from LLM response with multiple fallback strategies.
-
-        Handles common LLM output issues:
-        1. Markdown code blocks (```json ... ```)
-        2. Extra text before/after JSON
-        3. Single quotes instead of double quotes
-        4. Trailing commas
-        5. Unquoted keys
-
-        Args:
-            content: Raw LLM response content
-            context: Context description for error logging
-
-        Returns:
-            Parsed ParameterExtraction, or fallback with low confidence
-        """
-        import json
-        import re
-
-        raw_content = content.strip()
-
-        # Strategy 1: Clean markdown code blocks
-        if "```" in raw_content:
-            # Extract content between code blocks
-            match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw_content, re.DOTALL)
-            if match:
-                raw_content = match.group(1).strip()
-
-        # Strategy 2: Find JSON object boundaries
-        if not raw_content.startswith("{"):
-            # Find first { and last }
-            start = raw_content.find("{")
-            end = raw_content.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                raw_content = raw_content[start : end + 1]
-
-        # Strategy 3: Try direct parsing
-        try:
-            return ParameterExtraction.model_validate_json(raw_content)
-        except Exception:
-            pass
-
-        # Strategy 4: Fix common JSON issues
-        try:
-            # Replace single quotes with double quotes (but not in strings)
-            fixed = raw_content
-            # Remove trailing commas before } or ]
-            fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
-            # Try parsing fixed content
-            data = json.loads(fixed)
-            return ParameterExtraction.model_validate(data)
-        except Exception:
-            pass
-
-        # Strategy 5: Extract key fields with regex
-        try:
-            tool_match = re.search(r'"tool"\s*:\s*"([^"]+)"', raw_content)
-            conf_match = re.search(r'"confidence"\s*:\s*([\d.]+)', raw_content)
-            reason_match = re.search(r'"reasoning"\s*:\s*"([^"]*)"', raw_content)
-
-            if tool_match:
-                # Try to extract parameters block
-                params = {}
-                params_match = re.search(r'"parameters"\s*:\s*(\{[^}]*\})', raw_content)
-                if params_match:
-                    try:
-                        params = json.loads(params_match.group(1))
-                    except Exception:
-                        pass
-
-                return ParameterExtraction(
-                    tool=tool_match.group(1),
-                    parameters=params,
-                    confidence=float(conf_match.group(1)) if conf_match else 0.5,
-                    reasoning=reason_match.group(1) if reason_match else "Extracted via regex fallback",
-                )
-        except Exception:
-            pass
-
-        # Final fallback
-        logger.error(f"Failed to parse {context}: {raw_content[:200]}...")
-        return ParameterExtraction(
-            tool="suzieq_query",
-            parameters={},
-            confidence=0.3,
-            reasoning="Parse error: Could not extract valid JSON from response",
-        )
 
     async def _execute_tool(self, tool_name: str, parameters: dict[str, Any]) -> ToolOutput:
         """
         Execute the selected tool with extracted parameters.
 
-        Implements caching layer (Phase B.2):
-        1. Check cache for recent result (cache_key = hash(tool + params))
-        2. If cache hit: deserialize and return (no tool execution)
-        3. If cache miss: execute tool, serialize result, cache, return
+        Implements:
+        1. Tool retry with exponential backoff (LangChain 1.10 pattern)
+        2. Caching layer (Phase B.2)
+
+        Retry Configuration:
+        - max_retries: 3 attempts total
+        - retry_on: ConnectionError, TimeoutError, OSError
+        - backoff: exponential (1s, 2s, 4s) with jitter
 
         Args:
             tool_name: Tool identifier (must be registered in ToolRegistry)
@@ -867,10 +1200,12 @@ class FastPathStrategy:
                 error=f"Tool '{tool_name}' not registered. Available: {', '.join(available_tools)}",
             )
 
-        # Step 4: Execute tool
+        # Step 4: Execute tool with retry logic (LangChain 1.10 pattern)
         logger.debug(f"Executing tool '{tool_name}' with parameters: {parameters}")
         start_time = time.time()
-        tool_output = await tool.execute(**parameters)
+
+        tool_output = await self._execute_with_retry(tool, tool_name, parameters)
+
         elapsed_ms = int((time.time() - start_time) * 1000)
 
         # Add execution time to metadata
@@ -883,6 +1218,94 @@ class FastPathStrategy:
             await self._write_cache(tool_name, parameters, tool_output)
 
         return tool_output
+
+    async def _execute_with_retry(
+        self,
+        tool: Any,
+        tool_name: str,
+        parameters: dict[str, Any],
+        max_retries: int | None = None,
+        initial_delay: float | None = None,
+        backoff_factor: float | None = None,
+        jitter: bool | None = None,
+    ) -> ToolOutput:
+        """
+        Execute tool with exponential backoff retry.
+
+        Implements the same retry pattern as LangChain 1.10's ToolRetryMiddleware
+        but at the strategy level for tools not using the agent framework.
+        Default values are loaded from config/settings.py ToolRetryConfig.
+
+        Args:
+            tool: Tool instance to execute
+            tool_name: Tool name for logging
+            parameters: Tool parameters
+            max_retries: Maximum retry attempts (default: ToolRetryConfig.MAX_RETRIES)
+            initial_delay: Initial delay in seconds (default: ToolRetryConfig.INITIAL_DELAY)
+            backoff_factor: Multiplier for exponential backoff (default: ToolRetryConfig.BACKOFF_FACTOR)
+            jitter: Add randomness to delay (default: ToolRetryConfig.JITTER)
+
+        Returns:
+            ToolOutput from successful execution or last error
+        """
+        import random
+
+        from config.settings import ToolRetryConfig
+
+        # Use config defaults if not specified
+        _max_retries = max_retries if max_retries is not None else ToolRetryConfig.MAX_RETRIES
+        _initial_delay = initial_delay if initial_delay is not None else ToolRetryConfig.INITIAL_DELAY
+        _backoff_factor = backoff_factor if backoff_factor is not None else ToolRetryConfig.BACKOFF_FACTOR
+        _jitter = jitter if jitter is not None else ToolRetryConfig.JITTER
+
+        # Exceptions that should trigger retry (network/transient errors)
+        retryable_exceptions = (
+            ConnectionError,
+            TimeoutError,
+            OSError,
+        )
+
+        last_error: Exception | None = None
+        delay = _initial_delay
+
+        for attempt in range(_max_retries):
+            try:
+                return await tool.execute(**parameters)
+            except retryable_exceptions as e:
+                last_error = e
+                if attempt < _max_retries - 1:
+                    # Calculate delay with optional jitter
+                    actual_delay = delay
+                    if _jitter:
+                        actual_delay = delay * (0.5 + random.random())
+
+                    logger.warning(
+                        f"Tool '{tool_name}' failed (attempt {attempt + 1}/{_max_retries}): {e}. "
+                        f"Retrying in {actual_delay:.1f}s..."
+                    )
+                    await asyncio.sleep(actual_delay)
+                    delay *= _backoff_factor
+                else:
+                    logger.error(
+                        f"Tool '{tool_name}' failed after {_max_retries} attempts: {e}"
+                    )
+            except Exception as e:
+                # Non-retryable exception - fail immediately
+                logger.error(f"Tool '{tool_name}' failed with non-retryable error: {e}")
+                return ToolOutput(
+                    source=tool_name,
+                    device=parameters.get("device", "unknown"),
+                    data=[],
+                    error=f"Tool execution failed: {e}",
+                )
+
+        # All retries exhausted
+        return ToolOutput(
+            source=tool_name,
+            device=parameters.get("device", "unknown"),
+            data=[],
+            error=f"Tool '{tool_name}' failed after {max_retries} retries: {last_error}",
+        )
 
     def _get_cache_key(self, tool_name: str, parameters: dict[str, Any]) -> str:
         """
@@ -1073,19 +1496,18 @@ class FastPathStrategy:
 
 元数据: {tool_output.metadata}
 
-## 格式要求
-返回 JSON：
-{{{{
-    "answer": "基于数据的简洁答案（2-3 句话）",
-    "data_used": ["使用的字段名列表"],
-    "confidence": 0.95
-}}}}
+## 输出格式（必须严格遵守）
+返回纯 JSON，不要包含 markdown 代码块或其他格式：
+{{"answer": "基于数据的简洁答案（2-3 句话）", "data_used": ["hostname", "state"], "confidence": 0.95}}
 """
 
-        response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-
         try:
-            formatted = FormattedAnswer.model_validate_json(response.content)
+            # Use robust_structured_output for reliable JSON parsing
+            formatted = await robust_structured_output(
+                llm=self.llm,
+                output_class=FormattedAnswer,
+                prompt=prompt,
+            )
         except Exception as e:
             logger.error(f"Failed to parse formatted answer: {e}")
             # Fallback formatting

@@ -920,7 +920,9 @@ async def generate_cli_commands(
         return {
             "commands": [],
             "explanation": "",
-            "warnings": ["Must provide either 'device' (with NetBox platform) or 'platform' parameter"],
+            "warnings": [
+                "Must provide either 'device' (with NetBox platform) or 'platform' parameter"
+            ],
             "alternatives": [],
             "platform": None,
             "cached": False,

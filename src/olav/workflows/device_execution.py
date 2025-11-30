@@ -38,6 +38,7 @@ from typing import Literal
 from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
@@ -157,18 +158,30 @@ class DeviceExecutionWorkflow(BaseWorkflow):
         return False, "非配置变更请求"
 
     def build_graph(self, checkpointer: BaseCheckpointSaver) -> StateGraph:
-        """Build device execution workflow graph."""
+        """Build device execution workflow graph with proper tool loops."""
+
+        # Define tool nodes for each phase
+        # Planning phase tools: Schema search + memory + device discovery for plan generation
+        planning_tools = [
+            suzieq_query,  # CRITICAL: For device discovery when "all devices" is requested
+            search_episodic_memory,
+            search_openconfig_schema,
+            netconf_tool,  # get-config to retrieve current state
+        ]
+        planning_tools_node = ToolNode(planning_tools)
+
+        # Execution phase tools: NETCONF/CLI for actual config changes
+        execution_tools = [netconf_tool, cli_tool]
+        execution_tools_node = ToolNode(execution_tools)
+
+        # Validation phase tools: Verify config was applied
+        validation_tools = [suzieq_query, netconf_tool, cli_tool]
+        validation_tools_node = ToolNode(validation_tools)
 
         async def config_planning_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """Generate detailed change plan with rollback strategy."""
             llm = LLMFactory.get_chat_model()
-            llm_with_tools = llm.bind_tools(
-                [
-                    search_episodic_memory,
-                    search_openconfig_schema,
-                    netconf_tool,  # get-config to retrieve current state
-                ]
-            )
+            llm_with_tools = llm.bind_tools(planning_tools)
 
             user_query = state["messages"][-1].content
             planning_prompt = prompt_manager.load_prompt(
@@ -179,29 +192,39 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 [SystemMessage(content=planning_prompt), *state["messages"]]
             )
 
-            # TODO: Parse structured plan from response
-            config_plan = {"plan": response.content}
+            return {
+                **state,
+                "messages": state["messages"] + [response],
+                "iteration_count": state.get("iteration_count", 0) + 1,
+            }
+
+        async def plan_summary_node(state: DeviceExecutionState) -> DeviceExecutionState:
+            """Extract structured plan from planning phase for HITL review."""
+            # Get the last message from planning phase
+            last_message = state["messages"][-1]
+            plan_content = last_message.content if hasattr(last_message, "content") else ""
+
+            config_plan = {"plan": plan_content}
 
             return {
                 **state,
                 "config_plan": config_plan,
-                "messages": state["messages"] + [AIMessage(content=response.content)],
-                "iteration_count": state.get("iteration_count", 0) + 1,
             }
 
         async def hitl_approval_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """HITL approval - LangGraph interrupt point.
-            
+
             Uses LangGraph interrupt to pause and wait for user approval.
             When workflow resumes, approval_response contains user decision.
             """
             import logging
-            from langgraph.types import interrupt
+
             from config.settings import AgentConfig
-            
+            from langgraph.types import interrupt
+
             logger = logging.getLogger(__name__)
             user_approval = state.get("approval_status")
-            
+
             # YOLO mode: auto-approve
             if AgentConfig.YOLO_MODE and user_approval is None:
                 logger.info("[YOLO] Auto-approving device execution...")
@@ -209,41 +232,44 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                     **state,
                     "approval_status": "approved",
                 }
-            
+
             # Already processed (resuming after interrupt)
             if user_approval in ("approved", "rejected"):
                 return {
                     **state,
                     "approval_status": user_approval,
                 }
-            
+
             # HITL: Request user approval via interrupt
             config_plan = state.get("config_plan", {})
-            
-            approval_response = interrupt({
-                "action": "approval_required",
-                "config_plan": config_plan,
-                "message": f"请审批设备配置变更:\n计划: {config_plan}\n\n输入 Y 确认, N 取消:",
-            })
-            
+
+            approval_response = interrupt(
+                {
+                    "action": "approval_required",
+                    "config_plan": config_plan,
+                    "message": f"请审批设备配置变更:\n计划: {config_plan}\n\n输入 Y 确认, N 取消:",
+                }
+            )
+
             # Process approval response
             if isinstance(approval_response, dict):
-                if approval_response.get("approved") or approval_response.get("user_approval") == "approved":
+                if (
+                    approval_response.get("approved")
+                    or approval_response.get("user_approval") == "approved"
+                ):
                     return {
                         **state,
                         "approval_status": "approved",
                     }
-                else:
-                    return {
-                        **state,
-                        "approval_status": "rejected",
-                    }
-            else:
-                # String response (Y/N) - treat as approved if truthy
                 return {
                     **state,
-                    "approval_status": "approved" if approval_response else "rejected",
+                    "approval_status": "rejected",
                 }
+            # String response (Y/N) - treat as approved if truthy
+            return {
+                **state,
+                "approval_status": "approved" if approval_response else "rejected",
+            }
 
         async def config_execution_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """Execute configuration changes (NETCONF preferred)."""
@@ -257,7 +283,7 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 }
 
             llm = LLMFactory.get_chat_model()
-            llm_with_tools = llm.bind_tools([netconf_tool, cli_tool])
+            llm_with_tools = llm.bind_tools(execution_tools)
 
             config_plan = state.get("config_plan", {})
             execution_prompt = prompt_manager.load_prompt(
@@ -268,19 +294,28 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 [SystemMessage(content=execution_prompt), *state["messages"]]
             )
 
-            execution_result = {"result": response.content}
+            return {
+                **state,
+                "messages": state["messages"] + [response],
+                "iteration_count": state.get("iteration_count", 0) + 1,
+            }
+
+        async def execution_summary_node(state: DeviceExecutionState) -> DeviceExecutionState:
+            """Extract execution result after tool loop completes."""
+            last_message = state["messages"][-1]
+            result_content = last_message.content if hasattr(last_message, "content") else ""
+
+            execution_result = {"result": result_content}
 
             return {
                 **state,
                 "execution_result": execution_result,
-                "messages": state["messages"] + [AIMessage(content=response.content)],
-                "iteration_count": state.get("iteration_count", 0) + 1,
             }
 
         async def validation_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """Validate configuration changes."""
             llm = LLMFactory.get_chat_model()
-            llm_with_tools = llm.bind_tools([suzieq_query, netconf_tool, cli_tool])
+            llm_with_tools = llm.bind_tools(validation_tools)
 
             config_plan = state.get("config_plan", {})
             execution_result = state.get("execution_result", {})
@@ -295,13 +330,22 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 [SystemMessage(content=validation_prompt), *state["messages"]]
             )
 
-            validation_result = {"result": response.content}
+            return {
+                **state,
+                "messages": state["messages"] + [response],
+                "iteration_count": state.get("iteration_count", 0) + 1,
+            }
+
+        async def validation_summary_node(state: DeviceExecutionState) -> DeviceExecutionState:
+            """Extract validation result after tool loop completes."""
+            last_message = state["messages"][-1]
+            result_content = last_message.content if hasattr(last_message, "content") else ""
+
+            validation_result = {"result": result_content}
 
             return {
                 **state,
                 "validation_result": validation_result,
-                "messages": state["messages"] + [AIMessage(content=response.content)],
-                "iteration_count": state.get("iteration_count", 0) + 1,
             }
 
         async def final_answer_node(state: DeviceExecutionState) -> DeviceExecutionState:
@@ -337,17 +381,37 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 return "config_execution"
             return "final_answer"
 
-        # Build graph
+        # Build graph with proper tool loops
         workflow = StateGraph(DeviceExecutionState)
 
+        # Add all nodes
         workflow.add_node("config_planning", config_planning_node)
+        workflow.add_node("planning_tools", planning_tools_node)
+        workflow.add_node("plan_summary", plan_summary_node)
         workflow.add_node("hitl_approval", hitl_approval_node)
         workflow.add_node("config_execution", config_execution_node)
+        workflow.add_node("execution_tools", execution_tools_node)
+        workflow.add_node("execution_summary", execution_summary_node)
         workflow.add_node("validation", validation_node)
+        workflow.add_node("validation_tools", validation_tools_node)
+        workflow.add_node("validation_summary", validation_summary_node)
         workflow.add_node("final_answer", final_answer_node)
 
+        # Set entry point
         workflow.set_entry_point("config_planning")
-        workflow.add_edge("config_planning", "hitl_approval")
+
+        # Planning phase: Agent Loop (planning <-> planning_tools)
+        workflow.add_conditional_edges(
+            "config_planning",
+            tools_condition,
+            {"tools": "planning_tools", "__end__": "plan_summary"},
+        )
+        workflow.add_edge("planning_tools", "config_planning")
+
+        # After plan summary -> HITL approval
+        workflow.add_edge("plan_summary", "hitl_approval")
+
+        # After approval -> route to execution or final answer
         workflow.add_conditional_edges(
             "hitl_approval",
             route_after_approval,
@@ -356,24 +420,44 @@ class DeviceExecutionWorkflow(BaseWorkflow):
                 "final_answer": "final_answer",
             },
         )
-        workflow.add_edge("config_execution", "validation")
-        workflow.add_edge("validation", "final_answer")
+
+        # Execution phase: Agent Loop (execution <-> execution_tools)
+        workflow.add_conditional_edges(
+            "config_execution",
+            tools_condition,
+            {"tools": "execution_tools", "__end__": "execution_summary"},
+        )
+        workflow.add_edge("execution_tools", "config_execution")
+
+        # After execution summary -> validation
+        workflow.add_edge("execution_summary", "validation")
+
+        # Validation phase: Agent Loop (validation <-> validation_tools)
+        workflow.add_conditional_edges(
+            "validation",
+            tools_condition,
+            {"tools": "validation_tools", "__end__": "validation_summary"},
+        )
+        workflow.add_edge("validation_tools", "validation")
+
+        # After validation summary -> final answer
+        workflow.add_edge("validation_summary", "final_answer")
+
         workflow.add_edge("final_answer", END)
 
         # Compile with interrupt before approval (only if not YOLO mode)
         from config.settings import AgentConfig
-        
+
         if AgentConfig.YOLO_MODE:
             # YOLO mode: no interrupts, auto-approve in hitl_approval_node
             return workflow.compile(
                 checkpointer=checkpointer,
             )
-        else:
-            # Normal mode: interrupt before approval for user review
-            return workflow.compile(
-                checkpointer=checkpointer,
-                interrupt_before=["hitl_approval"],
-            )
+        # Normal mode: interrupt before approval for user review
+        return workflow.compile(
+            checkpointer=checkpointer,
+            interrupt_before=["hitl_approval"],
+        )
 
 
 __all__ = ["DeviceExecutionState", "DeviceExecutionWorkflow"]

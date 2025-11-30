@@ -7,6 +7,29 @@ from olav.strategies.fast_path import FastPathStrategy
 from olav.tools.base import ToolOutput, ToolRegistry
 
 
+# Module-level patches for LLM and schema checks
+@pytest.fixture(autouse=True)
+def mock_classify_intent():
+    """Patch classify_intent_async to avoid real LLM calls."""
+    async def mock_classify(query):
+        return ("suzieq", 0.9)
+    
+    with patch("olav.strategies.fast_path.classify_intent_async", side_effect=mock_classify):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_schema_checks():
+    """Patch schema discovery and relevance checks to test Memory RAG path."""
+    with patch.object(FastPathStrategy, "_discover_schema_for_intent", new_callable=AsyncMock) as mock_discover, \
+         patch.object(FastPathStrategy, "_check_schema_relevance") as mock_relevance:
+        # Schema discovery returns dict format (table_name -> schema_info)
+        mock_discover.return_value = {"bgp": {"table": "bgp", "fields": ["hostname", "state"]}}
+        # Schema is relevant (no fallback)
+        mock_relevance.return_value = (True, None)
+        yield
+
+
 class TestMemoryRAGIntegration:
     """Test episodic memory RAG optimization in FastPathStrategy."""
     
@@ -19,9 +42,27 @@ class TestMemoryRAGIntegration:
     
     @pytest.fixture
     def mock_llm(self):
-        """Mock LLM for testing."""
+        """Mock LLM for testing with structured output support."""
+        from olav.strategies.fast_path import ParameterExtraction
+        
         llm = MagicMock()
         llm.ainvoke = AsyncMock()
+        
+        # Mock with_structured_output for parameter extraction
+        def with_structured_output(schema):
+            structured_llm = MagicMock()
+            async def return_extraction(messages):
+                return ParameterExtraction(
+                    tool="suzieq_query",
+                    parameters={"table": "bgp", "hostname": "R1", "method": "get"},
+                    confidence=0.95,
+                    reasoning="BGP query on R1"
+                )
+            structured_llm.ainvoke = AsyncMock(side_effect=return_extraction)
+            return structured_llm
+        
+        llm.with_structured_output = MagicMock(side_effect=with_structured_output)
+        
         return llm
     
     @pytest.fixture
@@ -161,22 +202,12 @@ class TestMemoryRAGIntegration:
             error=None,
         )
         
-        # Mock LLM for both extraction and formatting
-        mock_llm.ainvoke.side_effect = [
-            # Parameter extraction response
-            AIMessage(content="""{
-                "tool": "suzieq_query",
-                "parameters": {"table": "bgp", "hostname": "R1"},
-                "confidence": 0.92,
-                "reasoning": "Simple BGP status query"
-            }"""),
-            # Answer formatting response
-            AIMessage(content="""{
-                "answer": "R1 BGP status",
-                "data_used": ["hostname"],
-                "confidence": 0.90
-            }""")
-        ]
+        # Mock LLM ainvoke for answer formatting only
+        mock_llm.ainvoke.return_value = AIMessage(content="""{
+            "answer": "R1 BGP status",
+            "data_used": ["hostname"],
+            "confidence": 0.90
+        }""")
         
         strategy = FastPathStrategy(
             llm=mock_llm,
@@ -190,8 +221,9 @@ class TestMemoryRAGIntegration:
         # Memory was queried but not used (low similarity)
         mock_episodic_memory_tool.execute.assert_called_once()
         
-        # LLM should be called twice (extraction + formatting)
-        assert mock_llm.ainvoke.call_count == 2
+        # with_structured_output used for param extraction, ainvoke for formatting
+        assert mock_llm.with_structured_output.call_count >= 1
+        assert mock_llm.ainvoke.call_count == 1
         
         assert result["success"] is True
     
@@ -211,20 +243,12 @@ class TestMemoryRAGIntegration:
             error=None,
         )
         
-        # Mock LLM for extraction and formatting
-        mock_llm.ainvoke.side_effect = [
-            AIMessage(content="""{
-                "tool": "suzieq_query",
-                "parameters": {"table": "interfaces"},
-                "confidence": 0.88,
-                "reasoning": "Interface status query"
-            }"""),
-            AIMessage(content="""{
-                "answer": "Interface status retrieved",
-                "data_used": ["ifname"],
-                "confidence": 0.85
-            }""")
-        ]
+        # Mock LLM ainvoke for formatting only
+        mock_llm.ainvoke.return_value = AIMessage(content="""{
+            "answer": "Interface status retrieved",
+            "data_used": ["ifname"],
+            "confidence": 0.85
+        }""")
         
         strategy = FastPathStrategy(
             llm=mock_llm,
@@ -238,8 +262,9 @@ class TestMemoryRAGIntegration:
         # Memory was queried but returned no results
         mock_episodic_memory_tool.execute.assert_called_once()
         
-        # Should fallback to LLM extraction
-        assert mock_llm.ainvoke.call_count == 2
+        # with_structured_output for extraction, ainvoke for formatting
+        assert mock_llm.with_structured_output.call_count >= 1
+        assert mock_llm.ainvoke.call_count == 1
         assert result["success"] is True
     
     @pytest.mark.asyncio
@@ -249,19 +274,11 @@ class TestMemoryRAGIntegration:
         """Test that Memory RAG can be disabled."""
         from langchain_core.messages import AIMessage
         
-        mock_llm.ainvoke.side_effect = [
-            AIMessage(content="""{
-                "tool": "suzieq_query",
-                "parameters": {"table": "bgp"},
-                "confidence": 0.90,
-                "reasoning": "BGP query"
-            }"""),
-            AIMessage(content="""{
-                "answer": "BGP data",
-                "data_used": ["hostname"],
-                "confidence": 0.88
-            }""")
-        ]
+        mock_llm.ainvoke.return_value = AIMessage(content="""{
+            "answer": "BGP data",
+            "data_used": ["hostname"],
+            "confidence": 0.88
+        }""")
         
         strategy = FastPathStrategy(
             llm=mock_llm,
@@ -275,8 +292,9 @@ class TestMemoryRAGIntegration:
         # Episodic memory should NOT be queried
         mock_episodic_memory_tool.execute.assert_not_called()
         
-        # LLM should be used for extraction
-        assert mock_llm.ainvoke.call_count == 2
+        # with_structured_output for extraction, ainvoke for formatting
+        assert mock_llm.with_structured_output.call_count >= 1
+        assert mock_llm.ainvoke.call_count == 1
         assert result["success"] is True
     
     @pytest.mark.asyncio
@@ -289,20 +307,12 @@ class TestMemoryRAGIntegration:
         # Mock episodic memory to raise exception
         mock_episodic_memory_tool.execute.side_effect = Exception("OpenSearch connection failed")
         
-        # Mock LLM for fallback extraction
-        mock_llm.ainvoke.side_effect = [
-            AIMessage(content="""{
-                "tool": "suzieq_query",
-                "parameters": {"table": "bgp"},
-                "confidence": 0.85,
-                "reasoning": "BGP query"
-            }"""),
-            AIMessage(content="""{
-                "answer": "BGP status",
-                "data_used": ["hostname"],
-                "confidence": 0.82
-            }""")
-        ]
+        # Mock LLM ainvoke for formatting only
+        mock_llm.ainvoke.return_value = AIMessage(content="""{
+            "answer": "BGP status",
+            "data_used": ["hostname"],
+            "confidence": 0.82
+        }""")
         
         strategy = FastPathStrategy(
             llm=mock_llm,
@@ -316,8 +326,9 @@ class TestMemoryRAGIntegration:
         # Should attempt memory search
         mock_episodic_memory_tool.execute.assert_called_once()
         
-        # Should fallback to LLM despite error
-        assert mock_llm.ainvoke.call_count == 2
+        # Should fallback to LLM with_structured_output for extraction
+        assert mock_llm.with_structured_output.call_count >= 1
+        assert mock_llm.ainvoke.call_count == 1
         assert result["success"] is True
     
     def test_search_episodic_memory_similarity_calculation(self):

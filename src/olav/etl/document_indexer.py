@@ -88,7 +88,8 @@ class EmbeddingService:
 
                 self._client = OpenAI(api_key=self.api_key)
             except ImportError as e:
-                raise ImportError("openai package required for embeddings") from e
+                msg = "openai package required for embeddings"
+                raise ImportError(msg) from e
         return self._client
 
     async def embed_text(self, text: str) -> list[float]:
@@ -486,7 +487,7 @@ class RAGIndexer:
 
             embeddings = await self.embedding_service.embed_batch(texts)
 
-            for chunk, embedding in zip(batch, embeddings):
+            for chunk, embedding in zip(batch, embeddings, strict=False):
                 all_embedded.append(EmbeddedChunk(chunk=chunk, embedding=embedding))
 
             logger.info(

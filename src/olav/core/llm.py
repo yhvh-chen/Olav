@@ -1,119 +1,76 @@
-"""LLM Factory for creating chat and embedding models."""
+"""LLM Factory for creating chat and embedding models.
 
-import json
+Refactored to use LangChain 1.10's init_chat_model() for unified model initialization.
+Supports 15+ providers with a single function call.
+
+LangChain 1.10 Middleware Integration:
+- ModelRetryMiddleware: Automatic retry with exponential backoff
+- ModelFallbackMiddleware: Automatic failover to backup models
+"""
+
 import logging
 import sys
 from pathlib import Path
 from typing import Any
+
+from langchain.agents.middleware import ModelFallbackMiddleware, ModelRetryMiddleware
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
+from langchain_openai import OpenAIEmbeddings
 
 # Add config to path if not already there
 config_path = Path(__file__).parent.parent.parent.parent / "config"
 if str(config_path) not in sys.path:
     sys.path.insert(0, str(config_path.parent))
 
-from config.settings import LLMConfig
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_openai.chat_models.base import _convert_dict_to_message
+from config.settings import LLMConfig, LLMRetryConfig
 
 from olav.core.settings import settings as env_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _fixed_convert_dict_to_message(message_dict: dict) -> Any:
-    """Fixed version of _convert_dict_to_message that handles JSON string arguments.
+# ============================================
+# Retry Configuration (from config/settings.py)
+# ============================================
+# Exceptions that should trigger retry (transient errors)
+RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
+    TimeoutError,
+    ConnectionError,
+)
 
-    OpenRouter/DeepSeek returns tool_calls with arguments as JSON strings.
+# Try to add provider-specific exceptions
+try:
+    from openai import APITimeoutError, RateLimitError
 
-    CRITICAL INSIGHT: We CANNOT pre-parse arguments from str to dict, because
-    parse_tool_call() will call json.loads() on it, causing TypeError.
-
-    Strategy: Let parse_tool_call handle JSON parsing. Only fix invalid_tool_calls.
-    """
-    # DO NOT modify tool_calls - let parse_tool_call handle it
-    # (Previous code pre-parsed arguments, which broke parse_tool_call's json.loads)
-
-    # Fix invalid_tool_calls: args from dict → str (if needed)
-    invalid_tool_calls = message_dict.get("invalid_tool_calls")
-    if invalid_tool_calls:  # Check if not None and not empty
-        logger.debug(f"Found {len(invalid_tool_calls)} invalid_tool_calls: {invalid_tool_calls}")
-        for i, tool_call in enumerate(invalid_tool_calls):
-            if "args" in tool_call:
-                args = tool_call["args"]
-                # InvalidToolCall.args MUST be str, convert dict back to str
-                if isinstance(args, dict):
-                    try:
-                        tool_call["args"] = json.dumps(args)
-                        logger.debug(f"Serialized invalid_tool_call[{i}] args to JSON string")
-                    except (TypeError, ValueError) as e:
-                        logger.warning(f"Failed to serialize invalid_tool_call[{i}] args: {e}")
-                        tool_call["args"] = ""
-                elif not isinstance(args, str):
-                    logger.warning(
-                        f"invalid_tool_call[{i}] args has unexpected type {type(args)}, converting to empty str"
-                    )
-                    tool_call["args"] = ""
-
-    # Call original converter
-    return _convert_dict_to_message(message_dict)
-
-
-class FixedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with fixed tool call parsing for OpenRouter/DeepSeek.
-
-    This class patches the message converter to handle JSON string arguments.
-    """
-
-    def _create_chat_result(self, response: Any, *args, **kwargs) -> Any:
-        """Override to use fixed message converter."""
-        # Temporarily patch the converter
-        import langchain_openai.chat_models.base as base_module
-
-        original_converter = base_module._convert_dict_to_message
-
-        try:
-            # Use our fixed converter
-            base_module._convert_dict_to_message = _fixed_convert_dict_to_message
-            return super()._create_chat_result(response, *args, **kwargs)
-        finally:
-            # Restore original converter
-            base_module._convert_dict_to_message = original_converter
+    RETRYABLE_EXCEPTIONS = (*RETRYABLE_EXCEPTIONS, APITimeoutError, RateLimitError)
+except ImportError:
+    pass  # openai package not installed
 
 
 class LLMFactory:
-    """Factory for creating LLM instances based on configured provider."""
+    """Factory for creating LLM instances using init_chat_model().
 
-    # One-time environment mapping flag
-    _openai_env_mapped = False
+    LangChain 1.10 provides init_chat_model() which supports 15+ providers
+    (openai, anthropic, azure_openai, ollama, etc.) with a unified interface.
 
-    @classmethod
-    def _ensure_openai_env(cls) -> None:
-        """Map LLM_API_KEY to OPENAI_API_KEY if provider==openai and env not set.
+    Middleware Support:
+    - get_chat_model(): Basic model without middleware
+    - get_retry_middleware(): ModelRetryMiddleware for transient errors
+    - get_fallback_middleware(): ModelFallbackMiddleware for model failover
+    """
 
-        Avoid mapping if key is an OpenRouter style (sk-or-) because OpenAI SDK
-        will reject it anyway; leave direct api_key usage in that scenario.
-        """
-        if cls._openai_env_mapped:
-            return
-        if env_settings.llm_provider == "openai":
-            import os
-
-            if (
-                not os.getenv("OPENAI_API_KEY")
-                and env_settings.llm_api_key
-                and not env_settings.llm_api_key.startswith("sk-or-")
-            ):
-                os.environ["OPENAI_API_KEY"] = env_settings.llm_api_key
-                logger.info("Mapped LLM_API_KEY to OPENAI_API_KEY for OpenAI provider")
-        cls._openai_env_mapped = True
+    # Cached middleware instances (singleton pattern)
+    _retry_middleware: ModelRetryMiddleware | None = None
+    _fallback_middleware: ModelFallbackMiddleware | None = None
 
     @staticmethod
     def get_chat_model(
         json_mode: bool = False,
         temperature: float | None = None,
         **kwargs: Any,
-    ) -> ChatOpenAI:
-        """Create a chat model instance.
+    ) -> BaseChatModel:
+        """Create a chat model instance using init_chat_model().
 
         Args:
             json_mode: Whether to enable JSON output mode
@@ -122,62 +79,35 @@ class LLMFactory:
 
         Returns:
             Configured chat model instance
-
-        Raises:
-            ValueError: If provider is not supported
         """
         temp = temperature if temperature is not None else LLMConfig.TEMPERATURE
 
-        if env_settings.llm_provider == "openai":
-            # Ensure environment variable mapping (non-OpenRouter keys only)
-            LLMFactory._ensure_openai_env()
-            model_kwargs = {}
+        # Build configurable fields for init_chat_model
+        config: dict[str, Any] = {
+            "temperature": temp,
+            "max_tokens": LLMConfig.MAX_TOKENS,
+        }
 
+        # Provider-specific configuration
+        provider = env_settings.llm_provider
+        model_name = env_settings.llm_model_name or LLMConfig.MODEL_NAME
+
+        if provider == "openai":
+            config["api_key"] = env_settings.llm_api_key
+            if LLMConfig.BASE_URL:
+                config["base_url"] = LLMConfig.BASE_URL
+            # Sequential tool execution for OpenRouter compatibility
+            config["model_kwargs"] = {"parallel_tool_calls": False}
             if json_mode:
-                model_kwargs["response_format"] = {"type": "json_object"}
+                config["model_kwargs"]["response_format"] = {"type": "json_object"}
+        elif provider == "ollama":
+            if json_mode:
+                config["format"] = "json"
+        elif provider == "azure_openai":
+            config["api_key"] = env_settings.llm_api_key
 
-            # DeepSeek via OpenRouter compatibility fixes:
-            # 1. Use FixedChatOpenAI to handle JSON string arguments
-            # 2. model_kwargs["parallel_tool_calls"]=False: Sequential execution (avoid warning)
-            model_kwargs["parallel_tool_calls"] = False  # Sequential tool execution
-
-            return FixedChatOpenAI(
-                model=env_settings.llm_model_name or LLMConfig.MODEL_NAME,
-                temperature=temp,
-                max_tokens=LLMConfig.MAX_TOKENS,
-                api_key=env_settings.llm_api_key,
-                base_url=LLMConfig.BASE_URL,
-                model_kwargs=model_kwargs,
-                **kwargs,
-            )
-        if env_settings.llm_provider == "ollama":
-            try:
-                from langchain_ollama import ChatOllama
-            except ImportError as e:
-                msg = "langchain-ollama not installed. Run: uv add langchain-ollama"
-                raise ImportError(msg) from e
-
-            return ChatOllama(
-                model=env_settings.llm_model_name or LLMConfig.MODEL_NAME,
-                temperature=temp,
-                format="json" if json_mode else None,
-                **kwargs,
-            )
-        if env_settings.llm_provider == "azure":
-            try:
-                from langchain_openai import AzureChatOpenAI
-            except ImportError as e:
-                msg = "Azure OpenAI support requires langchain-openai"
-                raise ImportError(msg) from e
-
-            return AzureChatOpenAI(
-                model=env_settings.llm_model_name or LLMConfig.MODEL_NAME,
-                temperature=temp,
-                api_key=env_settings.llm_api_key,
-                **kwargs,
-            )
-        msg = f"Unsupported LLM provider: {env_settings.llm_provider}"
-        raise ValueError(msg)
+        logger.debug(f"Initializing chat model: provider={provider}, model={model_name}")
+        return init_chat_model(model_name, model_provider=provider, **config, **kwargs)
 
     @staticmethod
     def get_embedding_model() -> OpenAIEmbeddings:
@@ -190,7 +120,6 @@ class LLMFactory:
             ValueError: If provider is not supported
         """
         if env_settings.llm_provider == "openai":
-            LLMFactory._ensure_openai_env()
             return OpenAIEmbeddings(
                 model=LLMConfig.EMBEDDING_MODEL,
                 api_key=env_settings.llm_api_key,
@@ -204,10 +133,172 @@ class LLMFactory:
                 raise ImportError(msg) from e
 
             return OllamaEmbeddings(model="nomic-embed-text")
-        if env_settings.llm_provider == "azure":
+        if env_settings.llm_provider == "azure_openai":
             return OpenAIEmbeddings(
                 model=LLMConfig.EMBEDDING_MODEL,
                 api_key=env_settings.llm_api_key,
             )
         msg = f"Unsupported embedding provider: {env_settings.llm_provider}"
         raise ValueError(msg)
+
+    # ============================================
+    # LangChain 1.10 Middleware Factory Methods
+    # ============================================
+
+    @classmethod
+    def get_retry_middleware(
+        cls,
+        max_retries: int | None = None,
+        backoff_factor: float | None = None,
+        initial_delay: float | None = None,
+        max_delay: float | None = None,
+        jitter: bool | None = None,
+    ) -> ModelRetryMiddleware:
+        """Get ModelRetryMiddleware for automatic retry with exponential backoff.
+
+        Handles transient errors like rate limits, timeouts, and connection errors.
+        Uses singleton pattern to avoid creating multiple instances.
+        Default values are loaded from config/settings.py LLMRetryConfig.
+
+        Args:
+            max_retries: Maximum retry attempts (default: LLMRetryConfig.MAX_RETRIES)
+            backoff_factor: Multiplier for exponential backoff (default: LLMRetryConfig.BACKOFF_FACTOR)
+            initial_delay: Initial delay in seconds (default: LLMRetryConfig.INITIAL_DELAY)
+            max_delay: Maximum delay cap in seconds (default: LLMRetryConfig.MAX_DELAY)
+            jitter: Add randomness to prevent thundering herd (default: LLMRetryConfig.JITTER)
+
+        Returns:
+            Configured ModelRetryMiddleware instance
+
+        Example:
+            >>> retry = LLMFactory.get_retry_middleware(max_retries=5)
+            >>> agent = create_agent(model=model, middleware=[retry])
+        """
+        if cls._retry_middleware is None:
+            # Use config defaults if not specified
+            _max_retries = max_retries if max_retries is not None else LLMRetryConfig.MAX_RETRIES
+            _backoff_factor = backoff_factor if backoff_factor is not None else LLMRetryConfig.BACKOFF_FACTOR
+            _initial_delay = initial_delay if initial_delay is not None else LLMRetryConfig.INITIAL_DELAY
+            _max_delay = max_delay if max_delay is not None else LLMRetryConfig.MAX_DELAY
+            _jitter = jitter if jitter is not None else LLMRetryConfig.JITTER
+            
+            cls._retry_middleware = ModelRetryMiddleware(
+                max_retries=_max_retries,
+                retry_on=RETRYABLE_EXCEPTIONS,
+                backoff_factor=_backoff_factor,
+                initial_delay=_initial_delay,
+                max_delay=_max_delay,
+                jitter=_jitter,
+                on_failure="continue",  # Return error message instead of raising
+            )
+            logger.info(
+                f"Created ModelRetryMiddleware: max_retries={_max_retries}, "
+                f"retry_on={[e.__name__ for e in RETRYABLE_EXCEPTIONS]}"
+            )
+        return cls._retry_middleware
+
+    @classmethod
+    def get_fallback_middleware(
+        cls,
+        fallback_models: list[str] | None = None,
+    ) -> ModelFallbackMiddleware:
+        """Get ModelFallbackMiddleware for automatic model failover.
+
+        When primary model fails completely (not transient), automatically
+        switches to backup models in order.
+
+        Args:
+            fallback_models: Ordered list of fallback model strings.
+                Format: "provider:model_name" (e.g., "openai:gpt-4o-mini")
+                If None, uses default fallback chain from config.
+
+        Returns:
+            Configured ModelFallbackMiddleware instance
+
+        Example:
+            >>> fallback = LLMFactory.get_fallback_middleware(
+            ...     ["openai:gpt-4o-mini", "ollama:llama3"]
+            ... )
+            >>> agent = create_agent(model=model, middleware=[fallback])
+        """
+        if cls._fallback_middleware is None:
+            # Default fallback chain if not specified
+            if fallback_models is None:
+                fallback_models = _get_default_fallback_models()
+
+            if not fallback_models:
+                # No fallbacks configured - create with primary model as fallback
+                primary = f"{env_settings.llm_provider}:{env_settings.llm_model_name}"
+                logger.warning(
+                    f"No fallback models configured, using primary model only: {primary}"
+                )
+                cls._fallback_middleware = ModelFallbackMiddleware(primary)
+            else:
+                cls._fallback_middleware = ModelFallbackMiddleware(
+                    fallback_models[0],
+                    *fallback_models[1:],
+                )
+                logger.info(f"Created ModelFallbackMiddleware: models={fallback_models}")
+
+        return cls._fallback_middleware
+
+    @classmethod
+    def get_middleware_stack(cls) -> list:
+        """Get the standard middleware stack for resilient LLM calls.
+
+        Returns both retry and fallback middleware in the correct order.
+        Retry is applied first (inner), then fallback (outer).
+
+        Returns:
+            List of middleware instances [retry, fallback]
+
+        Example:
+            >>> middleware = LLMFactory.get_middleware_stack()
+            >>> agent = create_agent(model=model, middleware=middleware)
+        """
+        return [
+            cls.get_retry_middleware(),
+            cls.get_fallback_middleware(),
+        ]
+
+    @classmethod
+    def reset_middleware(cls) -> None:
+        """Reset cached middleware instances.
+
+        Useful for testing or reconfiguration.
+        """
+        cls._retry_middleware = None
+        cls._fallback_middleware = None
+        logger.debug("Reset LLM middleware cache")
+
+
+def _get_default_fallback_models() -> list[str]:
+    """Get default fallback model chain from config or environment.
+
+    Priority:
+    1. LLMConfig.FALLBACK_MODELS if defined
+    2. Environment variable LLM_FALLBACK_MODELS (comma-separated)
+    3. Empty list (no fallbacks)
+
+    Returns:
+        List of model strings in fallback order
+    """
+    # Try config first
+    if hasattr(LLMConfig, "FALLBACK_MODELS") and LLMConfig.FALLBACK_MODELS:
+        return LLMConfig.FALLBACK_MODELS
+
+    # Try environment variable
+    import os
+
+    fallback_env = os.getenv("LLM_FALLBACK_MODELS", "")
+    if fallback_env:
+        return [m.strip() for m in fallback_env.split(",") if m.strip()]
+
+    # Default: use a smaller/cheaper model as fallback
+    provider = env_settings.llm_provider
+    if provider == "openai":
+        return ["openai:gpt-4o-mini"]
+    if provider == "ollama":
+        return ["ollama:llama3.2"]
+
+    return []

@@ -1,0 +1,135 @@
+# Sync Rules Configuration
+# 
+# Defines which fields can be auto-corrected vs require HITL approval.
+# This replaces hardcoded dictionaries in diff_engine.py and rules/*.py
+#
+# Priority: LLM classification > these rules > default (require HITL)
+
+# Fields that can be safely auto-corrected without human approval
+# These are typically descriptive or informational fields
+auto_correct_fields:
+  interface:
+    - description      # Interface description (cosmetic)
+    - mtu             # MTU value (can be synced safely)
+    - label           # NetBox label field
+    - custom_fields   # Custom field values (non-critical)
+  
+  device:
+    - serial          # Serial number (informational)
+    - serial_number   # Alias for serial
+    - software_version # OS version (informational)
+    - asset_tag       # Asset tracking tag
+    - comments        # Device comments
+    - custom_fields   # Custom field values
+  
+  ip_address:
+    - status          # IP status (active/deprecated)
+    - dns_name        # DNS hostname
+    - description     # IP description
+    - comments        # IP comments
+    - custom_fields   # Custom field values
+  
+  vlan:
+    - description     # VLAN description
+    - comments        # VLAN comments
+    - custom_fields   # Custom field values
+
+# Fields that ALWAYS require human-in-the-loop approval
+# These affect network connectivity or critical configuration
+hitl_required_fields:
+  interface:
+    - enabled         # Interface admin state
+    - mode            # Access/trunk mode
+    - tagged_vlans    # Tagged VLAN list
+    - untagged_vlan   # Native VLAN
+    - lag             # LAG membership
+    - mac_address     # MAC address
+    - existence       # Creating/deleting interfaces
+  
+  ip_address:
+    - address         # IP address itself
+    - assigned_object # Interface assignment
+    - vrf             # VRF assignment
+    - role            # IP role (primary/secondary)
+    - existence       # Creating/deleting IPs
+  
+  vlan:
+    - vid             # VLAN ID
+    - name            # VLAN name (affects config)
+    - site            # Site assignment
+    - group           # VLAN group
+    - existence       # Creating/deleting VLANs
+  
+  bgp_peer:
+    - remote_as       # Remote ASN
+    - peer_address    # Peer IP
+    - import_policy   # Import route policy
+    - export_policy   # Export route policy
+    - existence       # Creating/deleting peers
+  
+  device:
+    - site            # Site assignment
+    - rack            # Rack assignment
+    - device_role     # Device role
+    - platform        # Platform type
+    - primary_ip4     # Primary IPv4
+    - primary_ip6     # Primary IPv6
+    - existence       # Creating/deleting devices
+  
+  cable:
+    - a_terminations  # A-side termination
+    - b_terminations  # B-side termination
+    - existence       # Creating/deleting cables
+
+# Value transformation rules for auto-correction
+# Maps network device values to NetBox expected formats
+value_transforms:
+  status:
+    # Network state to NetBox status mapping
+    up: active
+    down: deprecated
+    active: active
+    inactive: deprecated
+    enabled: active
+    disabled: deprecated
+    "true": active
+    "false": deprecated
+  
+  boolean:
+    # Network boolean to Python boolean
+    up: true
+    down: false
+    enabled: true
+    disabled: false
+    "yes": true
+    "no": false
+    "1": true
+    "0": false
+
+# Severity classification rules
+severity_rules:
+  critical_fields:
+    - address
+    - enabled
+    - vid
+    - remote_as
+    - peer_address
+  
+  warning_fields:
+    - status
+    - mode
+    - tagged_vlans
+    - untagged_vlan
+  
+  info_fields:
+    - description
+    - mtu
+    - serial
+    - software_version
+    - comments
+
+# LLM classification settings (Phase 3)
+llm_classification:
+  enabled: false  # Set to true to enable LLM-based field classification
+  fallback_to_rules: true  # Use above rules if LLM fails
+  cache_ttl: 3600  # Cache LLM decisions for 1 hour

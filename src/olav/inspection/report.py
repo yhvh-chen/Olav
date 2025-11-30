@@ -9,9 +9,9 @@ Generates human-friendly inspection reports in Markdown format:
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from config.settings import InspectionConfig, AgentConfig
+from config.settings import AgentConfig, InspectionConfig
 
 if TYPE_CHECKING:
     from olav.inspection.runner import CheckResult
@@ -134,7 +134,7 @@ def tr(key: str, **kwargs: Any) -> str:
 
 class ReportGenerator:
     """Generate Markdown inspection reports."""
-    
+
     def __init__(
         self,
         profile_name: str,
@@ -145,7 +145,7 @@ class ReportGenerator:
         devices: list[str],
         checks: list[dict[str, Any]],
         language: str = "zh",
-    ):
+    ) -> None:
         self.profile_name = profile_name
         self.description = description
         self.results = results
@@ -155,72 +155,74 @@ class ReportGenerator:
         self.checks = checks
         self.language = language
         AgentConfig.LANGUAGE = language  # type: ignore
-    
+
     def _get_timestamp_str(self) -> str:
         """Get timestamp string for filename."""
         return self.start_time.strftime("%Y%m%d_%H%M%S")
-    
+
     def _get_report_filename(self) -> str:
         """Generate report filename with timestamp."""
         ts = self._get_timestamp_str()
         return f"inspection_{self.profile_name}_{ts}.md"
-    
+
     def generate(self) -> Path:
         """Generate Markdown report and save to file.
-        
+
         Returns:
             Path to generated report file
         """
         content = self._build_content()
-        
+
         # Save to reports directory
         reports_dir = InspectionConfig.get_reports_dir()
         filename = self._get_report_filename()
         report_path = reports_dir / filename
-        
+
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(content)
-        
+
         return report_path
-    
+
     def _build_content(self) -> str:
         """Build full report content."""
         lines: list[str] = []
-        
+
         # Header
         lines.append(tr("report_title"))
         lines.append("")
         lines.append(tr("profile", name=self.profile_name))
         lines.append(tr("description", desc=self.description))
-        
+
         duration = (self.end_time - self.start_time).total_seconds()
-        lines.append(tr(
-            "run_time",
-            start=self.start_time.strftime("%Y-%m-%d %H:%M:%S"),
-            end=self.end_time.strftime("%H:%M:%S"),
-            duration=duration,
-        ))
+        lines.append(
+            tr(
+                "run_time",
+                start=self.start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                end=self.end_time.strftime("%H:%M:%S"),
+                duration=duration,
+            )
+        )
         lines.append("")
-        
+
         # Summary
         lines.append(tr("summary_title"))
         lines.append("")
-        
+
         total = len(self.results)
         passed = sum(1 for r in self.results if r.passed)
         failed = total - passed
         critical = sum(1 for r in self.results if not r.passed and r.severity == "critical")
         warnings = sum(1 for r in self.results if not r.passed and r.severity == "warning")
-        
+
         lines.append(tr("devices", count=len(self.devices)))
         lines.append(tr("checks", count=len(self.checks)))
         lines.append(tr("total_results", count=total))
-        
+
         if total > 0:
             lines.append(tr("passed", count=passed, pct=100 * passed / total))
             lines.append(tr("failed", count=failed, pct=100 * failed / total))
         lines.append("")
-        
+
         # Overall status
         if critical > 0:
             lines.append(tr("status_critical"))
@@ -229,7 +231,7 @@ class ReportGenerator:
         else:
             lines.append(tr("status_healthy"))
         lines.append("")
-        
+
         # Critical issues
         critical_results = [r for r in self.results if not r.passed and r.severity == "critical"]
         if critical_results:
@@ -238,7 +240,7 @@ class ReportGenerator:
             for r in critical_results:
                 lines.append(f"- **{r.device}** / {r.check_name}: {r.message}")
             lines.append("")
-        
+
         # Warnings
         warning_results = [r for r in self.results if not r.passed and r.severity == "warning"]
         if warning_results:
@@ -247,31 +249,31 @@ class ReportGenerator:
             for r in warning_results:
                 lines.append(f"- **{r.device}** / {r.check_name}: {r.message}")
             lines.append("")
-        
+
         # Device summary table
         lines.append(tr("device_summary_title"))
         lines.append("")
         lines.append(tr("table_header"))
         lines.append("|---|---|---|---|")
-        
+
         for r in self.results:
             status = "✅" if r.passed else ("🔴" if r.severity == "critical" else "⚠️")
             # Truncate long messages
             msg = r.message[:60] + "..." if len(r.message) > 60 else r.message
             lines.append(f"| {r.device} | {r.check_name} | {status} | {msg} |")
-        
+
         lines.append("")
-        
+
         # Footer
         lines.append(tr("footer", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        
+
         return "\n".join(lines)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Export report data as dict (for JSON output)."""
         total = len(self.results)
         passed = sum(1 for r in self.results if r.passed)
-        
+
         return {
             "profile": self.profile_name,
             "description": self.description,

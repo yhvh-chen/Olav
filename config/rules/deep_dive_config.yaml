@@ -1,0 +1,121 @@
+# Deep Dive Workflow Configuration
+#
+# Defines OSI layer mappings and diagnostic strategies for funnel debugging.
+# This replaces hardcoded dictionaries in deep_dive.py
+
+# OSI Layer to SuzieQ table mapping
+# Used for layered diagnostic approach (漏斗式排错)
+osi_layer_tables:
+  L1:  # Physical Layer
+    - interfaces     # Interface state (up/down, errors, counters)
+    - lldp          # Link Layer Discovery Protocol neighbors
+  
+  L2:  # Data Link Layer
+    - macs          # MAC address table
+    - vlan          # VLAN configuration
+    - stp           # Spanning Tree Protocol state (if available)
+  
+  L3:  # Network Layer
+    - arpnd         # ARP/ND table (IP-to-MAC resolution)
+    - routes        # Routing table entries
+    - evpnVni       # EVPN VNI mappings (if available)
+  
+  L4:  # Transport Layer + Routing Protocols
+    - bgp           # BGP peering and prefix information
+    - ospfIf        # OSPF interface configuration
+    - ospfNbr       # OSPF neighbor relationships
+
+# Diagnostic order for funnel debugging
+# Start from lower layers (physical) and work up to application
+diagnostic_order:
+  - L1  # Check physical first
+  - L2  # Then data link
+  - L3  # Then network
+  - L4  # Then transport/routing
+
+# Layer descriptions for LLM context
+layer_descriptions:
+  L1: "Physical layer - Check interface status, link state, and neighbor discovery (LLDP)"
+  L2: "Data link layer - Verify MAC learning, VLAN configuration, and L2 switching"
+  L3: "Network layer - Validate IP addressing, ARP resolution, and routing tables"
+  L4: "Transport/Routing protocols - Examine BGP peers, OSPF neighbors, and protocol state"
+
+# Problem indicators per layer
+layer_problem_indicators:
+  L1:
+    - "state: down"
+    - "adminState: down"
+    - "no LLDP neighbors"
+    - "CRC errors"
+    - "input errors"
+  
+  L2:
+    - "no MAC entries"
+    - "VLAN mismatch"
+    - "STP blocking"
+    - "trunk not allowed"
+  
+  L3:
+    - "ARP timeout"
+    - "no route to host"
+    - "ICMP unreachable"
+    - "VRF mismatch"
+  
+  L4:
+    - "BGP state: Idle"
+    - "BGP state: Active"
+    - "OSPF state: Init"
+    - "no routes learned"
+    - "prefix missing"
+
+# Deep Dive trigger patterns
+# Queries matching these patterns will use Deep Dive workflow
+# Supports regex patterns (case-insensitive matching)
+trigger_patterns:
+  # 审计类 (Audit)
+  - "审计"
+  - "audit"
+  - "检查.*完整性"
+  - "check.*integrity"
+  - "配置.*完整"
+  # 批量操作 (Batch)
+  - "审计所有"
+  - "批量"
+  - "全部设备"
+  - "所有设备"
+  - "所有.*路由器"
+  - "all.*router"
+  - "多.*设备"
+  - "multiple.*device"
+  - "多台"
+  - "\\d+台"
+  # 复杂诊断
+  - "为什么"
+  - "why"
+  - "诊断.*问题"
+  - "diagnose.*issue"
+  - "排查.*故障"
+  - "troubleshoot"
+  - "根因"
+  - "root.*cause"
+  - "影响范围"
+  - "impact.*scope"
+  - "为什么.*无法访问"
+  - "从.*到.*"
+  - "跨"
+  - "深入分析"
+  - "详细排查"
+  - "彻底检查"
+  - "递归"
+  # 特定协议深度分析
+  - "MPLS.*配置"
+  - "BGP.*安全"
+  - "OSPF.*邻居"
+  - "ISIS.*拓扑"
+
+# Recursion limits for deep dive
+recursion_limits:
+  max_depth: 3        # Maximum recursion depth
+  max_devices: 30     # Maximum devices per batch
+  timeout_seconds: 300  # Timeout per iteration
+

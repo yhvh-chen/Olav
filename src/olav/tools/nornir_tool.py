@@ -8,12 +8,13 @@ Uses CLIAdapter and NetconfAdapter for standardized ToolOutput returns.
 import logging
 import time
 from pathlib import Path
-from typing import Literal, Any
+from typing import Any, Literal
+
+from langchain_core.tools import tool
 
 from olav.execution.backends.nornir_sandbox import NornirSandbox
 from olav.tools.adapters import CLIAdapter, NetconfAdapter
 from olav.tools.base import ToolOutput, ToolRegistry
-from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,7 @@ ToolRegistry.register(CLITool())
 # Compatibility Wrappers (@tool) for legacy workflow/test integration
 # ---------------------------------------------------------------------------
 
+
 @tool
 async def netconf_tool(
     device: str,
@@ -462,6 +464,7 @@ async def netconf_tool(
         "error": result.error,
         "__meta__": {"elapsed_ms": result.metadata.get("elapsed_ms")},
     }
+
 
 @tool
 async def cli_tool(

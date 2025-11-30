@@ -4,7 +4,6 @@ This implementation reads SuzieQ Parquet files directly using pandas/pyarrow,
 with dynamic schema loading from OpenSearch, avoiding hardcoded dictionaries.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -36,7 +35,7 @@ async def suzieq_schema_search(query: str) -> dict[str, Any]:
 
     This tool helps you find what data SuzieQ can query. Always call this
     BEFORE using suzieq_query to discover available tables, fields, and methods.
-    
+
     Schema is loaded dynamically from OpenSearch suzieq-schema index.
 
     Args:
@@ -64,7 +63,7 @@ async def suzieq_schema_search(query: str) -> dict[str, Any]:
     """
     # Load schema dynamically from OpenSearch
     suzieq_schema = await _schema_loader.load_suzieq_schema()
-    
+
     # Simple keyword matching
     keywords = query.lower().split()
     matching_tables = [

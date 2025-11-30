@@ -29,9 +29,7 @@ class IntentResult(BaseModel):
     category: Literal["suzieq", "netbox", "openconfig", "cli", "netconf"] = Field(
         description="Classified intent category"
     )
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Confidence score between 0 and 1"
-    )
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score between 0 and 1")
     reasoning: str = Field(description="Brief explanation for the classification")
 
 
@@ -93,9 +91,7 @@ class LLMIntentClassifier:
         """Lazy-load prompt template."""
         if self._prompt is None:
             try:
-                self._prompt = prompt_manager.load_prompt(
-                    "core", "intent_classification"
-                )
+                self._prompt = prompt_manager.load_prompt("core", "intent_classification")
             except Exception as e:
                 logger.warning(f"Failed to load prompt template: {e}")
                 self._prompt = self._get_fallback_prompt()

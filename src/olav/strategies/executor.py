@@ -101,7 +101,7 @@ class StrategyExecutor:
         self._fast_config = fast_path_config or {}
         self._deep_config = deep_path_config or {}
         self._batch_config = batch_path_config or {}
-        
+
         # Lazy-initialized strategies
         self._fast_path: FastPathStrategy | None = None
         self._deep_path: DeepPathStrategy | None = None
@@ -116,41 +116,34 @@ class StrategyExecutor:
         """Lazily initialize FastPathStrategy with ToolRegistry."""
         if self._fast_path is None:
             from olav.tools.base import ToolRegistry
-            
+
             # Import tools package to trigger self-registration
             if not ToolRegistry.list_tools():
                 import olav.tools  # noqa: F401 - triggers tool registration
-            
+
             self._fast_path = FastPathStrategy(
-                llm=self.llm,
-                tool_registry=ToolRegistry,
-                **self._fast_config
+                llm=self.llm, tool_registry=ToolRegistry, **self._fast_config
             )
         return self._fast_path
-    
+
     def _get_deep_path(self) -> DeepPathStrategy:
         """Lazily initialize DeepPathStrategy."""
         if self._deep_path is None:
             from olav.tools.base import ToolRegistry
-            
+
             # Import tools package to trigger self-registration
             if not ToolRegistry.list_tools():
                 import olav.tools  # noqa: F401 - triggers tool registration
-            
+
             self._deep_path = DeepPathStrategy(
-                llm=self.llm,
-                tool_registry=ToolRegistry,
-                **self._deep_config
+                llm=self.llm, tool_registry=ToolRegistry, **self._deep_config
             )
         return self._deep_path
-    
+
     def _get_batch_path(self) -> BatchPathStrategy:
         """Lazily initialize BatchPathStrategy."""
         if self._batch_path is None:
-            self._batch_path = BatchPathStrategy(
-                llm=self.llm,
-                **self._batch_config
-            )
+            self._batch_path = BatchPathStrategy(llm=self.llm, **self._batch_config)
         return self._batch_path
 
     async def execute(
@@ -237,12 +230,12 @@ class StrategyExecutor:
         """
         if strategy == "fast_path":
             return await self._execute_fast_path(user_query, context)
-        elif strategy == "deep_path":
+        if strategy == "deep_path":
             return await self._execute_deep_path(user_query, context)
-        elif strategy == "batch_path":
+        if strategy == "batch_path":
             return await self._execute_batch_path(batch_config_path, context)
-        else:
-            raise ValueError(f"Unknown strategy: {strategy}")
+        msg = f"Unknown strategy: {strategy}"
+        raise ValueError(msg)
 
     async def _execute_fast_path(
         self, user_query: str, context: dict[str, Any] | None
@@ -334,12 +327,20 @@ class StrategyExecutor:
         return ExecutionResult(
             success=True,
             strategy_used="batch_path",
-            answer=result.summary.summary_text if hasattr(result.summary, "summary_text") else str(result.summary),
+            answer=result.summary.summary_text
+            if hasattr(result.summary, "summary_text")
+            else str(result.summary),
             metadata={
                 "config_name": result.config_name,
-                "devices_checked": result.summary.total_devices if hasattr(result.summary, "total_devices") else None,
-                "checks_passed": result.summary.passed if hasattr(result.summary, "passed") else None,
-                "checks_failed": result.summary.failed if hasattr(result.summary, "failed") else None,
+                "devices_checked": result.summary.total_devices
+                if hasattr(result.summary, "total_devices")
+                else None,
+                "checks_passed": result.summary.passed
+                if hasattr(result.summary, "passed")
+                else None,
+                "checks_failed": result.summary.failed
+                if hasattr(result.summary, "failed")
+                else None,
                 "violations": result.violations,
             },
         )

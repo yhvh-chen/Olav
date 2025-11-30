@@ -3,7 +3,7 @@
 This module provides dynamic schema loading from OpenSearch indices,
 replacing hardcoded schema dictionaries with runtime queries.
 
-Supports both in-memory caching (for backward compatibility) and 
+Supports both in-memory caching (for backward compatibility) and
 distributed Redis caching (for production deployments).
 """
 
@@ -23,16 +23,16 @@ logger = logging.getLogger(__name__)
 
 class SchemaLoader:
     """Load and cache schemas from OpenSearch indices.
-    
+
     Provides dynamic schema discovery for Schema-Aware tools,
     eliminating hardcoded schema dictionaries.
-    
+
     Features:
     - Lazy loading from OpenSearch
     - Redis distributed caching (preferred) or in-memory fallback
     - Fallback to minimal schema on errors
     - Support for multiple schema indices
-    
+
     Cache Strategy:
     - If CacheManager provided: uses Redis for distributed caching
     - Otherwise: uses in-memory dict with TTL (legacy mode)
@@ -42,10 +42,10 @@ class SchemaLoader:
         self,
         memory: OpenSearchMemory | None = None,
         cache_ttl: int = 3600,
-        cache_manager: "CacheManager | None" = None,
+        cache_manager: CacheManager | None = None,
     ) -> None:
         """Initialize schema loader.
-        
+
         Args:
             memory: OpenSearch memory instance (created if None)
             cache_ttl: Cache time-to-live in seconds (default: 3600 = 1 hour)
@@ -65,11 +65,12 @@ class SchemaLoader:
         return self._memory
 
     @property
-    def cache_manager(self) -> "CacheManager | None":
+    def cache_manager(self) -> CacheManager | None:
         """Get cache manager (lazy-load from global if not provided)."""
         if self._cache_manager is None:
             try:
                 from olav.core.cache import get_cache_manager
+
                 self._cache_manager = get_cache_manager()
             except Exception as e:
                 logger.debug(f"CacheManager not available: {e}")
@@ -77,10 +78,10 @@ class SchemaLoader:
 
     async def _get_from_cache(self, cache_key: str) -> dict[str, Any] | None:
         """Get schema from cache (Redis or memory).
-        
+
         Args:
             cache_key: Cache key (e.g., "suzieq_schema")
-            
+
         Returns:
             Cached schema or None
         """
@@ -90,17 +91,17 @@ class SchemaLoader:
             if cached:
                 logger.debug(f"Redis cache HIT: {cache_key}")
                 return cached
-        
+
         # Fallback to in-memory cache
         if self._is_cache_valid(cache_key):
             logger.debug(f"Memory cache HIT: {cache_key}")
             return self._cache[cache_key]
-        
+
         return None
 
     async def _set_to_cache(self, cache_key: str, schema: dict[str, Any]) -> None:
         """Set schema in cache (both Redis and memory).
-        
+
         Args:
             cache_key: Cache key
             schema: Schema data to cache
@@ -109,7 +110,7 @@ class SchemaLoader:
         if self.cache_manager:
             await self.cache_manager.set_schema(cache_key, schema, ttl=self._cache_ttl)
             logger.debug(f"Redis cache SET: {cache_key}")
-        
+
         # Also update in-memory cache for performance
         self._cache[cache_key] = schema
         self._cache_timestamp[cache_key] = time.time()
@@ -119,7 +120,7 @@ class SchemaLoader:
         force_reload: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Load SuzieQ schema from OpenSearch suzieq-schema index.
-        
+
         Returns schema dictionary mapping table names to their metadata:
         {
             "bgp": {
@@ -129,23 +130,23 @@ class SchemaLoader:
             },
             ...
         }
-        
+
         Args:
             force_reload: Force reload from OpenSearch, bypass cache
-            
+
         Returns:
             Dictionary mapping table names to schema metadata
         """
         cache_key = "suzieq"
-        
+
         # Check cache (Redis then memory)
         if not force_reload:
             cached = await self._get_from_cache(cache_key)
             if cached:
                 return cached
-        
+
         logger.info("Loading SuzieQ schema from OpenSearch...")
-        
+
         try:
             # Query OpenSearch for all schemas
             results = await self.memory.search_schema(
@@ -153,30 +154,30 @@ class SchemaLoader:
                 query={"match_all": {}},
                 size=100,  # Should cover all SuzieQ tables
             )
-            
+
             if not results:
                 logger.warning("No schemas found in suzieq-schema index, using fallback")
                 return self._get_fallback_suzieq_schema()
-            
+
             # Convert to schema dictionary
             schema_dict = {}
             for doc in results:
                 table_name = doc.get("table")
                 if not table_name:
                     continue
-                
+
                 schema_dict[table_name] = {
                     "fields": doc.get("fields", []),
                     "description": doc.get("description", f"{table_name} table"),
                     "methods": doc.get("methods", ["get", "summarize"]),
                 }
-            
+
             # Update cache (Redis + memory)
             await self._set_to_cache(cache_key, schema_dict)
-            
+
             logger.info(f"✓ Loaded {len(schema_dict)} SuzieQ table schemas from OpenSearch")
             return schema_dict
-            
+
         except Exception as e:
             logger.error(f"Failed to load SuzieQ schema from OpenSearch: {e}")
             logger.warning("Falling back to minimal hardcoded schema")
@@ -187,87 +188,130 @@ class SchemaLoader:
         force_reload: bool = False,
     ) -> list[dict[str, Any]]:
         """Load OpenConfig YANG schema from OpenSearch.
-        
+
         Returns list of XPath entries with descriptions and examples.
-        
+
         Args:
             force_reload: Force reload from OpenSearch, bypass cache
-            
+
         Returns:
             List of XPath schema entries
         """
         cache_key = "openconfig"
-        
+
         # Check cache (Redis then memory)
         if not force_reload:
             cached = await self._get_from_cache(cache_key)
             if cached:
                 return cached
-        
+
         logger.info("Loading OpenConfig schema from OpenSearch...")
-        
+
         try:
             results = await self.memory.search_schema(
                 index="openconfig-schema",
                 query={"match_all": {}},
                 size=1000,
             )
-            
+
             # Update cache (Redis + memory)
             await self._set_to_cache(cache_key, results)
-            
+
             logger.info(f"✓ Loaded {len(results)} OpenConfig XPath schemas")
             return results
-            
+
         except Exception as e:
             logger.error(f"Failed to load OpenConfig schema: {e}")
             return []
 
     def _is_cache_valid(self, cache_key: str) -> bool:
         """Check if cached schema is still valid.
-        
+
         Args:
             cache_key: Cache key to check
-            
+
         Returns:
             True if cache exists and not expired
         """
         if cache_key not in self._cache:
             return False
-        
+
         age = time.time() - self._cache_timestamp.get(cache_key, 0)
         return age < self._cache_ttl
 
     def _get_fallback_suzieq_schema(self) -> dict[str, dict[str, Any]]:
         """Return minimal fallback schema if OpenSearch is unavailable.
-        
+
         Contains only the most essential tables for basic functionality.
         Updated to match actual SuzieQ table names (ospfNbr, ospfIf).
         """
         logger.warning("Using minimal fallback SuzieQ schema (10 core tables)")
         return {
             "bgp": {
-                "fields": ["namespace", "hostname", "vrf", "peer", "asn", "state", "peerAsn", "peerHostname"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "peer",
+                    "asn",
+                    "state",
+                    "peerAsn",
+                    "peerHostname",
+                ],
                 "description": "BGP protocol information",
                 "methods": ["get", "summarize"],
             },
             "interfaces": {
-                "fields": ["namespace", "hostname", "ifname", "state", "adminState", "mtu", "speed"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "ifname",
+                    "state",
+                    "adminState",
+                    "mtu",
+                    "speed",
+                ],
                 "description": "Network interface status",
                 "methods": ["get", "summarize"],
             },
             "routes": {
-                "fields": ["namespace", "hostname", "vrf", "prefix", "nexthopIp", "protocol", "metric"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "prefix",
+                    "nexthopIp",
+                    "protocol",
+                    "metric",
+                ],
                 "description": "Routing table entries",
                 "methods": ["get", "summarize"],
             },
             "ospfNbr": {
-                "fields": ["namespace", "hostname", "vrf", "ifname", "area", "state", "peerRouterId", "peerIP"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "ifname",
+                    "area",
+                    "state",
+                    "peerRouterId",
+                    "peerIP",
+                ],
                 "description": "OSPF neighbor information",
                 "methods": ["get", "summarize"],
             },
             "ospfIf": {
-                "fields": ["namespace", "hostname", "vrf", "ifname", "area", "state", "networkType", "cost"],
+                "fields": [
+                    "namespace",
+                    "hostname",
+                    "vrf",
+                    "ifname",
+                    "area",
+                    "state",
+                    "networkType",
+                    "cost",
+                ],
                 "description": "OSPF interface configuration",
                 "methods": ["get", "summarize"],
             },
@@ -304,11 +348,73 @@ class SchemaLoader:
         if self.cache_manager:
             await self.cache_manager.clear_all_schemas()
             logger.info("Redis schema cache cleared")
-        
+
         # Clear in-memory cache
         self._cache.clear()
         self._cache_timestamp.clear()
         logger.info("Memory schema cache cleared")
+
+    async def get_key_fields(self, table: str) -> list[str]:
+        """Get key fields for a SuzieQ table from schema.
+
+        Queries the suzieq-schema-fields index for fields with is_key=true.
+        Falls back to sensible defaults if schema query fails.
+
+        Args:
+            table: SuzieQ table name (e.g., "bgp", "interfaces")
+
+        Returns:
+            List of key field names for deduplication
+        """
+        cache_key = f"key_fields_{table}"
+
+        # Check cache first
+        cached = await self._get_from_cache(cache_key)
+        if cached:
+            return cached.get("fields", ["hostname"])
+
+        try:
+            # Query OpenSearch for key fields
+            results = await self.memory.search_schema(
+                index="suzieq-schema-fields",
+                query={"bool": {"must": [{"term": {"table": table}}, {"term": {"is_key": True}}]}},
+                size=20,
+            )
+
+            key_fields = [doc.get("field") for doc in results if doc.get("field")]
+
+            if not key_fields:
+                # Fall back to hostname if no key fields found
+                key_fields = ["hostname"]
+
+            # Cache the result
+            await self._set_to_cache(cache_key, {"fields": key_fields})
+
+            logger.debug(f"Key fields for {table}: {key_fields}")
+            return key_fields
+
+        except Exception as e:
+            logger.warning(f"Failed to get key fields for {table}: {e}, using fallback")
+            return self._get_fallback_key_fields(table)
+
+    def _get_fallback_key_fields(self, table: str) -> list[str]:
+        """Return fallback key fields when OpenSearch is unavailable.
+
+        Provides sensible defaults based on common SuzieQ table structures.
+        """
+        fallback_keys = {
+            "bgp": ["hostname", "peer", "afi", "safi"],
+            "interfaces": ["hostname", "ifname"],
+            "routes": ["hostname", "vrf", "prefix"],
+            "lldp": ["hostname", "ifname"],
+            "device": ["hostname"],
+            "ospfNbr": ["hostname", "vrf", "ifname", "peerRouterId"],
+            "ospfIf": ["hostname", "vrf", "ifname"],
+            "macs": ["hostname", "vlan", "macaddr"],
+            "arpnd": ["hostname", "ipAddress"],
+            "vlan": ["hostname", "vlan"],
+        }
+        return fallback_keys.get(table, ["hostname"])
 
 
 # Global singleton instance for convenience
@@ -317,9 +423,9 @@ _global_loader: SchemaLoader | None = None
 
 def get_schema_loader() -> SchemaLoader:
     """Get global SchemaLoader singleton.
-    
+
     Creates SchemaLoader with auto-loaded CacheManager for Redis support.
-    
+
     Returns:
         Global SchemaLoader instance
     """

@@ -33,7 +33,7 @@ Usage:
 
     # Self-register at module load
     ToolRegistry.register(MyTool())
-    
+
     # Retrieve tool
     tool = ToolRegistry.get_tool("my_tool")
 """
@@ -176,7 +176,7 @@ class ToolRegistry:
     """
     Simple registry for OLAV tools.
 
-    Provides a centralized registry for tool instances. Tools register 
+    Provides a centralized registry for tool instances. Tools register
     themselves at module load time via ToolRegistry.register().
 
     Note: discover_tools() has been removed - tools self-register on import.

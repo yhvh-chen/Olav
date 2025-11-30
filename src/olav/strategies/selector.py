@@ -28,6 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
+from olav.core.json_utils import robust_structured_output
 from olav.strategies.batch_path import BatchPathStrategy
 from olav.strategies.deep_path import DeepPathStrategy
 from olav.strategies.fast_path import FastPathStrategy
@@ -292,10 +293,13 @@ class StrategySelector:
 }}}}
 """
 
-        response = await self.llm.ainvoke([SystemMessage(content=prompt)])
-
         try:
-            decision = StrategyDecision.model_validate_json(response.content)
+            # Use robust_structured_output for reliable JSON extraction
+            decision = await robust_structured_output(
+                llm=self.llm,
+                output_class=StrategyDecision,
+                prompt=prompt,
+            )
             logger.info(
                 f"LLM classification: {decision.strategy} (confidence: {decision.confidence:.2f})"
             )
