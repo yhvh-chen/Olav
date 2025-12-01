@@ -300,13 +300,32 @@ export async function deleteSession(threadId: string, token: string): Promise<vo
 // ============================================
 // Topology API
 // ============================================
-import type { TopologyData } from './types';
+import type { TopologyData, HistoryListResponse } from './types';
 
 /**
  * Get network topology data
  */
 export async function getTopology(token: string): Promise<TopologyData> {
   return fetchApi<TopologyData>('/topology', {}, token);
+}
+
+// ============================================
+// Execution History API
+// ============================================
+
+/**
+ * Get execution history with optional pagination
+ */
+export async function getHistory(
+  token: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<HistoryListResponse> {
+  return fetchApi<HistoryListResponse>(
+    `/sessions?limit=${limit}&offset=${offset}`,
+    {},
+    token,
+  );
 }
 
 export { ApiError };

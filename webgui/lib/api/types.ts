@@ -177,3 +177,27 @@ export interface TopologyData {
   edges: TopologyEdge[];
   last_updated?: string;
 }
+
+// ============================================
+// Execution History Types
+// ============================================
+export interface HistoryItem {
+  thread_id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  first_message?: string;
+  workflow_type?: WorkflowType | string;
+  status?: 'completed' | 'interrupted' | 'failed';
+}
+
+export interface HistoryListResponse {
+  sessions: HistoryItem[];
+  total: number;
+}
+
+export interface HistoryFilter {
+  workflow_type?: WorkflowType | 'all';
+  date_range?: 'today' | 'week' | 'month' | 'all';
+  search?: string;
+}

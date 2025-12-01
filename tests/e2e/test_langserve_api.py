@@ -661,6 +661,45 @@ async def test_topology_endpoint(base_url: str, server_token: str):
         assert response_no_auth.status_code == 401, "Expected 401 without auth"
 
 
+@pytest.mark.asyncio
+async def test_history_endpoint(base_url: str, server_token: str):
+    """Test execution history endpoint (sessions with pagination).
+    
+    Validates:
+    - GET /sessions?limit=10&offset=0 returns 200 with valid token
+    - Response contains sessions array and total count
+    - Session items have required fields
+    - Returns 401 without token
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test with valid token and pagination params
+        response = await client.get(
+            f"{base_url}/sessions?limit=10&offset=0",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        data = response.json()
+        
+        # Validate response structure (matches HistoryListResponse)
+        assert "sessions" in data, "Response missing 'sessions' field"
+        assert "total" in data, "Response missing 'total' field"
+        assert isinstance(data["sessions"], list), "sessions should be a list"
+        assert isinstance(data["total"], int), "total should be an integer"
+        
+        # Validate session item structure if any sessions exist
+        if data["sessions"]:
+            session = data["sessions"][0]
+            assert "thread_id" in session, "Session missing 'thread_id' field"
+            assert "created_at" in session, "Session missing 'created_at' field"
+            assert "updated_at" in session, "Session missing 'updated_at' field"
+            assert "message_count" in session, "Session missing 'message_count' field"
+        
+        # Test without token (should fail)
+        response_no_auth = await client.get(f"{base_url}/sessions?limit=10&offset=0")
+        assert response_no_auth.status_code == 401, "Expected 401 without auth"
+
+
 # ============================================
 # Summary Report
 # ============================================
@@ -683,4 +722,5 @@ def print_test_summary(request):
     print("  ✓ LangServe RemoteRunnable SDK compatibility")
     print("  ✓ Sessions API (list, get, delete)")
     print("  ✓ Topology API (network graph data)")
+    print("  ✓ History API (execution history with pagination)")
     print("="*60)

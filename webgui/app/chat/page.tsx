@@ -203,6 +203,12 @@ export default function ChatPage() {
             </div>
             <div className="flex items-center gap-4">
               <a
+                href="/history"
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                📜 历史
+              </a>
+              <a
                 href="/topology"
                 className="text-sm text-muted-foreground hover:text-foreground"
               >
