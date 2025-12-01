@@ -47,6 +47,8 @@ OPTIONAL_ENDPOINTS = {
 }
 
 TIMEOUT = 10
+MAX_RETRIES = 30  # Max retries for NetBox connectivity
+RETRY_DELAY = 10  # Seconds between retries
 
 
 def fail(code: int, msg: str, context: Dict[str, Any] | None = None) -> None:
@@ -67,7 +69,40 @@ def request(url: str, token: str) -> requests.Response:
     return requests.get(url, headers={"Authorization": f"Token {token}"}, timeout=TIMEOUT)
 
 
+def check_root_with_retry(url: str, token: str, max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY) -> None:
+    """Check NetBox API root with retry logic for slow startup."""
+    import time
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = request(f"{url}/api/", token)
+            if resp.status_code == 200:
+                print(f"[OK] NetBox API reachable after {attempt} attempt(s)")
+                return
+            elif resp.status_code in (401, 403):
+                # Auth error - NetBox is up but token issue
+                fail(3, f"Authentication failed status={resp.status_code}", {"attempt": attempt})
+            elif resp.status_code >= 500:
+                print(f"[RETRY {attempt}/{max_retries}] Server error {resp.status_code}, retrying in {delay}s...")
+            elif resp.status_code == 404:
+                print(f"[RETRY {attempt}/{max_retries}] API root 404, retrying in {delay}s...")
+            else:
+                print(f"[RETRY {attempt}/{max_retries}] Unexpected status {resp.status_code}, retrying in {delay}s...")
+        except requests.exceptions.ConnectionError as e:
+            print(f"[RETRY {attempt}/{max_retries}] Connection refused, NetBox starting... (retry in {delay}s)")
+        except requests.exceptions.Timeout:
+            print(f"[RETRY {attempt}/{max_retries}] Request timeout, retrying in {delay}s...")
+        except Exception as e:
+            print(f"[RETRY {attempt}/{max_retries}] Error: {e}, retrying in {delay}s...")
+        
+        if attempt < max_retries:
+            time.sleep(delay)
+    
+    fail(2, f"NetBox not reachable after {max_retries} attempts ({max_retries * delay}s)", {"url": url})
+
+
 def check_root(url: str, token: str) -> None:
+    """Legacy single-attempt check (kept for compatibility)."""
     resp = request(f"{url}/api/", token)
     if resp.status_code >= 500:
         fail(2, f"Server error {resp.status_code} reaching /api/", {"status": resp.status_code})
@@ -112,10 +147,14 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--autocreate", action="store_true", help="Auto-create baseline site/role/tag if missing")
+    parser.add_argument("--retries", type=int, default=MAX_RETRIES, help=f"Max retries for NetBox connectivity (default: {MAX_RETRIES})")
+    parser.add_argument("--delay", type=int, default=RETRY_DELAY, help=f"Delay between retries in seconds (default: {RETRY_DELAY})")
     args = parser.parse_args()
 
     base_url, token = get_env()
-    check_root(base_url, token)
+    
+    # Use retry-enabled check for robustness during container startup
+    check_root_with_retry(base_url, token, max_retries=args.retries, delay=args.delay)
 
     if args.autocreate or os.getenv("AUTOCREATE_BASELINE") == "1":
         auto_create_baseline(base_url, token)
