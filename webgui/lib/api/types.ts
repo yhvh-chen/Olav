@@ -201,3 +201,32 @@ export interface HistoryFilter {
   date_range?: 'today' | 'week' | 'month' | 'all';
   search?: string;
 }
+
+// ============================================
+// Inspection Report Types
+// ============================================
+export interface ReportSummary {
+  id: string;
+  filename: string;
+  title: string;
+  config_name?: string;
+  executed_at: string;
+  device_count: number;
+  check_count: number;
+  pass_count: number;
+  fail_count: number;
+  status: string;
+}
+
+export interface ReportListResponse {
+  reports: ReportSummary[];
+  total: number;
+}
+
+export interface ReportDetail extends ReportSummary {
+  content: string;  // Raw markdown content
+  description?: string;
+  duration?: string;
+  pass_rate: number;
+  warnings: string[];
+}

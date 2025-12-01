@@ -700,6 +700,93 @@ async def test_history_endpoint(base_url: str, server_token: str):
         assert response_no_auth.status_code == 401, "Expected 401 without auth"
 
 
+@pytest.mark.asyncio
+async def test_reports_list_endpoint(base_url: str, server_token: str):
+    """Test inspection reports list endpoint.
+    
+    Validates:
+    - GET /reports returns 200 with valid token
+    - Response contains reports array and total count
+    - Returns 401 without token
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test with valid token
+        response = await client.get(
+            f"{base_url}/reports?limit=10&offset=0",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        data = response.json()
+        
+        # Validate response structure
+        assert "reports" in data, "Response missing 'reports' field"
+        assert "total" in data, "Response missing 'total' field"
+        assert isinstance(data["reports"], list), "reports should be a list"
+        assert isinstance(data["total"], int), "total should be an integer"
+        
+        # Validate report item structure if any reports exist
+        if data["reports"]:
+            report = data["reports"][0]
+            assert "id" in report, "Report missing 'id' field"
+            assert "filename" in report, "Report missing 'filename' field"
+            assert "title" in report, "Report missing 'title' field"
+            assert "executed_at" in report, "Report missing 'executed_at' field"
+            assert "status" in report, "Report missing 'status' field"
+        
+        # Test without token (should fail)
+        response_no_auth = await client.get(f"{base_url}/reports")
+        assert response_no_auth.status_code == 401, "Expected 401 without auth"
+
+
+@pytest.mark.asyncio
+async def test_reports_detail_endpoint(base_url: str, server_token: str):
+    """Test inspection report detail endpoint.
+    
+    Validates:
+    - GET /reports/{id} returns 200 for existing report
+    - Response contains full report content
+    - Returns 404 for non-existent report
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # First get the list to find a report ID
+        list_response = await client.get(
+            f"{base_url}/reports?limit=1",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        
+        assert list_response.status_code == 200
+        list_data = list_response.json()
+        
+        if list_data["reports"]:
+            report_id = list_data["reports"][0]["id"]
+            
+            # Test getting the report detail
+            detail_response = await client.get(
+                f"{base_url}/reports/{report_id}",
+                headers={"Authorization": f"Bearer {server_token}"}
+            )
+            
+            assert detail_response.status_code == 200, f"Expected 200, got {detail_response.status_code}"
+            detail_data = detail_response.json()
+            
+            # Validate full report structure
+            assert "id" in detail_data, "Report missing 'id' field"
+            assert "content" in detail_data, "Report missing 'content' field"
+            assert "title" in detail_data, "Report missing 'title' field"
+            assert "pass_rate" in detail_data, "Report missing 'pass_rate' field"
+            assert "warnings" in detail_data, "Report missing 'warnings' field"
+            assert isinstance(detail_data["content"], str), "content should be a string"
+            assert len(detail_data["content"]) > 0, "content should not be empty"
+        
+        # Test non-existent report (should return 404)
+        response_404 = await client.get(
+            f"{base_url}/reports/non_existent_report_12345",
+            headers={"Authorization": f"Bearer {server_token}"}
+        )
+        assert response_404.status_code == 404, "Expected 404 for non-existent report"
+
+
 # ============================================
 # Summary Report
 # ============================================
@@ -723,4 +810,5 @@ def print_test_summary(request):
     print("  ✓ Sessions API (list, get, delete)")
     print("  ✓ Topology API (network graph data)")
     print("  ✓ History API (execution history with pagination)")
+    print("  ✓ Reports API (inspection reports list and detail)")
     print("="*60)

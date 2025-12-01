@@ -300,7 +300,7 @@ export async function deleteSession(threadId: string, token: string): Promise<vo
 // ============================================
 // Topology API
 // ============================================
-import type { TopologyData, HistoryListResponse } from './types';
+import type { TopologyData, HistoryListResponse, ReportListResponse, ReportDetail } from './types';
 
 /**
  * Get network topology data
@@ -326,6 +326,35 @@ export async function getHistory(
     {},
     token,
   );
+}
+
+// ============================================
+// Inspection Reports API
+// ============================================
+
+/**
+ * Get list of inspection reports
+ */
+export async function getReports(
+  token: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<ReportListResponse> {
+  return fetchApi<ReportListResponse>(
+    `/reports?limit=${limit}&offset=${offset}`,
+    {},
+    token,
+  );
+}
+
+/**
+ * Get a specific inspection report by ID
+ */
+export async function getReport(
+  reportId: string,
+  token: string,
+): Promise<ReportDetail> {
+  return fetchApi<ReportDetail>(`/reports/${reportId}`, {}, token);
 }
 
 export { ApiError };

@@ -898,6 +898,7 @@ export interface ExecutionPlan {
 | ~~会话历史侧边栏~~ | ~~P2~~ | ✅ 已完成 (SessionSidebar + /sessions API) |
 | ~~网络拓扑页面~~ | ~~P3~~ | ✅ 已完成 (React Flow + /topology API) |
 | ~~执行历史页面~~ | ~~P2~~ | ✅ 已完成 (history-store + /history page) |
+| ~~巡检报告阅读~~ | ~~P2~~ | ✅ 已完成 (reports-store + /reports page + detail view) |
 
 ---
 

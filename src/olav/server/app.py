@@ -1094,6 +1094,297 @@ def create_app() -> FastAPI:
         )
 
     # ============================================
+    # Inspection Reports API
+    # ============================================
+    class ReportSummary(BaseModel):
+        """Summary of an inspection report."""
+        id: str
+        filename: str
+        title: str
+        config_name: str | None = None
+        executed_at: str
+        device_count: int = 0
+        check_count: int = 0
+        pass_count: int = 0
+        fail_count: int = 0
+        status: str = "unknown"  # "通过", "需要关注", "严重问题"
+
+    class ReportListResponse(BaseModel):
+        """Response for report list endpoint."""
+        reports: list[ReportSummary]
+        total: int
+
+    class ReportDetail(BaseModel):
+        """Full inspection report details."""
+        id: str
+        filename: str
+        content: str  # Raw markdown content
+        title: str
+        config_name: str | None = None
+        description: str | None = None
+        executed_at: str
+        duration: str | None = None
+        device_count: int = 0
+        check_count: int = 0
+        pass_count: int = 0
+        fail_count: int = 0
+        pass_rate: float = 0.0
+        status: str = "unknown"
+        warnings: list[str] = []
+
+    def _parse_report_metadata(content: str, filename: str) -> dict:
+        """Parse metadata from inspection report markdown content."""
+        import re
+        
+        metadata = {
+            "title": "巡检报告",
+            "config_name": None,
+            "description": None,
+            "executed_at": "",
+            "duration": None,
+            "device_count": 0,
+            "check_count": 0,
+            "pass_count": 0,
+            "fail_count": 0,
+            "pass_rate": 0.0,
+            "status": "unknown",
+            "warnings": [],
+        }
+        
+        # Extract title
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if title_match:
+            metadata["title"] = title_match.group(1).strip()
+        
+        # Extract config name
+        config_match = re.search(r'\*\*巡检配置\*\*:\s*(.+)$', content, re.MULTILINE)
+        if config_match:
+            metadata["config_name"] = config_match.group(1).strip()
+        
+        # Extract description
+        desc_match = re.search(r'\*\*描述\*\*:\s*(.+)$', content, re.MULTILINE)
+        if desc_match:
+            metadata["description"] = desc_match.group(1).strip()
+        
+        # Extract execution time
+        time_match = re.search(r'\*\*执行时间\*\*:\s*(.+)$', content, re.MULTILINE)
+        if time_match:
+            time_str = time_match.group(1).strip()
+            # Extract duration if present (e.g., "2025-11-27 23:10:51 → 23:10:51 (0.2秒)")
+            dur_match = re.search(r'\(([^)]+)\)', time_str)
+            if dur_match:
+                metadata["duration"] = dur_match.group(1)
+            # Extract start time
+            start_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', time_str)
+            if start_match:
+                metadata["executed_at"] = start_match.group(1)
+        
+        # Fallback: extract date from filename (e.g., inspection_xxx_20251127_231051.md)
+        if not metadata["executed_at"]:
+            date_match = re.search(r'(\d{8})_(\d{6})', filename)
+            if date_match:
+                d, t = date_match.groups()
+                metadata["executed_at"] = f"{d[:4]}-{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}"
+        
+        # Extract device count
+        device_match = re.search(r'\*\*设备数\*\*:\s*(\d+)', content)
+        if device_match:
+            metadata["device_count"] = int(device_match.group(1))
+        
+        # Extract check count
+        check_match = re.search(r'\*\*检查项\*\*:\s*(\d+)', content)
+        if check_match:
+            metadata["check_count"] = int(check_match.group(1))
+        
+        # Extract pass/fail counts
+        pass_match = re.search(r'✅\s*\*\*通过\*\*:\s*(\d+)', content)
+        if pass_match:
+            metadata["pass_count"] = int(pass_match.group(1))
+        
+        fail_match = re.search(r'❌\s*\*\*失败\*\*:\s*(\d+)', content)
+        if fail_match:
+            metadata["fail_count"] = int(fail_match.group(1))
+        
+        # Calculate pass rate
+        total = metadata["pass_count"] + metadata["fail_count"]
+        if total > 0:
+            metadata["pass_rate"] = round(metadata["pass_count"] / total * 100, 1)
+        
+        # Extract status
+        status_match = re.search(r'整体状态:\s*(.+)$', content, re.MULTILINE)
+        if status_match:
+            metadata["status"] = status_match.group(1).strip()
+        
+        # Extract warnings
+        warning_section = re.search(r'## ⚠️ 警告.*?\n((?:- .+\n)+)', content)
+        if warning_section:
+            warnings = re.findall(r'- (.+)$', warning_section.group(1), re.MULTILINE)
+            metadata["warnings"] = warnings[:10]  # Limit to 10 warnings
+        
+        return metadata
+
+    @app.get(
+        "/reports",
+        response_model=ReportListResponse,
+        tags=["reports"],
+        summary="List inspection reports",
+        responses={
+            200: {
+                "description": "List of inspection reports",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "reports": [
+                                {
+                                    "id": "inspection_bgp_peer_audit_20251127_231051",
+                                    "filename": "inspection_bgp_peer_audit_20251127_231051.md",
+                                    "title": "🔍 网络巡检报告",
+                                    "config_name": "bgp_peer_audit",
+                                    "executed_at": "2025-11-27 23:10:51",
+                                    "device_count": 3,
+                                    "check_count": 2,
+                                    "pass_count": 3,
+                                    "fail_count": 3,
+                                    "status": "需要关注"
+                                }
+                            ],
+                            "total": 1
+                        }
+                    }
+                },
+            },
+        },
+    )
+    async def list_reports(
+        current_user: CurrentUser,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> ReportListResponse:
+        """
+        List inspection reports from data/inspection-reports/.
+
+        Reports are ordered by execution time (newest first).
+
+        **Required**: Bearer token authentication
+
+        **Query Parameters**:
+        - `limit`: Maximum reports to return (default: 50)
+        - `offset`: Pagination offset (default: 0)
+        """
+        from pathlib import Path
+        
+        reports_dir = Path("data/inspection-reports")
+        reports: list[ReportSummary] = []
+        
+        try:
+            if reports_dir.exists():
+                # Get all markdown files
+                report_files = sorted(
+                    reports_dir.glob("*.md"),
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True
+                )
+                
+                total = len(report_files)
+                
+                # Apply pagination
+                paginated_files = report_files[offset:offset + limit]
+                
+                for report_file in paginated_files:
+                    try:
+                        content = report_file.read_text(encoding="utf-8")
+                        metadata = _parse_report_metadata(content, report_file.name)
+                        
+                        report_id = report_file.stem  # filename without extension
+                        
+                        reports.append(ReportSummary(
+                            id=report_id,
+                            filename=report_file.name,
+                            title=metadata["title"],
+                            config_name=metadata["config_name"],
+                            executed_at=metadata["executed_at"],
+                            device_count=metadata["device_count"],
+                            check_count=metadata["check_count"],
+                            pass_count=metadata["pass_count"],
+                            fail_count=metadata["fail_count"],
+                            status=metadata["status"],
+                        ))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse report {report_file.name}: {e}")
+                        continue
+                
+                return ReportListResponse(reports=reports, total=total)
+            
+        except Exception as e:
+            logger.error(f"Failed to list reports: {e}")
+        
+        return ReportListResponse(reports=[], total=0)
+
+    @app.get(
+        "/reports/{report_id}",
+        response_model=ReportDetail,
+        tags=["reports"],
+        summary="Get inspection report details",
+        responses={
+            200: {
+                "description": "Inspection report details",
+            },
+            404: {
+                "description": "Report not found",
+            },
+        },
+    )
+    async def get_report(
+        report_id: str,
+        current_user: CurrentUser,
+    ) -> ReportDetail:
+        """
+        Get full details of an inspection report.
+
+        **Required**: Bearer token authentication
+
+        **Example Request**:
+        ```bash
+        curl http://localhost:8000/reports/inspection_bgp_peer_audit_20251127_231051 \\
+          -H "Authorization: Bearer <token>"
+        ```
+        """
+        from pathlib import Path
+        
+        reports_dir = Path("data/inspection-reports")
+        report_file = reports_dir / f"{report_id}.md"
+        
+        if not report_file.exists():
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        try:
+            content = report_file.read_text(encoding="utf-8")
+            metadata = _parse_report_metadata(content, report_file.name)
+            
+            return ReportDetail(
+                id=report_id,
+                filename=report_file.name,
+                content=content,
+                title=metadata["title"],
+                config_name=metadata["config_name"],
+                description=metadata["description"],
+                executed_at=metadata["executed_at"],
+                duration=metadata["duration"],
+                device_count=metadata["device_count"],
+                check_count=metadata["check_count"],
+                pass_count=metadata["pass_count"],
+                fail_count=metadata["fail_count"],
+                pass_rate=metadata["pass_rate"],
+                status=metadata["status"],
+                warnings=metadata["warnings"],
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to read report {report_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ============================================
     # LangServe Routes
     # ============================================
     # NOTE: LangServe routes now mounted dynamically in lifespan after orchestrator init.
