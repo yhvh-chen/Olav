@@ -29,6 +29,8 @@ import json
 import logging
 from typing import Any, ClassVar, Literal
 
+from olav.core.prompt_manager import prompt_manager
+
 from pydantic import BaseModel, Field
 
 from olav.core.llm import LLMFactory
@@ -305,11 +307,20 @@ class LLMDiffEngine:
         """
         model = self._get_model()
 
-        # Format the prompt
-        prompt = COMPARISON_PROMPT.format(
-            netbox_json=json.dumps(netbox_data, indent=2, default=str),
-            network_json=json.dumps(network_data, indent=2, default=str),
-        )
+        # Load prompt from YAML
+        try:
+            prompt = prompt_manager.load_prompt(
+                "sync",
+                "netbox_comparison",
+                netbox_json=json.dumps(netbox_data, indent=2, default=str),
+                network_json=json.dumps(network_data, indent=2, default=str),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load netbox_comparison prompt: {e}, using fallback")
+            prompt = COMPARISON_PROMPT.format(
+                netbox_json=json.dumps(netbox_data, indent=2, default=str),
+                network_json=json.dumps(network_data, indent=2, default=str),
+            )
 
         try:
             result = await model.ainvoke(prompt)

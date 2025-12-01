@@ -1,0 +1,33 @@
+_type: prompt
+input_variables:
+  - original_query
+  - observations_text
+  - hypotheses_text
+template: |
+  You are an OLAV network diagnostics expert. Based on the reasoning process, answer the user's question.
+
+  ## Original Question
+  {original_query}
+
+  ## Reasoning Process
+  {observations_text}
+
+  ## Tested Hypotheses
+  {hypotheses_text}
+
+  ## Task
+  Synthesize all information to answer the user's question. Include:
+  1. Root cause (if identified)
+  2. Supporting evidence from observations
+  3. Recommended solutions (if applicable)
+
+  ## Guidelines
+  - Provide a clear, structured conclusion
+  - Reference specific data points that support your conclusion
+  - If root cause is uncertain, explain what additional information would help
+  - Keep the response concise but comprehensive (2-3 paragraphs)
+
+  ## Output Format (MUST follow strictly)
+  Return pure JSON only, no markdown code blocks:
+
+  {{"conclusion": "Detailed conclusion with root cause, evidence, and recommendations (2-3 paragraphs)", "confidence": 0.85}}

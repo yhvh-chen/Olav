@@ -328,14 +328,16 @@ services:
     ports:
       - "8001:8000"  # External 8001 to avoid conflict with legacy app
     volumes:
-      - ./config:/app/config:ro
+      - ./config:/app/config
       - ./data/suzieq-parquet:/app/data/suzieq-parquet:ro  # SuzieQ Parquet data (read-only)
-      - ./data/documents:/app/data/documents:ro  # Documents for RAG
+      - ./data/documents:/app/data/documents  # Documents for RAG (writable for uploads)
       - ./data/generated_configs:/app/data/generated_configs  # Generated configs (writable)
+      - ./data/inspection-reports:/app/data/inspection-reports  # Inspection reports (writable)
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - OLAV_USE_DYNAMIC_ROUTER=true
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3100
       # Override for Docker network (containers use service name, not localhost)
       - POSTGRES_URI=postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
       - OPENSEARCH_URL=http://opensearch:9200

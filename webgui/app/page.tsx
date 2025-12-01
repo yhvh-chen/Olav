@@ -2,18 +2,19 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuthStore } from '@/lib/stores/auth-store';
+import { useAuthStore, useHasHydrated } from '@/lib/stores/auth-store';
 import { getMe } from '@/lib/api/client';
 
 function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { token: storedToken, setToken, setUser, _hasHydrated } = useAuthStore();
+  const { token: storedToken, setToken, setUser } = useAuthStore();
+  const hasHydrated = useHasHydrated();
   const [status, setStatus] = useState<'hydrating' | 'checking' | 'redirecting'>('hydrating');
 
   useEffect(() => {
-    // Wait for Zustand to hydrate from localStorage first
-    if (!_hasHydrated) {
+    // Wait for component to mount (hydration complete)
+    if (!hasHydrated) {
       return;
     }
 
@@ -52,7 +53,7 @@ function HomeContent() {
     };
 
     handleAuth();
-  }, [router, searchParams, storedToken, setToken, setUser, _hasHydrated]);
+  }, [router, searchParams, storedToken, setToken, setUser, hasHydrated]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">

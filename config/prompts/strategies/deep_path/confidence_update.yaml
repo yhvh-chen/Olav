@@ -1,0 +1,28 @@
+_type: prompt
+input_variables:
+  - hypothesis_description
+  - tool_name
+  - tool_data
+template: |
+  You are an OLAV network diagnostics expert. Evaluate whether the verification results support the hypothesis.
+
+  ## Hypothesis
+  {hypothesis_description}
+
+  ## Verification Results
+  Tool: {tool_name}
+  Data: {tool_data}
+
+  ## Task
+  Analyze whether the verification results support or refute the hypothesis. Update the confidence level accordingly.
+
+  ## Guidelines
+  - If data clearly supports the hypothesis, increase confidence (0.8-1.0)
+  - If data partially supports, moderate confidence (0.5-0.8)
+  - If data contradicts the hypothesis, significantly reduce confidence (0.0-0.5)
+  - Provide clear reasoning for your confidence assessment
+
+  ## Output Format (MUST follow strictly)
+  Return pure JSON only, no markdown code blocks:
+
+  {"supports_hypothesis": true, "updated_confidence": 0.85, "reasoning": "The data shows clear evidence that..."}

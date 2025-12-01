@@ -50,8 +50,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from olav.core.prompt_manager import prompt_manager
 from olav.schemas.inspection import CheckTask, InspectionConfig
 from olav.tools.base import ToolOutput, ToolRegistry
 from olav.validation.threshold import DeviceValidationResult, ThresholdValidator
@@ -437,8 +439,6 @@ class BatchPathStrategy:
         Returns:
             Updated parameters dictionary with LLM-compiled values
         """
-        from langchain_core.messages import HumanMessage, SystemMessage
-
         # Schema-Aware: discover correct table names
         schema_section = ""
         if tool == "suzieq_query":
@@ -451,10 +451,10 @@ class BatchPathStrategy:
                     ]
                 )
                 schema_section = f"""
-## 🎯 Schema Discovery 结果（必须使用这些表名）
+## 🎯 Schema Discovery Results (MUST use these table names)
 {schema_tables}
 
-⚠️ 重要：请使用上述发现的表名，不要猜测或使用其他表名！
+⚠️ IMPORTANT: Use the table names discovered above - DO NOT guess!
 """
 
         # Build capability guide section for this tool
@@ -462,46 +462,25 @@ class BatchPathStrategy:
         tool_prefix = tool.split("_")[0] if "_" in tool else tool
         if tool_prefix in self._tool_guides:
             capability_guide = f"""
-## 工具能力参考
+## Tool Capability Reference
 {self._tool_guides[tool_prefix][:800]}...
 """
 
-        # System prompt for intent compilation
-        system_prompt = f"""你是网络运维专家，负责将自然语言意图编译为工具参数。
+        try:
+            system_prompt = prompt_manager.load_prompt(
+                "strategies/batch_path",
+                "intent_compilation",
+                tool=tool,
+                schema_section=schema_section,
+                capability_guide=capability_guide,
+                intent=intent,
+                existing_params=str(existing_params),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load intent_compilation prompt: {e}, using fallback")
+            system_prompt = f"Compile intent '{intent}' for tool {tool} into parameters."
 
-工具: {tool}
-{schema_section}
-{capability_guide}
-## 参数格式
-
-**suzieq_query**:
-- table: SuzieQ 表名（必须使用 Schema Discovery 发现的表名）
-- method: 查询方法 (get, summarize, unique, aver)
-- hostname: 设备名过滤
-- max_age_hours: 数据时间范围（默认 24）
-- 其他字段过滤根据 Schema 定义
-
-**cli_execute**:
-- command: CLI 命令字符串
-- device: 设备主机名 (自动填充)
-
-**netconf_get**:
-- xpath: NETCONF XPath 路径
-- device: 设备主机名 (自动填充)
-
-**任务**: 将用户意图转换为参数字典。只返回 JSON 格式的参数，不要解释。
-
-⚠️ 重要：如果有 Schema Discovery 结果，必须使用发现的表名，不要猜测！
-
-返回格式：
-{{"<参数名>": "<参数值>", ...}}
-"""
-
-        human_prompt = f"""意图: {intent}
-
-已有参数: {existing_params}
-
-请补充或完善参数字典，只返回 JSON。"""
+        human_prompt = f"Intent: {intent}\n\nExisting parameters: {existing_params}\n\nReturn ONLY JSON."
 
         try:
             response = await self.llm.ainvoke(

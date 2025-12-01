@@ -1,0 +1,35 @@
+_type: prompt
+input_variables:
+  - query
+  - candidates_desc
+template: |
+  You are the OLAV network operations platform intent router. Select the most appropriate workflow from the candidates based on the user query.
+
+  ## User Query
+  {query}
+
+  ## Candidate Workflows
+  {candidates_desc}
+
+  ## Task
+
+  Analyze the query intent and select the best matching workflow. If the query intent is unclear or does not belong to any candidate workflow, select the candidate with the highest confidence.
+
+  ## Response Format
+
+  Return a JSON object:
+
+  ```json
+  {{
+    "workflow_name": "Name of the selected workflow (must be one of the candidates)",
+    "confidence": 0.95,
+    "reasoning": "Brief explanation for the selection"
+  }}
+  ```
+
+  ## Selection Guidelines
+
+  1. **Exact Match**: Prefer workflows that directly address the query's primary intent
+  2. **Capability Match**: Consider which workflow has the tools needed to fulfill the request
+  3. **Scope Match**: Match the query scope (single device vs. batch) to workflow capabilities
+  4. **Safety First**: For ambiguous write operations, prefer workflows with HITL approval

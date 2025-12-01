@@ -80,8 +80,8 @@ olav-webgui/
 │   │   │   ├── page.tsx          # 新会话
 │   │   │   └── [sessionId]/
 │   │   │       └── page.tsx      # 历史会话
-│   │   ├── topology/
-│   │   │   └── page.tsx          # 网络拓扑
+│   │   ├── inventory/
+│   │   │   └── page.tsx          # 资产清单
 │   │   ├── devices/
 │   │   │   └── page.tsx          # 设备管理
 │   │   ├── history/
@@ -111,7 +111,7 @@ olav-webgui/
 │   │   ├── approval-card.tsx
 │   │   ├── execution-plan.tsx
 │   │   └── confirmation-dialog.tsx
-│   ├── topology/                 # 拓扑组件
+│   ├── inventory/                 # 资产组件
 │   │   ├── network-graph.tsx
 │   │   ├── device-node.tsx
 │   │   └── connection-edge.tsx
@@ -381,34 +381,29 @@ useEffect(() => {
 - 确认/拒绝按钮
 - 超时自动取消
 
-### 4. Topology (`/topology`)
+### 4. Inventory (`/inventory`)
 
 ```
 ┌──────┬──────────────────────────────────────────┐
-│      │  Network Topology          [Refresh]    │
+│      │  📦 资产清单              [Refresh]    │
 │ S    ├──────────────────────────────────────────┤
-│ I    │                                          │
-│ D    │         ┌─────┐                          │
-│ E    │         │ R1  │                          │
-│ B    │         └──┬──┘                          │
-│ A    │       ┌────┴────┐                        │
-│ R    │    ┌──┴──┐   ┌──┴──┐                     │
-│      │    │ SW1 │   │ SW2 │                     │
-│      │    └──┬──┘   └──┬──┘                     │
-│      │    ┌──┴──┐   ┌──┴──┐                     │
-│      │    │ H1  │   │ H2  │                     │
-│      │    └─────┘   └─────┘                     │
-│      │                                          │
+│ I    │  Search: [_______________] Status: [All]│
+│ D    ├──────────────────────────────────────────┤
+│ E    │  Device  | Status | IP      | Vendor   │
+│ B    │  R1      | ● Up   | .101    | Cisco    │
+│ A    │  R2      | ● Up   | .102    | Cisco    │
+│ R    │  SW1     | ● Up   | .105    | Cisco    │
+│      │  SW2     | ○ Down | .106    | Cisco    │
 │      ├──────────────────────────────────────────┤
-│      │ Selected: R1 │ Status: Up │ Query ➤     │
+│      │ 6 devices • 5 online • 1 offline        │
 └──────┴──────────────────────────────────────────┘
 ```
 
 **功能**:
-- React Flow 交互式拓扑
+- 设备列表（来自 SuzieQ device 数据）
+- 状态筛选（在线/离线）
+- 搜索过滤
 - 点击设备查询详情
-- 故障节点高亮
-- 缩放/平移
 
 ### 5. History (`/history`)
 
@@ -896,7 +891,7 @@ export interface ExecutionPlan {
 | ~~Docker Compose 集成~~ | ~~P1~~ | ✅ 已完成 (olav-webgui service) |
 | ~~Single Token Auth 对齐~~ | ~~P1~~ | ✅ 已完成 (removed JWT) |
 | ~~会话历史侧边栏~~ | ~~P2~~ | ✅ 已完成 (SessionSidebar + /sessions API) |
-| ~~网络拓扑页面~~ | ~~P3~~ | ✅ 已完成 (React Flow + /topology API) |
+| ~~资产清单页面~~ | ~~P3~~ | ✅ 已完成 (/inventory API + 列表表格) |
 | ~~执行历史页面~~ | ~~P2~~ | ✅ 已完成 (history-store + /history page) |
 | ~~巡检报告阅读~~ | ~~P2~~ | ✅ 已完成 (reports-store + /reports page + detail view) |
 | ~~巡检配置管理~~ | ~~P3~~ | ✅ 已完成 (inspections-store + /inspections page + run) |
@@ -1049,4 +1044,305 @@ services:
     environment:
       - OLAV_API_TOKEN=${OLAV_API_TOKEN}
 ```
+
+---
+
+## Phase 2: UI Enhancement (v0.2.0)
+
+### 2.1 Collapsible Sidebar Layout
+
+**目标**：优化侧边栏交互，支持收起/展开
+
+**布局设计**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 收起状态 (48px 宽)                                          │
+├────┬────────────────────────────────────────────────────────┤
+│ ☰  │                                                        │
+│    │              OLAV                                      │
+│    │                                                        │
+│    │     [主聊天区域]                                        │
+│    │                                                        │
+│ +  │                                                        │
+└────┴────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 展开状态 (280px 宽)                                         │
+├────────────────┬────────────────────────────────────────────┤
+│ ☰  OLAV        │                                            │
+│ ───────────────│              OLAV                          │
+│ 📝 今天的会话   │                                            │
+│ • BGP 邻居查询  │     [主聊天区域]                            │
+│ • OSPF 状态检查 │                                            │
+│ 📅 昨天         │                                            │
+│ • 配置审计...   │                                            │
+│ ───────────────│                                            │
+│ ⚙️ Settings    │                                            │
+│ + New Chat     │                                            │
+└────────────────┴────────────────────────────────────────────┘
+```
+
+**实现要点**：
+- Hamburger 按钮移至左上角
+- 收起时只显示图标栏（☰ 上方，+ 下方）
+- 展开时显示完整历史列表
+- 使用 `framer-motion` 或 CSS `transform` 动画
+- 状态持久化到 `localStorage`
+
+### 2.2 Settings Panel
+
+**位置**：侧边栏底部，历史列表和 New Chat 之间
+
+**设置项**：
+
+| 设置 | 类型 | 说明 |
+|------|------|------|
+| Language | Select | UI 语言 + Agent 回复语言 (zh/en/ja) |
+| LLM Provider | Select (只读) | openai/ollama/azure |
+| Model Name | Text (只读) | 当前使用的模型 |
+| Base URL | Text (只读) | LLM API 地址 |
+| Temperature | Slider (只读) | 0-2 范围 |
+
+**UI 设计**：
+
+```
+┌──────────────────────────────────────┐
+│ ⚙️ Settings                    [×]  │
+├──────────────────────────────────────┤
+│                                      │
+│ Language                             │
+│ ┌────────────────────────────────┐   │
+│ │ 中文 (Chinese)              ▼ │   │
+│ └────────────────────────────────┘   │
+│                                      │
+│ ─────────── LLM Configuration ───────│
+│ (Read-only, restart server to change)│
+│                                      │
+│ Provider: openai                     │
+│ Model: gpt-4-turbo                   │
+│ Base URL: https://api.openai.com    │
+│ Temperature: 0.7                     │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+**i18n 实现**：
+- 使用 `next-intl` 库
+- 翻译文件：`messages/en.json`, `messages/zh.json`
+- Agent 语言通过 API 请求 `lang` 参数传递
+
+### 2.3 Execution Log Panel
+
+**目标**：流式展示工具调用和推理过程
+
+**UI 设计**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🔄 Execution Log                              [▼ 收起]      │
+├─────────────────────────────────────────────────────────────┤
+│ 10:23:45  🧠 Thinking: Analyzing user query...              │
+│ 10:23:46  🔧 Tool: suzieq_schema_search                     │
+│           └─ params: {query: "ospf peers"}                  │
+│ 10:23:47  ✅ Result: Found tables: ospfNbr, ospfIf          │
+│ 10:23:48  🔧 Tool: suzieq_query                             │
+│           └─ params: {table: "ospfNbr", method: "get"}      │
+│ 10:23:49  ✅ Result: 6 records returned                     │
+│ 10:23:50  💡 Formatting answer...                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**交互**：
+- 默认收起，显示一行摘要："执行中... 已调用 2 个工具"
+- 点击展开查看完整日志
+- 自动滚动到最新条目
+- 颜色编码：🧠 蓝色思考、🔧 绿色工具、❌ 红色错误
+
+**后端事件类型**：
+- `thinking`: 思考过程
+- `tool_start`: 工具开始调用
+- `tool_end`: 工具调用完成
+- `error`: 错误信息
+
+### 2.4 Stop Button
+
+**目标**：执行过程中可中断请求
+
+**状态变化**：
+
+```
+发送前:    [  Send  ➤ ]  (蓝色)
+执行中:    [  Stop  ■ ]  (红色)
+完成后:    [  Send  ➤ ]  (蓝色)
+```
+
+**实现要点**：
+- 使用 `AbortController` 中断 fetch 请求
+- 中断后显示 "已取消" 消息
+- 清理 pending 状态
+
+### 2.5 Markdown Table Support
+
+**目标**：正确渲染 GFM 表格
+
+**依赖**：
+- `remark-gfm` 插件
+- Tailwind 表格样式
+
+**效果对比**：
+
+CLI 输出（Rich 格式）：
+```
+  Hostname   Interface   State 
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  R1         Gi1         full
+  R2         Gi2         full
+```
+
+WebGUI 渲染（HTML 表格）：
+```
+┌──────────┬───────────┬───────┐
+│ Hostname │ Interface │ State │
+├──────────┼───────────┼───────┤
+│ R1       │ Gi1       │ full  │
+│ R2       │ Gi2       │ full  │
+└──────────┴───────────┴───────┘
+```
+
+### 2.6 Dynamic Session Titles
+
+**目标**：用第一条消息作为会话标题
+
+**实现方案**：
+
+1. **前端**：发送消息后，截取前 30 个字符作为标题
+2. **后端**：`/sessions` API 支持 `title` 字段更新
+
+**API 变更**：
+
+```typescript
+// PATCH /sessions/{session_id}
+{
+  "title": "查询 R1 的 BGP 邻居状态"
+}
+```
+
+**显示效果**：
+
+```
+📝 今天
+• 查询 R1 的 BGP 邻居状态
+• OSPF 配置检查
+• 批量审计边界路由器
+
+📅 昨天
+• 网络延迟诊断
+• NetBox 设备同步
+```
+
+---
+
+## Phase 2 Implementation Checklist
+
+| 功能 | 前端 | 后端 | 状态 |
+|------|------|------|------|
+| 2.5 Markdown 表格 | 安装 remark-gfm + CSS | 无 | ✅ 已完成 |
+| 2.6 会话标题 | first_message 字段映射 | /sessions API 已返回 | ✅ 已完成 |
+| 2.4 停止按钮 | AbortController + UI | 无 | ✅ 已完成 |
+| 2.1 侧边栏收起 | 布局重构 + CSS 动画 | 无 | ✅ 已完成 |
+| 2.3 执行日志面板 | ExecutionLogPanel 组件 | 使用现有 SSE 事件 | ✅ 已完成 |
+| 2.2 Settings + i18n | SettingsPanel + 语言选择 | GET /config | ✅ 已完成 |
+
+### Phase 2 完成文件列表
+
+| 文件 | 改动说明 |
+|------|----------|
+| `components/session-sidebar.tsx` | 添加 `isCollapsed`, `onToggleCollapse`, `onOpenSettings` props；重构为收起/展开布局 |
+| `components/execution-log-panel.tsx` | 新增：可折叠执行日志面板，显示 thinking/tool 事件 |
+| `components/settings-panel.tsx` | 新增：设置弹窗，语言选择 + LLM 配置只读显示 |
+| `lib/stores/chat-store.ts` | 添加 `abortController`, `toolHistory`, `abortStreaming()`, `addToolToHistory()` |
+| `lib/api/client.ts` | `streamWorkflow()` 添加 `signal` 参数支持中断 |
+| `app/chat/page.tsx` | 集成所有新组件：停止按钮、侧边栏收起、执行日志、设置面板 |
+| `lib/i18n/translations.ts` | 新增：简单 i18n 翻译系统（中/英文） |
+| `lib/i18n/context.tsx` | 新增：React Context 提供全局语言状态 |
+| `app/layout.tsx` | 添加 `LanguageProvider` 包装 |
+
+---
+
+## Known Issues (待修复)
+
+> **记录日期**: 2025-12-01
+
+### Issue #1: 会话 Token 不持久化
+
+**现象**：登录后刷新页面，会重新跳转到登录页面，Token 未正确持久化。
+
+**预期行为**：Token 应保存在 `localStorage`，刷新后自动恢复登录状态。
+
+**可能原因**：
+- `auth-store.ts` 的 `persist` middleware 配置问题
+- `AuthGuard` 组件在 hydration 前错误重定向
+- Next.js SSR/CSR hydration 不匹配
+
+**修复方向**：
+- 检查 Zustand persist 配置
+- 在 AuthGuard 中添加 hydration 状态检查
+- 使用 `useEffect` 延迟验证直到客户端 hydrated
+
+---
+
+### Issue #2: 流式内容只显示 "Thinking..."
+
+**现象**：对话过程中只显示 "Thinking..."，没有实时展示 LLM 输出的流式内容。
+
+**预期行为**：应在一个小 box 中实时展示 LLM 正在生成的回复内容（打字机效果）。
+
+**可能原因**：
+- `streamWorkflow()` 返回的事件格式与前端解析不匹配
+- `processStreamEvent()` 未正确提取 token 内容
+- LangServe stream 格式需要额外解析
+
+**修复方向**：
+- 调试 SSE 事件内容，确认实际返回的数据结构
+- 检查 `normalizeStreamEvent()` 函数逻辑
+- 确保 `streamingContent` 状态正确更新
+
+---
+
+### Issue #3: Markdown 表格不渲染
+
+**现象**：Agent 返回的表格数据未正确渲染为 HTML 表格。
+
+**预期行为**：GFM 格式的 Markdown 表格应渲染为带边框的 HTML 表格。
+
+**可能原因**：
+- `remark-gfm` 插件未正确配置
+- `react-markdown` 的 table 组件缺少样式
+- CSS 样式未应用到表格元素
+
+**修复方向**：
+- 验证 `MessageBubble` 中 `remarkPlugins={[remarkGfm]}` 配置
+- 添加 Tailwind 表格样式 (`@apply border` 等)
+- 检查 `markdown.css` 或 `globals.css` 中的表格样式
+
+---
+
+### Issue #4: 新对话不显示在历史栏
+
+**现象**：点击 "New Chat" 创建新对话后，发送消息，历史栏不显示新会话。
+
+**预期行为**：发送第一条消息后，会话应立即出现在左侧历史栏。
+
+**可能原因**：
+- 新会话未调用 `/sessions` API 创建
+- `SessionSidebar` 未监听会话创建事件
+- 需要手动刷新会话列表
+
+**修复方向**：
+- 发送消息后调用 `fetchSessions()` 刷新列表
+- 或者在前端本地添加新会话到 `sessions` 数组
+- 确保后端 `/orchestrator/stream` 返回 `thread_id`
+
+---
 

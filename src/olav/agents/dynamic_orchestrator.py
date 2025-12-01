@@ -29,6 +29,7 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from pydantic import BaseModel, Field
 
 from olav.core.json_utils import robust_structured_output
+from olav.core.prompt_manager import prompt_manager
 from olav.workflows.registry import WorkflowMetadata, WorkflowRegistry
 
 logger = logging.getLogger(__name__)
@@ -199,22 +200,12 @@ class DynamicIntentRouter:
             [f"{i + 1}. **{c.name}**: {c.description}" for i, c in enumerate(candidates)]
         )
 
-        prompt = f"""你是 OLAV 网络运维平台的意图路由器。根据用户查询，从候选工作流中选择最合适的一个。
-
-用户查询: {query}
-
-候选工作流:
-{candidates_desc}
-
-请分析查询意图，选择最匹配的工作流。如果查询意图不明确或不属于任何候选工作流，选择置信度最高的候选。
-
-返回 JSON 格式:
-{{
-    "workflow_name": "选中的工作流名称（必须是候选之一）",
-    "confidence": 0.95,
-    "reasoning": "简短说明选择原因"
-}}
-"""
+        prompt = prompt_manager.load_prompt(
+            "agents",
+            "intent_router",
+            query=query,
+            candidates_desc=candidates_desc,
+        )
 
         # Use robust_structured_output for reliable JSON parsing
         try:

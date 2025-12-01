@@ -1347,33 +1347,28 @@ class DeepDiveWorkflow(BaseWorkflow):
         for phase in diagnosis_plan.get("phases", []):
             phase_findings = phase.get("findings", [])
             phases_summary.append(
-                f"**{phase['name']}** ({phase['layer']}): {len(phase_findings)} 项发现"
+                f"**{phase['name']}** ({phase['layer']}): {len(phase_findings)} findings"
             )
             for f in phase_findings[:3]:
                 phases_summary.append(f"  - {f}")
 
-        # Use LLM to generate root cause analysis
-        prompt = f"""你是网络故障分析专家。根据漏斗式诊断的结果，生成根因分析报告。
+        # Format findings for prompt
+        findings_text = "\n".join(f"- {f}" for f in findings) if findings else "- No obvious anomalies found"
 
-## 原始问题
-{user_query}
-
-## 拓扑分析
-- 受影响设备: {", ".join(topology.get("affected_devices", []))}
-- 故障范围: {topology.get("scope", "unknown")}
-
-## 诊断发现
-{chr(10).join(phases_summary)}
-
-## 所有发现
-{chr(10).join(f"- {f}" for f in findings) if findings else "- 未发现明显异常"}
-
-请生成根因分析报告，包括:
-1. **根因识别**: 最可能的故障原因
-2. **证据链**: 支持该结论的关键发现
-3. **建议操作**: 修复步骤或进一步排查方向
-
-使用 Markdown 格式输出。"""
+        # Load prompt from YAML
+        try:
+            prompt = prompt_manager.load_prompt(
+                "workflows/deep_dive",
+                "root_cause_report",
+                user_query=user_query,
+                affected_devices=", ".join(topology.get("affected_devices", [])),
+                scope=topology.get("scope", "unknown"),
+                phases_summary=chr(10).join(phases_summary),
+                findings=findings_text,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load root_cause_report prompt: {e}, using fallback")
+            prompt = f"Generate root cause analysis for: {user_query}\nFindings: {findings_text}"
 
         response = await self.llm.ainvoke(
             [

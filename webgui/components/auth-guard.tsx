@@ -2,9 +2,9 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { useAuthStore } from '@/lib/stores/auth-store';
+import { useAuthStore, useHasHydrated } from '@/lib/stores/auth-store';
 
-// 公开路由 - 不需要认证检查
+// Public routes - no auth check needed
 const PUBLIC_PATHS = ['/login'];
 
 interface AuthGuardProps {
@@ -16,44 +16,38 @@ function AuthGuardContent({ children }: AuthGuardProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { token } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const hasHydrated = useHasHydrated();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
+    if (!hasHydrated) return;
 
     const isPublicPath = PUBLIC_PATHS.includes(pathname);
     const hasUrlToken = searchParams.get('token');
     
-    // 根路径由其自身处理（它会验证 token 并跳转）
+    // Root path handled by itself
     if (pathname === '/') {
       setChecked(true);
       return;
     }
 
-    // 公开路由：
-    // - 如果 URL 有 token 参数，让页面自己处理验证
-    // - 如果没有 URL token 但已有存储 token，不自动跳转（让用户可以重新输入）
+    // Public routes
     if (isPublicPath) {
       setChecked(true);
       return;
     }
 
-    // 私有路由需要 token
+    // Private routes need token
     if (!token) {
       router.replace('/login');
       return;
     }
 
     setChecked(true);
-  }, [mounted, token, pathname, router, searchParams]);
+  }, [hasHydrated, token, pathname, router, searchParams]);
 
-  // 等待客户端挂载
-  if (!mounted || !checked) {
+  // Wait for hydration and check
+  if (!hasHydrated || !checked) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />

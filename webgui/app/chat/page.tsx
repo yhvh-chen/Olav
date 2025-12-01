@@ -5,21 +5,26 @@ import { useChatStore, processStreamEvent } from '@/lib/stores/chat-store';
 import { streamWorkflow, getSession } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/stores/auth-store';
 import { useSessionStore } from '@/lib/stores/session-store';
+import { useLanguage } from '@/lib/i18n/context';
 import { HITLDialog } from '@/components/hitl-dialog';
 import { MessageBubble } from '@/components/message-bubble';
-import { ModeSelector, type WorkflowMode } from '@/components/mode-selector';
 import { SessionSidebar } from '@/components/session-sidebar';
+import { ToolsMenu, type ToolType } from '@/components/tools-menu';
+import { InspectionModal } from '@/components/inspection-modal';
+import { DocumentModal } from '@/components/document-modal';
+import { ExecutionLogPanel } from '@/components/execution-log-panel';
+import { SettingsPanel } from '@/components/settings-panel';
 import type { Message, ThinkingStep, ToolEvent, InterruptEvent } from '@/lib/api/types';
 
 // Thinking Steps Panel Component
-function ThinkingPanel({ steps }: { steps: ThinkingStep[] }) {
+function ThinkingPanel({ steps, label }: { steps: ThinkingStep[]; label: string }) {
   if (steps.length === 0) return null;
   
   return (
     <div className="mb-2 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-medium text-yellow-600">
         <span className="animate-pulse">🧠</span>
-        <span>思考过程</span>
+        <span>{label}</span>
       </div>
       <div className="space-y-1 text-xs text-muted-foreground">
         {steps.map((step, i) => (
@@ -34,12 +39,12 @@ function ThinkingPanel({ steps }: { steps: ThinkingStep[] }) {
 }
 
 // Active Tool Indicator Component
-function ToolIndicator({ tool }: { tool: ToolEvent }) {
+function ToolIndicator({ tool, label }: { tool: ToolEvent; label: string }) {
   return (
     <div className="mb-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
       <div className="flex items-center gap-2 text-xs">
         <span className="animate-spin">⚙️</span>
-        <span className="font-medium text-blue-600">执行工具: {tool.name}</span>
+        <span className="font-medium text-blue-600">{label}: {tool.name}</span>
       </div>
       {tool.args && (
         <pre className="mt-2 overflow-x-auto text-xs text-muted-foreground">
@@ -53,21 +58,30 @@ function ToolIndicator({ tool }: { tool: ToolEvent }) {
 export default function ChatPage() {
   const [input, setInput] = useState('');
   const [pendingInterrupt, setPendingInterrupt] = useState<InterruptEvent | null>(null);
-  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('normal');
+  const [currentTool, setCurrentTool] = useState<ToolType>('standard');
+  const [showInspection, setShowInspection] = useState(false);
+  const [showDocuments, setShowDocuments] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // i18n
+  const { language, setLanguage, t } = useLanguage();
   
   // Zustand stores
   const { 
     messages, 
     isStreaming, 
     currentThinking, 
-    activeTool, 
+    activeTool,
+    toolHistory,
     streamingContent,
     addMessage,
     setMessages,
     setStreaming,
     clearChat,
+    setAbortController,
+    abortStreaming,
   } = useChatStore();
   
   const { token } = useAuthStore();
@@ -100,6 +114,16 @@ export default function ChatPage() {
     clearChat();
   }, [clearChat]);
 
+  const handleToolSelect = (tool: ToolType) => {
+    if (tool === 'inspection') {
+      setShowInspection(true);
+    } else if (tool === 'documents') {
+      setShowDocuments(true);
+    } else {
+      setCurrentTool(tool);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
@@ -114,6 +138,10 @@ export default function ChatPage() {
     setInput('');
     setStreaming(true);
 
+    // Create AbortController for stop functionality
+    const abortController = new AbortController();
+    setAbortController(abortController);
+
     try {
       // Convert messages for API
       const apiMessages = [...messages, userMessage].map(m => ({
@@ -124,8 +152,8 @@ export default function ChatPage() {
       // Use demo token if not logged in
       const authToken = token || 'demo-token';
 
-      // Stream from backend
-      for await (const event of streamWorkflow(apiMessages, authToken)) {
+      // Stream from backend with abort signal
+      for await (const event of streamWorkflow(apiMessages, authToken, undefined, abortController.signal)) {
         processStreamEvent(event);
         
         // Handle interrupt (HITL)
@@ -134,13 +162,19 @@ export default function ChatPage() {
         }
       }
     } catch (error) {
+      // Don't show error for aborted requests
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
       console.error('Stream error:', error);
       setStreaming(false);
       addMessage({
         role: 'assistant',
-        content: `❌ 错误: ${error instanceof Error ? error.message : '连接失败，请确保后端服务已启动'}`,
+        content: `❌ Error: ${error instanceof Error ? error.message : 'Connection failed, please ensure backend is running'}`,
         timestamp: new Date().toISOString(),
       });
+    } finally {
+      setAbortController(null);
     }
   };
 
@@ -149,14 +183,22 @@ export default function ChatPage() {
     addMessage({
       role: 'assistant',
       content: approved 
-        ? '✅ 操作已批准，正在执行...' 
-        : '❌ 操作已拒绝',
+        ? '✅ Operation approved, executing...' 
+        : '❌ Operation rejected',
       timestamp: new Date().toISOString(),
     });
   };
 
   return (
     <div className="flex h-screen bg-background">
+      {/* Modals */}
+      {showInspection && <InspectionModal onClose={() => setShowInspection(false)} />}
+      {showDocuments && <DocumentModal onClose={() => setShowDocuments(false)} />}
+      <SettingsPanel 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)}
+      />
+      
       {/* HITL Approval Dialog */}
       {pendingInterrupt && (
         <HITLDialog
@@ -166,79 +208,21 @@ export default function ChatPage() {
         />
       )}
 
-      {/* Session Sidebar */}
-      {sidebarOpen && (
-        <SessionSidebar
-          onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
-        />
-      )}
+      {/* Session Sidebar - always render for collapse functionality */}
+      <SessionSidebar
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        isCollapsed={!sidebarOpen}
+        onToggleCollapse={() => setSidebarOpen(!sidebarOpen)}
+        onOpenSettings={() => setShowSettings(true)}
+      />
 
       {/* Main Chat Area */}
       <div className="flex flex-1 flex-col">
-        {/* Header */}
-        <header className="border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                title={sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-              <h1 className="text-xl font-bold">OLAV</h1>
-              <ModeSelector currentMode={workflowMode} onModeChange={setWorkflowMode} />
-            </div>
-            <div className="flex items-center gap-4">
-              <a
-                href="/inspections"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                🔍 巡检
-              </a>
-              <a
-                href="/reports"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                📊 报告
-              </a>
-              <a
-                href="/documents"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                📚 文档
-              </a>
-              <a
-                href="/history"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                📜 历史
-              </a>
-              <a
-                href="/topology"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                🌐 拓扑
-              </a>
-              <button
-                onClick={clearChat}
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                清空对话
-              </button>
-            </div>
+        {/* Header - Clean without sidebar toggle (moved to sidebar) */}
+        <header className="border-b border-border px-6 py-3">
+          <div className="flex items-center justify-center">
+            <h1 className="text-xl font-bold text-primary">{t('chat.title')}</h1>
           </div>
         </header>
 
@@ -247,8 +231,8 @@ export default function ChatPage() {
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.length === 0 ? (
               <div className="text-center text-muted-foreground">
-                <p className="text-lg">👋 您好！我是 OLAV</p>
-                <p className="mt-2">企业网络运维智能助手，请输入您的问题</p>
+                <p className="text-lg">{t('chat.welcome')}</p>
+                <p className="mt-2">{t('chat.welcome_subtitle')}</p>
               </div>
             ) : (
               messages.map((msg, i) => (
@@ -260,15 +244,15 @@ export default function ChatPage() {
               <div className="flex justify-start">
                 <div className="max-w-[80%] space-y-2">
                   {/* Thinking Process */}
-                  <ThinkingPanel steps={currentThinking} />
+                  <ThinkingPanel steps={currentThinking} label={t('tools.thinking_process')} />
                   
                   {/* Active Tool */}
-                  {activeTool && <ToolIndicator tool={activeTool} />}
+                  {activeTool && <ToolIndicator tool={activeTool} label={t('tools.executing')} />}
                   
                   {/* Streaming Response */}
                   <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
                     {streamingContent || (
-                      <span className="animate-pulse">思考中...</span>
+                      <span className="animate-pulse">{t('chat.thinking')}</span>
                     )}
                   </div>
                 </div>
@@ -280,25 +264,73 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Input */}
-        <div className="border-t border-border p-4">
-          <form onSubmit={handleSubmit} className="mx-auto max-w-3xl flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="输入您的问题，例如：查询 R1 的 BGP 状态"
-              className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              disabled={isStreaming}
-            />
-            <button
-              type="submit"
-              disabled={isStreaming || !input.trim()}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              发送
-            </button>
-          </form>
+        {/* Execution Log Panel - shows when streaming */}
+        {isStreaming && (currentThinking.length > 0 || activeTool || toolHistory.length > 0) && (
+          <ExecutionLogPanel
+            thinkingSteps={currentThinking}
+            activeTool={activeTool}
+            toolHistory={toolHistory}
+          />
+        )}
+
+        {/* Input Area */}
+        <div className="p-4 pb-6">
+          <div className="mx-auto max-w-3xl rounded-xl border border-input bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring">
+            <form onSubmit={handleSubmit} className="flex items-center gap-2">
+              {/* Embedded Mode Selection */}
+              <ToolsMenu 
+                currentMode={currentTool} 
+                onSelect={handleToolSelect} 
+                variant="ghost"
+                compact={true}
+              />
+              
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={t('chat.placeholder')}
+                className="flex-1 bg-transparent px-2 py-2 text-sm focus:outline-none"
+                disabled={isStreaming}
+              />
+              
+              {/* Clear Chat Button */}
+              <button
+                type="button"
+                onClick={clearChat}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-red-500 transition-colors"
+                title="Clear Chat"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                </svg>
+              </button>
+
+              {/* Send/Stop Button */}
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={abortStreaming}
+                  className="rounded-lg bg-red-500 p-2 text-white hover:bg-red-600 transition-colors"
+                  title="Stop Generation"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                    <path fillRule="evenodd" d="M4.25 3A2.25 2.25 0 002 5.25v9.5A2.25 2.25 0 004.25 17h11.5A2.25 2.25 0 0018 14.75v-9.5A2.25 2.25 0 0015.75 3H4.25z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="rounded-lg bg-primary p-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                    <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.89 28.89 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+                  </svg>
+                </button>
+              )}
+            </form>
+          </div>
         </div>
       </div>
     </div>

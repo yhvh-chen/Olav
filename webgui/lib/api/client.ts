@@ -10,7 +10,7 @@ import type {
   StreamEvent,
 } from './types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 class ApiError extends Error {
   constructor(
@@ -138,6 +138,7 @@ export async function* streamWorkflow(
   messages: Message[],
   token: string,
   threadId?: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   // Use /orchestrator/stream (stateless, LangServe-compatible)
   // NOT /orchestrator/stream/events (requires stateful graph)
@@ -151,6 +152,7 @@ export async function* streamWorkflow(
       input: { messages },
       config: threadId ? { configurable: { thread_id: threadId } } : undefined,
     }),
+    signal,
   });
 
   if (!response.ok) {
@@ -276,11 +278,17 @@ export interface SessionDetail extends Session {
   }>;
 }
 
+interface SessionListResponse {
+  sessions: Session[];
+  total: number;
+}
+
 /**
  * List all workflow sessions
  */
 export async function getSessions(token: string): Promise<Session[]> {
-  return fetchApi<Session[]>('/sessions', {}, token);
+  const response = await fetchApi<SessionListResponse>('/sessions', {}, token);
+  return response.sessions || [];
 }
 
 /**
@@ -298,15 +306,15 @@ export async function deleteSession(threadId: string, token: string): Promise<vo
 }
 
 // ============================================
-// Topology API
+// Inventory API
 // ============================================
-import type { TopologyData, HistoryListResponse, ReportListResponse, ReportDetail } from './types';
+import type { InventoryData, InventoryDevice, HistoryListResponse, ReportListResponse, ReportDetail } from './types';
 
 /**
- * Get network topology data
+ * Get device inventory from SuzieQ
  */
-export async function getTopology(token: string): Promise<TopologyData> {
-  return fetchApi<TopologyData>('/topology', {}, token);
+export async function getInventory(token: string): Promise<InventoryData> {
+  return fetchApi<InventoryData>('/inventory', {}, token);
 }
 
 // ============================================
@@ -384,6 +392,24 @@ export async function getInspection(
   token: string,
 ): Promise<InspectionConfig> {
   return fetchApi<InspectionConfig>(`/inspections/${inspectionId}`, {}, token);
+}
+
+/**
+ * Update an inspection configuration
+ */
+export async function updateInspection(
+  inspectionId: string,
+  content: string,
+  token: string,
+): Promise<InspectionConfig> {
+  return fetchApi<InspectionConfig>(
+    `/inspections/${inspectionId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    },
+    token,
+  );
 }
 
 /**

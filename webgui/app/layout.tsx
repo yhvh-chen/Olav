@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { ThemeProvider } from 'next-themes';
 import { AuthGuard } from '@/components/auth-guard';
+import { LanguageProvider } from '@/lib/i18n/context';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -14,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="zh" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body>
         <ThemeProvider
           attribute="class"
@@ -22,9 +23,11 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AuthGuard>
-            {children}
-          </AuthGuard>
+          <LanguageProvider>
+            <AuthGuard>
+              {children}
+            </AuthGuard>
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

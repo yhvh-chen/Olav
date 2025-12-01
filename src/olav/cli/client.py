@@ -35,6 +35,25 @@ if sys.platform == "win32":
 logger = logging.getLogger(__name__)
 
 
+def _unescape_newlines(text: str) -> str:
+    """Unescape literal \\n sequences to actual newlines.
+
+    LLMs sometimes return literal '\\n' strings instead of actual newline
+    characters in their JSON output. This function converts them back.
+
+    Args:
+        text: Text that may contain literal \\n sequences
+
+    Returns:
+        Text with literal \\n converted to actual newlines
+    """
+    if not text:
+        return text
+    # Replace literal \n (two characters) with actual newline
+    # Also handle \t for tabs
+    return text.replace("\\n", "\n").replace("\\t", "\t")
+
+
 # ============================================
 # Data Models
 # ============================================
@@ -422,12 +441,12 @@ class OLAVClient:
                                             )
                                             if content:
                                                 final_message_content = content
-                                                live.update(Markdown(content))
+                                                live.update(Markdown(_unescape_newlines(content)))
                                             break
                                 # Also check for final_message in result
                                 if node_state.get("final_message"):
                                     final_message_content = node_state["final_message"]
-                                    live.update(Markdown(final_message_content))
+                                    live.update(Markdown(_unescape_newlines(final_message_content)))
 
             else:
                 # Non-streaming mode
@@ -494,6 +513,8 @@ class OLAVClient:
 
             # Get final message
             final_message = result.get("final_message", "")
+            if final_message:
+                final_message = _unescape_newlines(final_message)
             if final_message and not any(m.get("type") == "ai" for m in messages_dict):
                 messages_dict.append({"type": "ai", "content": final_message})
 
@@ -570,6 +591,10 @@ class OLAVClient:
             else:
                 msg_type = getattr(msg, "type", "unknown")
                 content = getattr(msg, "content", "")
+
+            # Unescape literal \n sequences from LLM output
+            if content:
+                content = _unescape_newlines(content)
 
             if msg_type == "ai":
                 self.console.print(Markdown(f"**AI**: {content}"))

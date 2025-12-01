@@ -20,9 +20,9 @@ const riskColors = {
 
 // Risk level labels
 const riskLabels = {
-  low: '低风险',
-  medium: '中风险',
-  high: '高风险',
+  low: 'Low Risk',
+  medium: 'Medium Risk',
+  high: 'High Risk',
 };
 
 export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
@@ -68,8 +68,8 @@ export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
           <div className="flex items-center gap-3">
             <span className="text-2xl">⚠️</span>
             <div>
-              <h2 className="text-lg font-semibold">操作审批请求</h2>
-              <p className="text-sm text-muted-foreground">需要您的确认才能继续执行</p>
+              <h2 className="text-lg font-semibold">Operation Approval Request</h2>
+              <p className="text-sm text-muted-foreground">Your confirmation is required to proceed</p>
             </div>
           </div>
           <span className={`rounded-full border px-3 py-1 text-xs font-medium ${riskColors[interrupt.risk_level]}`}>
@@ -81,7 +81,7 @@ export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
         <div className="space-y-4 p-6">
           {/* Operation Description */}
           <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">操作描述</h3>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Operation Description</h3>
             <p className="text-foreground">{interrupt.message}</p>
           </div>
 
@@ -99,12 +99,12 @@ export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
           {showRejectInput && (
             <div>
               <label className="mb-2 block text-sm font-medium text-muted-foreground">
-                拒绝原因 (可选)
+                Rejection Reason (Optional)
               </label>
               <textarea
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="请说明拒绝此操作的原因..."
+                placeholder="Please explain the reason for rejecting this operation..."
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 rows={3}
               />
@@ -119,14 +119,14 @@ export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
             disabled={isSubmitting}
             className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-500/20 disabled:opacity-50"
           >
-            {showRejectInput ? '确认拒绝' : '拒绝'}
+            {showRejectInput ? 'Confirm Reject' : 'Reject'}
           </button>
           <button
             onClick={handleApprove}
             disabled={isSubmitting}
             className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
           >
-            {isSubmitting ? '处理中...' : '批准执行'}
+            {isSubmitting ? 'Processing...' : 'Approve Execution'}
           </button>
         </div>
       </div>
@@ -138,21 +138,21 @@ export function HITLDialog({ interrupt, onClose, onResult }: HITLDialogProps) {
 function ExecutionPlanDisplay({ plan }: { plan: ExecutionPlan }) {
   return (
     <div className="rounded-lg border border-border bg-secondary/30 p-4">
-      <h3 className="mb-3 text-sm font-medium text-muted-foreground">执行计划</h3>
+      <h3 className="mb-3 text-sm font-medium text-muted-foreground">Execution Plan</h3>
       
       <div className="space-y-2 text-sm">
         <div className="flex gap-2">
-          <span className="text-muted-foreground">设备:</span>
+          <span className="text-muted-foreground">Device:</span>
           <span className="font-mono">{plan.device}</span>
         </div>
         <div className="flex gap-2">
-          <span className="text-muted-foreground">操作:</span>
+          <span className="text-muted-foreground">Operation:</span>
           <span>{plan.operation}</span>
         </div>
         
         {plan.commands.length > 0 && (
           <div>
-            <span className="text-muted-foreground">命令:</span>
+            <span className="text-muted-foreground">Commands:</span>
             <div className="mt-2 rounded-lg bg-black/50 p-3">
               <pre className="overflow-x-auto text-xs text-green-400">
                 {plan.commands.map((cmd, i) => (

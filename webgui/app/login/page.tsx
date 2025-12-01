@@ -16,7 +16,7 @@ function LoginContent() {
   
   const { setToken: storeToken, setUser, logout } = useAuthStore();
 
-  // 验证 Token 的通用函数
+  // Common function to validate token
   const validateToken = async (tokenToValidate: string): Promise<boolean> => {
     try {
       console.log('Validating token (first 10 chars):', tokenToValidate.substring(0, 10) + '...');
@@ -32,33 +32,33 @@ function LoginContent() {
       if (err instanceof Error) {
         console.error('Error details:', err.message, err.name);
       }
-      // 清除可能无效的存储 token
+      // Clear potentially invalid stored token
       logout();
       return false;
     }
   };
 
-  // 处理 URL 参数中的错误或 token
+  // Handle errors or tokens in URL parameters
   useEffect(() => {
-    // 防止重复验证
+    // Prevent duplicate validation
     if (validationAttempted.current) return;
     
     const urlError = searchParams.get('error');
     const urlToken = searchParams.get('token');
     
     if (urlError === 'invalid_token') {
-      setError('Token 无效或已过期，请重新输入');
+      setError('Token is invalid or expired, please re-enter');
       validationAttempted.current = true;
       return;
     }
     
-    // 如果 URL 有 token，自动验证（通常由根页面处理，这是 fallback）
+    // If URL has token, auto-validate (usually handled by root page, this is fallback)
     if (urlToken) {
       validationAttempted.current = true;
       setAutoValidating(true);
       validateToken(urlToken).then(success => {
         if (!success) {
-          setError('URL 中的 Token 无效或已过期');
+          setError('Token in URL is invalid or expired');
         }
         setAutoValidating(false);
       });
@@ -68,11 +68,11 @@ function LoginContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 手动提交 Token
+  // Manually submit Token
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualToken.trim()) {
-      setError('请输入 Token');
+      setError('Please enter Token');
       return;
     }
 
@@ -81,18 +81,18 @@ function LoginContent() {
 
     const success = await validateToken(manualToken.trim());
     if (!success) {
-      setError('Token 无效或已过期');
+      setError('Token is invalid or expired');
     }
     setIsValidating(false);
   };
 
-  // 自动验证中的加载状态
+  // Loading state during auto-validation
   if (autoValidating) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
           <div className="animate-spin mx-auto h-8 w-8 rounded-full border-2 border-primary border-t-transparent" />
-          <p className="mt-4 text-muted-foreground">正在验证...</p>
+          <p className="mt-4 text-muted-foreground">Validating...</p>
         </div>
       </div>
     );
@@ -108,7 +108,7 @@ function LoginContent() {
           </div>
           <h1 className="mt-4 text-2xl font-bold">OLAV WebGUI</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            企业网络运维智能助手
+            Enterprise Network Operations Intelligent Assistant
           </p>
         </div>
 
@@ -123,7 +123,7 @@ function LoginContent() {
               type="text"
               value={manualToken}
               onChange={(e) => setManualToken(e.target.value)}
-              placeholder="粘贴 Token..."
+              placeholder="Paste Token..."
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               disabled={isValidating}
             />
@@ -142,23 +142,23 @@ function LoginContent() {
             disabled={isValidating || !manualToken.trim()}
             className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {isValidating ? '验证中...' : '进入系统'}
+            {isValidating ? 'Validating...' : 'Enter System'}
           </button>
         </form>
 
         {/* Help Section */}
         <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm">
-          <h3 className="font-medium">💡 如何获取 Token</h3>
+          <h3 className="font-medium">💡 How to get Token</h3>
           <div className="mt-2 space-y-2 text-muted-foreground">
-            <p>启动后端后，控制台会打印：</p>
+            <p>After starting the backend, the console will print:</p>
             <div className="rounded bg-black/30 p-2 text-xs font-mono">
               <p className="text-green-400">🌐 WebGUI URL:</p>
               <p className="text-blue-400">   http://localhost:3100?token=xxx</p>
             </div>
-            <p className="mt-2">两种方式进入：</p>
+            <p className="mt-2">Two ways to enter:</p>
             <ul className="ml-4 list-disc space-y-1">
-              <li>直接点击链接（自动登录）</li>
-              <li>复制 token 值粘贴到上方输入框</li>
+              <li>Click the link directly (auto-login)</li>
+              <li>Copy the token value and paste it into the input box above</li>
             </ul>
           </div>
         </div>
@@ -172,7 +172,7 @@ function LoadingSpinner() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="text-center">
         <div className="animate-spin mx-auto h-8 w-8 rounded-full border-2 border-primary border-t-transparent" />
-        <p className="mt-4 text-muted-foreground">加载中...</p>
+        <p className="mt-4 text-muted-foreground">Loading...</p>
       </div>
     </div>
   );

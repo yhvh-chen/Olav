@@ -77,6 +77,38 @@ class InspectionScheduler:
 
     async def _run_loop(self) -> None:
         """Main scheduler loop."""
+        # 1. Load individual profile schedules
+        from config.settings import Paths
+        import yaml
+        
+        scheduled_tasks = []
+        
+        if Paths.INSPECTIONS_DIR.exists():
+            for yaml_file in Paths.INSPECTIONS_DIR.glob("*.yaml"):
+                try:
+                    content = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                    schedule = content.get("schedule")
+                    profile_name = yaml_file.stem
+                    
+                    if schedule:
+                        logger.info(f"Scheduling profile '{profile_name}' with schedule: {schedule}")
+                        task = asyncio.create_task(
+                            self._run_profile_schedule(profile_name, schedule)
+                        )
+                        self._tasks.append(task)
+                        scheduled_tasks.append(profile_name)
+                except Exception as e:
+                    logger.error(f"Failed to load schedule for {yaml_file}: {e}")
+
+        if scheduled_tasks:
+            logger.info(f"Started {len(scheduled_tasks)} individual inspection schedules")
+            # Wait for all tasks (or stop signal)
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            return
+
+        # 2. Fallback to global config if no individual schedules found
+        logger.info("No individual profile schedules found, falling back to global config")
+        
         # Determine schedule type
         if InspectionConfig.SCHEDULE_INTERVAL_MINUTES:
             # Interval-based (for testing)
@@ -93,6 +125,48 @@ class InspectionScheduler:
             # Daily at specific time
             logger.info(f"Running inspections daily at {InspectionConfig.SCHEDULE_TIME}")
             await self._run_daily_loop()
+
+    async def _run_profile_schedule(self, profile_name: str, schedule: str) -> None:
+        """Run a specific profile on its own schedule."""
+        # Check if it's a simple alias like "daily" or "hourly"
+        if schedule.lower() == "daily":
+            schedule = "0 9 * * *"  # Default to 9 AM
+        elif schedule.lower() == "hourly":
+            schedule = "0 * * * *"
+            
+        try:
+            from croniter import croniter
+        except ImportError:
+            logger.error("croniter package not installed. Install with: uv add croniter")
+            return
+
+        try:
+            cron = croniter(schedule)
+        except Exception as e:
+            logger.error(f"Invalid cron expression for {profile_name}: {schedule} ({e})")
+            return
+
+        logger.info(f"Started scheduler for {profile_name} ({schedule})")
+
+        while not self._stop_event.is_set():
+            # Get next run time
+            next_run = cron.get_next(datetime)
+            now = datetime.now()
+            wait_seconds = (next_run - now).total_seconds()
+
+            if wait_seconds > 0:
+                # logger.debug(f"Profile {profile_name} next run at {next_run}")
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=wait_seconds,
+                    )
+                    break  # Stop event was set
+                except TimeoutError:
+                    pass  # Time to run
+
+            # Run inspection
+            await self._execute_inspection(profile_name)
 
     async def _run_interval_loop(self, interval_seconds: int) -> None:
         """Run inspections at fixed intervals."""
@@ -176,11 +250,11 @@ class InspectionScheduler:
             # Run inspection
             await self._execute_inspection()
 
-    async def _execute_inspection(self) -> dict[str, Any]:
+    async def _execute_inspection(self, profile_name: str | None = None) -> dict[str, Any]:
         """Execute the configured inspection profile."""
         from olav.inspection.runner import run_inspection
 
-        profile = InspectionConfig.DEFAULT_PROFILE
+        profile = profile_name or InspectionConfig.DEFAULT_PROFILE
         logger.info(f"Starting scheduled inspection: {profile}")
 
         try:

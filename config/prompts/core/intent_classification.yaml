@@ -47,4 +47,4 @@ template: |
 
   ⚠️ IMPORTANT: Return pure JSON only, no markdown code blocks:
 
-  {"category": "suzieq", "confidence": 0.95, "reasoning": "User querying network status"}
+  {{"category": "suzieq", "confidence": 0.95, "reasoning": "User querying network status"}}

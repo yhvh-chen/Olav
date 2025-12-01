@@ -1,85 +1,51 @@
-# BGP Peer Health Audit - Example Batch Inspection Config
-# 
-# Purpose: Daily verification of BGP peer states across edge routers
-# Schedule: Run at 09:00 daily (via cron/APScheduler)
-# Owner: Network Operations Team
-#
-# Usage:
-#   uv run python -m olav.cli batch-inspect config/inspections/bgp_peer_audit.yaml
-
-name: bgp_peer_audit
-description: Verify BGP peer counts and states across edge routers
-
-# Device Selection
-# Option 1: Explicit list
-devices:
-  - R1
-  - R2
-  - R3
-
-# Option 2: NetBox filter (uncomment to use)
-# devices:
-#   netbox_filter:
-#     role: edge-router
-#     tag: production
-#     site: DC1
-
-# Option 3: Regex pattern (uncomment to use)
-# devices:
-#   regex: "^R[0-9]+"
-
-# Inspection Checks
-checks:
-  # Check 1: Ensure minimum BGP peer count
-  - name: bgp_established_count
-    description: Ensure at least 2 BGP peers are Established
-    tool: suzieq_query
-    enabled: true
-    parameters:
-      table: bgp
-      state: Established
-      method: get
-    threshold:
-      field: count
-      operator: ">="
-      value: 2
-      severity: critical
-      message: "Device {device} has only {actual} established BGP peers (expected >= {value})"
-
-  # Check 2: No BGP peers should be Idle
-  - name: bgp_no_idle_peers
-    description: No BGP peers should be in Idle state
-    tool: suzieq_query
-    enabled: true
-    parameters:
-      table: bgp
-      state: Idle
-      method: get
-    threshold:
-      field: count
-      operator: "=="
-      value: 0
-      severity: warning
-      message: "Device {device} has {actual} BGP peers in Idle state"
-
-  # Check 3: Verify BGP session uptime (optional)
-  - name: bgp_session_stability
-    description: BGP sessions should have reasonable uptime (>1 hour)
-    tool: suzieq_query
-    enabled: false  # Disabled by default
-    parameters:
-      table: bgp
-      state: Established
-      method: get
-    threshold:
-      field: uptime
-      operator: ">"
-      value: 3600  # 1 hour in seconds
-      severity: info
-      message: "Device {device} has BGP peer with uptime {actual}s (threshold: {value}s)"
-
-# Execution Settings
-parallel: true          # Execute checks in parallel across devices
-max_workers: 5          # Max concurrent workers (adjust based on device count)
-stop_on_failure: false  # Continue even if a check fails
-output_format: table    # Options: table, json, yaml, html
+{
+  "id": "bgp_peer_audit",
+  "name": "bgp_peer_audit",
+  "description": "Verify BGP peer counts and states across edge routers",
+  "filename": "bgp_peer_audit.yaml",
+  "devices": [
+    "R1",
+    "R2",
+    "R3",
+    "R2"
+  ],
+  "checks": [
+    {
+      "name": "bgp_established_count",
+      "description": "Ensure at least 2 BGP peers are Established",
+      "tool": "suzieq_query",
+      "enabled": true,
+      "parameters": {
+        "table": "bgp",
+        "state": "Established",
+        "method": "get"
+      }
+    },
+    {
+      "name": "bgp_no_idle_peers",
+      "description": "No BGP peers should be in Idle state",
+      "tool": "suzieq_query",
+      "enabled": true,
+      "parameters": {
+        "table": "bgp",
+        "state": "Idle",
+        "method": "get"
+      }
+    },
+    {
+      "name": "bgp_session_stability",
+      "description": "BGP sessions should have reasonable uptime (>1 hour)",
+      "tool": "suzieq_query",
+      "enabled": false,
+      "parameters": {
+        "table": "bgp",
+        "state": "Established",
+        "method": "get"
+      }
+    }
+  ],
+  "parallel": true,
+  "max_workers": 5,
+  "stop_on_failure": false,
+  "output_format": "table"
+}

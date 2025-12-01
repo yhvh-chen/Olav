@@ -29,6 +29,8 @@ Workflow:
 
 import sys
 
+from olav.core.prompt_manager import prompt_manager
+
 if sys.platform == "win32":
     import asyncio
 
@@ -190,17 +192,16 @@ class InspectionWorkflow(BaseWorkflow):
         messages = state.get("messages", [])
         user_query = messages[-1].content if messages else ""
 
-        # Use LLM to extract scope
-        system_prompt = """你是网络巡检助手。从用户查询中提取：
-1. 设备范围 (device_scope): 具体设备名列表，如 ["R1", "R2"]，如果是"所有"或未指定，返回 ["all"]
-2. 检查类型 (entity_types): 要检查的实体类型列表，可选: interface, ip_address, device, vlan
-
-以 JSON 格式返回，例如:
-{"device_scope": ["R1", "R2"], "entity_types": ["interface", "ip_address"]}
-
-如果用户未指定，默认返回:
-{"device_scope": ["all"], "entity_types": ["interface", "ip_address", "device"]}
-"""
+        # Load prompt from YAML
+        try:
+            system_prompt = prompt_manager.load_prompt(
+                "workflows/inspection",
+                "scope_extraction",
+                user_query=user_query,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load scope_extraction prompt: {e}, using fallback")
+            system_prompt = f"Extract device scope from: {user_query}"
 
         try:
             response = await self.llm.ainvoke(

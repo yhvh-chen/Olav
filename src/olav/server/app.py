@@ -218,6 +218,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("🚀 Starting OLAV API Server...")
 
+    # Start Inspection Scheduler
+    from olav.inspection.scheduler import InspectionScheduler
+    scheduler = InspectionScheduler()
+    scheduler_task = asyncio.create_task(scheduler.start())
+    logger.info("⏰ Inspection Scheduler started in background")
+
     # Initialize Workflow Orchestrator (returns tuple: orchestrator, graph, checkpointer_context)
     try:
         # Feature flags from centralized settings
@@ -226,12 +232,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         # Initialize orchestrator & underlying Postgres checkpointer (async)
         result = await create_workflow_orchestrator(expert_mode=expert_mode)
-        orch_obj, _stateful_graph, stateless_graph, checkpointer_manager = (
+        orch_obj, stateful_graph, stateless_graph, checkpointer_manager = (
             result  # (WorkflowOrchestrator, stateful_graph, stateless_graph, context manager)
         )
 
-        # Use stateless graph for LangServe streaming (no thread_id requirement)
-        # For stateful operations with HITL, use orch_obj.route() directly
+        # Use stateless graph for LangServe streaming to avoid thread_id requirement
+        # Stateless mode doesn't require checkpointer config in every request
         orchestrator = stateless_graph
         app.state.orchestrator_obj = orch_obj  # store original orchestrator for stateful ops
         try:
@@ -322,6 +328,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Cleanup on shutdown
     logger.info("🛑 Shutting down OLAV API Server...")
+    
+    # Stop scheduler
+    if scheduler:
+        logger.info("Stopping Inspection Scheduler...")
+        await scheduler.stop()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Inspection Scheduler stopped")
+
     if checkpointer:
         # PostgresSaver context manager handles cleanup
         pass
@@ -529,7 +546,7 @@ def create_app() -> FastAPI:
             },
             limits={
                 "max_query_length": 2000,
-                "session_timeout_minutes": settings.jwt_expiration_minutes,
+                "session_timeout_minutes": settings.token_max_age_hours * 60,  # Convert hours to minutes
                 "rate_limit_rpm": settings.api_rate_limit_rpm if settings.api_rate_limit_enabled else None,
             },
             workflows=["query_diagnostic", "device_execution", "netbox_management", "deep_dive"],
@@ -771,6 +788,35 @@ def create_app() -> FastAPI:
                     except Exception as e:
                         logger.debug(f"Failed to extract message from checkpoint: {e}")
                     
+                    # Fallback: Use checkpointer to get latest state if first message missing
+                    if not first_message and checkpointer:
+                        try:
+                            config = {"configurable": {"thread_id": row["thread_id"]}}
+                            # This gets the LATEST state, which contains the full history
+                            cp_tuple = await checkpointer.aget_tuple(config)
+                            if cp_tuple and cp_tuple.checkpoint:
+                                msgs = cp_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+                                for msg in msgs:
+                                    # Handle BaseMessage or dict
+                                    content = ""
+                                    role = ""
+                                    if hasattr(msg, "content"):
+                                        content = msg.content
+                                        role = "user" if msg.type == "human" else msg.type
+                                    elif isinstance(msg, dict):
+                                        content = msg.get("content", "")
+                                        role = "user" if msg.get("type") == "human" else msg.get("role")
+                                    
+                                    if role == "user" and content:
+                                        first_message = content[:100] + ("..." if len(content) > 100 else "")
+                                        break
+                                
+                                # Also try to get workflow type from latest state
+                                if not workflow_type:
+                                    workflow_type = cp_tuple.checkpoint.get("channel_values", {}).get("workflow_type")
+                        except Exception as e:
+                            logger.debug(f"Failed to get title via checkpointer: {e}")
+
                     # Parse timestamps
                     created_at = row["created_at"] or datetime.now().isoformat()
                     updated_at = row["updated_at"] or datetime.now().isoformat()
@@ -822,6 +868,68 @@ def create_app() -> FastAPI:
           -H "Authorization: Bearer <token>"
         ```
         """
+        # Use global checkpointer if available (preferred method for LangGraph v2)
+        if checkpointer:
+            logger.info(f"Attempting to get session {thread_id} via checkpointer")
+            try:
+                config = {"configurable": {"thread_id": thread_id}}
+                # aget_tuple retrieves the latest checkpoint, handling checkpoint_writes automatically
+                checkpoint_tuple = await checkpointer.aget_tuple(config)
+                
+                if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
+                    # Fallback to SQL check to see if it really doesn't exist or just no state
+                    logger.warning(f"Checkpointer returned None for {thread_id}, falling back to SQL")
+                    pass 
+                else:
+                    checkpoint = checkpoint_tuple.checkpoint
+                    channel_values = checkpoint.get("channel_values", {})
+                    logger.info(f"Session {thread_id} channel_values keys: {list(channel_values.keys())}")
+                    
+                    # DEBUG: Dump structure if messages missing
+                    if "messages" not in channel_values:
+                        logger.warning(f"Session {thread_id} missing messages! Dump: {str(channel_values)[:500]}")
+                        # Try to find messages in other keys
+                        for k, v in channel_values.items():
+                            if isinstance(v, dict) and "messages" in v:
+                                logger.info(f"Found messages in sub-key {k}")
+                                messages = v["messages"]
+                                break
+                            if k == "messages": # Should be covered by get
+                                messages = v
+                                break
+                    else:
+                        messages = channel_values.get("messages", [])
+                    
+                    logger.info(f"Session {thread_id} messages count: {len(messages)}")
+                    
+                    # Convert to standard format
+                    formatted_messages = []
+                    for msg in messages:
+                        # Handle both dict and BaseMessage objects
+                        if hasattr(msg, "type") and hasattr(msg, "content"):
+                            role = "user" if msg.type == "human" else "assistant"
+                            formatted_messages.append({
+                                "role": role,
+                                "content": msg.content,
+                            })
+                        elif isinstance(msg, dict):
+                            role = "user" if msg.get("type") == "human" else "assistant"
+                            formatted_messages.append({
+                                "role": role,
+                                "content": msg.get("content", ""),
+                            })
+                    
+                    return {
+                        "thread_id": thread_id,
+                        "messages": formatted_messages,
+                        "workflow_type": channel_values.get("workflow_type"),
+                    }
+            except Exception as e:
+                logger.error(f"Failed to get session via checkpointer {thread_id}: {e}")
+                # Fallback to SQL below
+        else:
+            logger.warning("Checkpointer not available, using SQL fallback")
+        
         import asyncpg
         
         try:
@@ -932,62 +1040,54 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e))
 
     # ============================================
-    # Network Topology API
+    # Device Inventory API
     # ============================================
-    class TopologyNode(BaseModel):
-        """Node in the network topology."""
+    class InventoryDevice(BaseModel):
+        """Device in the inventory."""
         id: str
         hostname: str
+        namespace: str = "default"
         device_type: str | None = None
         vendor: str | None = None
         model: str | None = None
-        status: str = "up"
+        version: str | None = None
+        serial_number: str | None = None
+        os: str | None = None
+        status: str = "unknown"  # "up", "down", "unknown"
         management_ip: str | None = None
+        uptime: str | None = None
+        last_polled: str | None = None
 
-    class TopologyEdge(BaseModel):
-        """Edge (link) in the network topology."""
-        id: str
-        source: str  # Source node ID
-        target: str  # Target node ID
-        source_port: str | None = None
-        target_port: str | None = None
-        link_type: str | None = None  # "lldp", "bgp", etc.
-
-    class TopologyData(BaseModel):
-        """Network topology data."""
-        nodes: list[TopologyNode]
-        edges: list[TopologyEdge]
+    class InventoryData(BaseModel):
+        """Device inventory data."""
+        devices: list[InventoryDevice]
+        total: int
         last_updated: str | None = None
 
     @app.get(
-        "/topology",
-        response_model=TopologyData,
-        tags=["topology"],
-        summary="Get network topology",
+        "/inventory",
+        response_model=InventoryData,
+        tags=["inventory"],
+        summary="Get device inventory",
         responses={
             200: {
-                "description": "Network topology data",
+                "description": "Device inventory data",
                 "content": {
                     "application/json": {
                         "example": {
-                            "nodes": [
+                            "devices": [
                                 {
                                     "id": "R1",
                                     "hostname": "R1",
+                                    "namespace": "default",
                                     "device_type": "router",
-                                    "vendor": "cisco",
-                                    "status": "up"
+                                    "vendor": "Cisco",
+                                    "model": "ISRV",
+                                    "status": "up",
+                                    "management_ip": "192.168.100.101"
                                 }
                             ],
-                            "edges": [
-                                {
-                                    "id": "R1-eth0-R2-eth0",
-                                    "source": "R1",
-                                    "target": "R2",
-                                    "source_port": "eth0",
-                                    "target_port": "eth0"
-                                }
-                            ],
+                            "total": 6,
                             "last_updated": "2025-12-01T10:00:00Z"
                         }
                     }
@@ -995,120 +1095,131 @@ def create_app() -> FastAPI:
             },
         },
     )
-    async def get_topology(current_user: CurrentUser) -> TopologyData:
+    async def get_inventory(current_user: CurrentUser) -> InventoryData:
         """
-        Get network topology from SuzieQ LLDP and device data.
+        Get device inventory from SuzieQ device data.
 
-        Builds a graph of network devices and their interconnections
-        based on LLDP neighbor discovery data.
+        Returns a list of all network devices with their basic information
+        including hostname, vendor, model, status, and management IP.
 
         **Required**: Bearer token authentication
 
         **Example Request**:
         ```bash
-        curl http://localhost:8000/topology \\
+        curl http://localhost:8000/inventory \\
           -H "Authorization: Bearer <token>"
         ```
         """
-        from datetime import datetime
         from pathlib import Path
         import pandas as pd
 
-        nodes: list[TopologyNode] = []
-        edges: list[TopologyEdge] = []
-        seen_nodes: set[str] = set()
-        seen_edges: set[str] = set()
+        devices: list[InventoryDevice] = []
+        seen_devices: set[str] = set()
         last_updated: str | None = None
 
         parquet_dir = Path("data/suzieq-parquet")
 
         try:
-            # Load device data for nodes
-            device_path = parquet_dir / "device"
+            import pyarrow.parquet as pq
+            
+            # SuzieQ stores coalesced data in 'coalesced' subfolder
+            device_path = parquet_dir / "coalesced" / "device"
+            if not device_path.exists():
+                # Fallback to raw device folder if coalesced doesn't exist
+                device_path = parquet_dir / "device"
+            
             if device_path.exists():
-                device_files = list(device_path.rglob("*.parquet"))
-                if device_files:
-                    df_device = pd.concat([pd.read_parquet(f) for f in device_files], ignore_index=True)
+                try:
+                    # Read entire dataset with partitioning
+                    device_table = pq.read_table(str(device_path))
+                    df_device = device_table.to_pandas()
                     
-                    # Get latest record per hostname
-                    if "timestamp" in df_device.columns:
-                        df_device = df_device.sort_values("timestamp", ascending=False)
-                        df_device = df_device.drop_duplicates(subset=["hostname"], keep="first")
-                        last_updated = df_device["timestamp"].max()
-                        if pd.notna(last_updated):
-                            last_updated = pd.Timestamp(last_updated).isoformat()
-                    
-                    for _, row in df_device.iterrows():
-                        hostname = str(row.get("hostname", "unknown"))
-                        if hostname and hostname not in seen_nodes:
-                            seen_nodes.add(hostname)
-                            nodes.append(TopologyNode(
-                                id=hostname,
-                                hostname=hostname,
-                                device_type=str(row.get("devtype", "")) or None,
-                                vendor=str(row.get("vendor", "")) or None,
-                                model=str(row.get("model", "")) or None,
-                                status="up" if row.get("status") == "alive" else "down",
-                                management_ip=str(row.get("address", "")) or None,
-                            ))
+                    if not df_device.empty:
+                        # Get latest record per hostname
+                        if "timestamp" in df_device.columns and "hostname" in df_device.columns:
+                            df_device = df_device.sort_values("timestamp", ascending=False)
+                            df_device = df_device.drop_duplicates(subset=["hostname"], keep="first")
+                            last_updated = df_device["timestamp"].max()
+                            if pd.notna(last_updated):
+                                last_updated = pd.Timestamp(last_updated).isoformat()
+                        
+                        for _, row in df_device.iterrows():
+                            hostname = str(row.get("hostname", "unknown"))
+                            logger.info(f"Processing {hostname}. Keys: {row.index.tolist()}")
+                            if hostname and hostname not in seen_devices:
+                                seen_devices.add(hostname)
+                                
+                                # Parse uptime if available
+                                uptime_str = None
+                                uptime_val = row.get("uptime")
+                                
+                                # Fallback to bootupTimestamp calculation
+                                if (pd.isna(uptime_val) or not uptime_val):
+                                    # Check if bootupTimestamp exists in index
+                                    if "bootupTimestamp" in row.index:
+                                        bootup_ts = row["bootupTimestamp"]
+                                        logger.info(f"Device {hostname} bootupTimestamp: {bootup_ts}")
+                                        if pd.notna(bootup_ts):
+                                            try:
+                                                import time
+                                                current_ts = time.time()
+                                                bootup_ts_float = float(bootup_ts)
+                                                if bootup_ts_float < current_ts:
+                                                    uptime_secs = current_ts - bootup_ts_float
+                                                    uptime_val = uptime_secs
+                                            except Exception:
+                                                pass
+                                    else:
+                                        logger.warning(f"Device {hostname} missing bootupTimestamp column")
+                                        pass
 
-            # Load LLDP data for edges
-            lldp_path = parquet_dir / "lldp"
-            if lldp_path.exists():
-                lldp_files = list(lldp_path.rglob("*.parquet"))
-                if lldp_files:
-                    df_lldp = pd.concat([pd.read_parquet(f) for f in lldp_files], ignore_index=True)
-                    
-                    # Get latest records
-                    if "timestamp" in df_lldp.columns:
-                        df_lldp = df_lldp.sort_values("timestamp", ascending=False)
-                        df_lldp = df_lldp.drop_duplicates(
-                            subset=["hostname", "ifname", "peerHostname", "peerIfname"],
-                            keep="first"
-                        )
-                    
-                    for _, row in df_lldp.iterrows():
-                        source = str(row.get("hostname", ""))
-                        target = str(row.get("peerHostname", ""))
-                        source_port = str(row.get("ifname", ""))
-                        target_port = str(row.get("peerIfname", ""))
-                        
-                        if not source or not target:
-                            continue
-                        
-                        # Create unique edge ID (sorted to avoid duplicates A-B vs B-A)
-                        edge_key = tuple(sorted([f"{source}:{source_port}", f"{target}:{target_port}"]))
-                        edge_id = f"{edge_key[0]}-{edge_key[1]}"
-                        
-                        if edge_id not in seen_edges:
-                            seen_edges.add(edge_id)
-                            edges.append(TopologyEdge(
-                                id=edge_id,
-                                source=source,
-                                target=target,
-                                source_port=source_port or None,
-                                target_port=target_port or None,
-                                link_type="lldp",
-                            ))
-                            
-                            # Ensure both nodes exist
-                            for node_name in [source, target]:
-                                if node_name not in seen_nodes:
-                                    seen_nodes.add(node_name)
-                                    nodes.append(TopologyNode(
-                                        id=node_name,
-                                        hostname=node_name,
-                                        status="up",
-                                    ))
+                                if pd.notna(uptime_val) and uptime_val:
+                                    try:
+                                        # Uptime is typically in seconds
+                                        uptime_secs = float(uptime_val)
+                                        days = int(uptime_secs // 86400)
+                                        hours = int((uptime_secs % 86400) // 3600)
+                                        mins = int((uptime_secs % 3600) // 60)
+                                        if days > 0:
+                                            uptime_str = f"{days}天 {hours}小时"
+                                        elif hours > 0:
+                                            uptime_str = f"{hours}小时 {mins}分钟"
+                                        else:
+                                            uptime_str = f"{mins}分钟"
+                                    except (ValueError, TypeError):
+                                        uptime_str = str(uptime_val)
+                                
+                                # Get timestamp as last_polled
+                                last_polled = None
+                                ts = row.get("timestamp")
+                                if pd.notna(ts):
+                                    last_polled = pd.Timestamp(ts).isoformat()
+                                
+                                devices.append(InventoryDevice(
+                                    id=hostname,
+                                    hostname=hostname,
+                                    namespace=str(row.get("namespace", "default")) or "default",
+                                    device_type=str(row.get("devtype", "")) or None,
+                                    vendor=str(row.get("vendor", "")) or None,
+                                    model=str(row.get("model", "")) or None,
+                                    version=str(row.get("version", "")) or None,
+                                    serial_number=str(row.get("serialNumber", "")) or None,
+                                    os=str(row.get("os", "")) or None,
+                                    status="up" if row.get("status") == "alive" else "down",
+                                    management_ip=str(row.get("address", "")) or None,
+                                    uptime=uptime_str,
+                                    last_polled=last_polled,
+                                ))
+                except Exception as e:
+                    logger.warning(f"Failed to read device parquet: {e}")
 
         except Exception as e:
-            logger.error(f"Failed to load topology: {e}")
-            # Return empty topology on error
-            return TopologyData(nodes=[], edges=[], last_updated=None)
+            logger.error(f"Failed to load inventory: {e}")
+            return InventoryData(devices=[], total=0, last_updated=None)
 
-        return TopologyData(
-            nodes=nodes,
-            edges=edges,
+        return InventoryData(
+            devices=devices,
+            total=len(devices),
             last_updated=last_updated,
         )
 
@@ -1426,6 +1537,15 @@ def create_app() -> FastAPI:
         max_workers: int = 5
         stop_on_failure: bool = False
         output_format: str = "table"
+        schedule: str | None = None  # Cron expression or "daily", "hourly"
+
+    class InspectionCreateRequest(BaseModel):
+        """Request to create a new inspection."""
+        name: str
+        description: str | None = None
+        devices: list[str] | dict = []
+        checks: list[InspectionCheck] = []
+        schedule: str | None = None
 
     class InspectionListResponse(BaseModel):
         """Response for inspection list endpoint."""
@@ -1539,6 +1659,7 @@ def create_app() -> FastAPI:
                         max_workers=config.get("max_workers", 5),
                         stop_on_failure=config.get("stop_on_failure", False),
                         output_format=config.get("output_format", "table"),
+                        schedule=config.get("schedule"),
                     ))
                 
                 return InspectionListResponse(inspections=inspections, total=len(inspections))
@@ -1547,6 +1668,98 @@ def create_app() -> FastAPI:
             logger.error(f"Failed to list inspections: {e}")
         
         return InspectionListResponse(inspections=[], total=0)
+
+    @app.post(
+        "/inspections",
+        response_model=InspectionConfig,
+        tags=["inspections"],
+        summary="Create new inspection configuration",
+        responses={
+            201: {"description": "Inspection created"},
+            400: {"description": "Invalid configuration"},
+            409: {"description": "Inspection already exists"},
+        },
+        status_code=201,
+    )
+    async def create_inspection(
+        request: InspectionCreateRequest,
+        current_user: CurrentUser,
+    ) -> InspectionConfig:
+        """
+        Create a new inspection configuration.
+
+        **Required**: Bearer token authentication
+        """
+        from pathlib import Path
+        import yaml
+        import re
+        
+        # Sanitize filename
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', request.name.lower())
+        filename = f"{safe_name}.yaml"
+        yaml_file = Path("config/inspections") / filename
+        
+        if yaml_file.exists():
+            raise HTTPException(status_code=409, detail=f"Inspection '{safe_name}' already exists")
+        
+        # Build config dict
+        config = {
+            "name": request.name,
+            "description": request.description,
+            "devices": request.devices,
+            "checks": [check.model_dump() for check in request.checks],
+            "schedule": request.schedule,
+            # Defaults
+            "parallel": True,
+            "max_workers": 5,
+            "stop_on_failure": False,
+            "output_format": "table",
+        }
+        
+        try:
+            # Write to file
+            yaml_file.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            
+            return InspectionConfig(
+                id=safe_name,
+                filename=filename,
+                **config
+            )
+        except Exception as e:
+            logger.error(f"Failed to create inspection {safe_name}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete(
+        "/inspections/{inspection_id}",
+        tags=["inspections"],
+        summary="Delete inspection configuration",
+        responses={
+            200: {"description": "Inspection deleted"},
+            404: {"description": "Inspection not found"},
+        },
+    )
+    async def delete_inspection(
+        inspection_id: str,
+        current_user: CurrentUser,
+    ) -> dict:
+        """
+        Delete an inspection configuration.
+
+        **Required**: Bearer token authentication
+        """
+        from pathlib import Path
+        
+        yaml_file = Path("config/inspections") / f"{inspection_id}.yaml"
+        
+        if not yaml_file.exists():
+            raise HTTPException(status_code=404, detail="Inspection not found")
+        
+        try:
+            yaml_file.unlink()
+            return {"status": "deleted", "id": inspection_id}
+        except Exception as e:
+            logger.error(f"Failed to delete inspection {inspection_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(
         "/inspections/{inspection_id}",
@@ -1601,7 +1814,57 @@ def create_app() -> FastAPI:
             max_workers=config.get("max_workers", 5),
             stop_on_failure=config.get("stop_on_failure", False),
             output_format=config.get("output_format", "table"),
+            schedule=config.get("schedule"),
         )
+
+    class InspectionUpdateRequest(BaseModel):
+        """Request to update an inspection configuration."""
+        content: str
+
+    @app.put(
+        "/inspections/{inspection_id}",
+        response_model=InspectionConfig,
+        tags=["inspections"],
+        summary="Update inspection configuration",
+        responses={
+            200: {"description": "Inspection updated"},
+            404: {"description": "Inspection not found"},
+            500: {"description": "Failed to save inspection"},
+        },
+    )
+    async def update_inspection(
+        inspection_id: str,
+        request: InspectionUpdateRequest,
+        current_user: CurrentUser,
+    ) -> InspectionConfig:
+        """
+        Update an inspection configuration YAML file.
+
+        **Required**: Bearer token authentication
+        """
+        from pathlib import Path
+        
+        yaml_file = Path("config/inspections") / f"{inspection_id}.yaml"
+        
+        if not yaml_file.exists():
+            raise HTTPException(status_code=404, detail="Inspection not found")
+        
+        try:
+            # Validate YAML content
+            import yaml
+            config = yaml.safe_load(request.content)
+            if not config or not isinstance(config, dict):
+                raise ValueError("Invalid YAML content")
+            
+            # Write to file
+            yaml_file.write_text(request.content, encoding="utf-8")
+            
+            # Return updated config
+            return await get_inspection(inspection_id, current_user)
+            
+        except Exception as e:
+            logger.error(f"Failed to update inspection {inspection_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.post(
         "/inspections/{inspection_id}/run",
@@ -1647,6 +1910,33 @@ def create_app() -> FastAPI:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_id = f"inspection_{inspection_id}_{timestamp}"
         
+        # Parse config to check if it's a "Smart Inspection" (no checks)
+        config = _parse_inspection_yaml(yaml_file)
+        if not config:
+             raise HTTPException(status_code=500, detail="Failed to parse inspection config")
+
+        checks = config.get("checks", [])
+        description = config.get("description")
+        
+        if not checks and description:
+            # Smart Inspection Mode: Use LLM to execute based on description
+            # We'll use the orchestrator to run this as a DeepDive task
+            if not orchestrator:
+                 raise HTTPException(status_code=503, detail="Orchestrator not ready")
+            
+            # Construct a query for the orchestrator
+            query = f"Run inspection: {description}. Target devices: {config.get('devices', 'all')}"
+            
+            # TODO: Launch this as a background task properly
+            # For now, we just acknowledge it. In a real implementation, we'd
+            # invoke orchestrator.ainvoke(...) in a background task and save the result as a report.
+            
+            return InspectionRunResponse(
+                status="started",
+                message=f"Smart Inspection '{inspection_id}' queued. LLM will execute: '{description}'",
+                report_id=report_id,
+            )
+
         # TODO: Actually run inspection via CLI or background task
         # For now, return a placeholder response
         # In production, this would use subprocess or celery to run:
@@ -1834,55 +2124,6 @@ def create_app() -> FastAPI:
     # ============================================
     # LangServe Routes
     # ============================================
-        """
-        Get full details of an inspection report.
-
-        **Required**: Bearer token authentication
-
-        **Example Request**:
-        ```bash
-        curl http://localhost:8000/reports/inspection_bgp_peer_audit_20251127_231051 \\
-          -H "Authorization: Bearer <token>"
-        ```
-        """
-        from pathlib import Path
-        
-        reports_dir = Path("data/inspection-reports")
-        report_file = reports_dir / f"{report_id}.md"
-        
-        if not report_file.exists():
-            raise HTTPException(status_code=404, detail="Report not found")
-        
-        try:
-            content = report_file.read_text(encoding="utf-8")
-            metadata = _parse_report_metadata(content, report_file.name)
-            
-            return ReportDetail(
-                id=report_id,
-                filename=report_file.name,
-                content=content,
-                title=metadata["title"],
-                config_name=metadata["config_name"],
-                description=metadata["description"],
-                executed_at=metadata["executed_at"],
-                duration=metadata["duration"],
-                device_count=metadata["device_count"],
-                check_count=metadata["check_count"],
-                pass_count=metadata["pass_count"],
-                fail_count=metadata["fail_count"],
-                pass_rate=metadata["pass_rate"],
-                status=metadata["status"],
-                warnings=metadata["warnings"],
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to read report {report_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    # ============================================
-    # LangServe Routes
-    # ============================================
     # NOTE: LangServe routes now mounted dynamically in lifespan after orchestrator init.
     if not orchestrator:
         logger.warning(
@@ -1914,8 +2155,6 @@ def create_app() -> FastAPI:
             },
             headers=headers,
         )
-
-        return app
 
     # ============================================
     # Simplified Invoke Endpoint (bypasses LangServe validation schema)

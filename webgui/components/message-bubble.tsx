@@ -91,7 +91,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             {/* Tools Used */}
             {message.metadata.tools_used && message.metadata.tools_used.length > 0 && (
               <div className="flex flex-wrap gap-1 text-xs opacity-70">
-                <span>工具:</span>
+                <span>Tools:</span>
                 {message.metadata.tools_used.map((tool, i) => (
                   <span key={i} className="rounded bg-black/20 px-1">
                     {tool}
@@ -103,7 +103,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             {/* Duration */}
             {message.metadata.duration_ms && (
               <div className="text-xs opacity-50">
-                耗时: {(message.metadata.duration_ms / 1000).toFixed(2)}s
+                Time: {(message.metadata.duration_ms / 1000).toFixed(2)}s
               </div>
             )}
           </div>
@@ -112,7 +112,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* Timestamp */}
         {message.timestamp && (
           <div className="mt-1 text-xs opacity-40">
-            {new Date(message.timestamp).toLocaleTimeString('zh-CN')}
+            {new Date(message.timestamp).toLocaleTimeString('en-US')}
           </div>
         )}
       </div>

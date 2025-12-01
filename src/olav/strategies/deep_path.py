@@ -28,10 +28,10 @@ import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
 from olav.core.json_utils import robust_structured_output
+from olav.core.prompt_manager import prompt_manager
 from olav.tools.base import ToolOutput, ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -381,41 +381,31 @@ class DeepPathStrategy:
         if self._tool_guides:
             guides_text = "\n\n".join(
                 [
-                    f"### {name.upper()} 工具\n{guide[:500]}..."  # Truncate for token efficiency
+                    f"### {name.upper()} Tools\n{guide[:500]}..."  # Truncate for token efficiency
                     for name, guide in self._tool_guides.items()
                 ]
             )
             capability_guide = f"""
-## 工具能力指南
+## Tool Capability Guide
 {guides_text}
 """
 
-        context_str = ""
+        context_section = ""
         if context:
-            context_str = f"\n\n可用上下文: {context}"
+            context_section = f"\n\nAvailable context: {context}"
 
-        prompt = f"""你是 OLAV 网络诊断专家。用户提出了复杂的诊断问题，需要多步推理。
-
-## 用户问题
-{state.original_query}
-{context_str}
-{schema_section}
-{capability_guide}
-## 第一步：初始观察
-确定需要收集哪些初始数据来理解问题。选择 1-2 个工具调用。
-
-可用工具：
-- suzieq_query: 查询网络状态（必须使用 Schema Discovery 中发现的表名）
-- netbox_api_call: 查询设备信息、IP、配置
-- cli_tool: 执行 CLI 命令
-- netconf_tool: NETCONF get-config
-
-⚠️ 如果使用 suzieq_query，必须使用 Schema Discovery 中发现的表名！
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"tool_calls": [{{"tool": "suzieq_query", "parameters": {{"table": "bgp"}}, "reasoning": "查询 BGP 状态"}}]}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/deep_path",
+                "initial_observation",
+                original_query=state.original_query,
+                context_section=context_section,
+                schema_section=schema_section,
+                capability_guide=capability_guide,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load initial_observation prompt: {e}, using fallback")
+            prompt = f"Analyze query and select tools: {state.original_query}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -459,27 +449,22 @@ class DeepPathStrategy:
         # Serialize observations
         observations_text = "\n\n".join(
             [
-                f"**观察 {obs.step_number}**: {obs.tool} → {obs.interpretation}\n"
-                f"数据: {obs.tool_output.data[:3] if obs.tool_output and obs.tool_output.data else 'No data'}"
+                f"**Observation {obs.step_number}**: {obs.tool} → {obs.interpretation}\n"
+                f"Data: {obs.tool_output.data[:3] if obs.tool_output and obs.tool_output.data else 'No data'}"
                 for obs in state.observations
             ]
         )
 
-        prompt = f"""你是 OLAV 网络诊断专家。基于观察到的数据，提出可能的根本原因假设。
-
-## 原始问题
-{state.original_query}
-
-## 已收集的观察
-{observations_text}
-
-## 任务
-分析数据，提出 2-3 个关于根本原因的假设。按置信度排序（最可能的在前）。
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"hypotheses": [{{"description": "假设描述", "reasoning": "推理过程", "verification_plan": "验证计划", "confidence": 0.8}}]}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/deep_path",
+                "hypothesis_generation",
+                original_query=state.original_query,
+                observations_text=observations_text,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load hypothesis_generation prompt: {e}, using fallback")
+            prompt = f"Generate hypotheses for: {state.original_query}\nObservations: {observations_text}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -507,9 +492,9 @@ class DeepPathStrategy:
             # Fallback hypothesis
             state.hypotheses = [
                 Hypothesis(
-                    description="需要更多数据来确定根本原因",
-                    reasoning="当前观察不足以形成确定性假设",
-                    verification_plan="收集更多诊断数据",
+                    description="Insufficient data to determine root cause",
+                    reasoning="Current observations are insufficient to form a definitive hypothesis",
+                    verification_plan="Collect additional diagnostic data",
                     confidence=0.3,
                 )
             ]
@@ -535,28 +520,21 @@ class DeepPathStrategy:
                 ]
             )
             schema_section = f"""
-## 🎯 Schema Discovery 结果（必须使用这些表名）
+## 🎯 Schema Discovery Results (MUST use these table names)
 {schema_tables}
 """
 
-        prompt = f"""你是 OLAV 网络诊断专家。现在需要验证一个假设。
-
-## 假设
-{state.current_hypothesis.description}
-
-## 验证计划
-{state.current_hypothesis.verification_plan}
-{schema_section}
-
-## 任务
-根据验证计划，决定需要执行的工具调用。如果有 Schema Discovery 结果，使用发现的表名。
-
-⚠️ 如果使用 suzieq_query，必须使用 Schema Discovery 中发现的表名！
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"tool": "suzieq_query", "parameters": {{"table": "bgp"}}, "reasoning": "验证假设的工具调用"}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/deep_path",
+                "hypothesis_verification",
+                hypothesis_description=state.current_hypothesis.description,
+                verification_plan=state.current_hypothesis.verification_plan,
+                schema_section=schema_section,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load hypothesis_verification prompt: {e}, using fallback")
+            prompt = f"Verify hypothesis: {state.current_hypothesis.description}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -596,22 +574,22 @@ class DeepPathStrategy:
 
         latest_obs = state.observations[-1]
 
-        prompt = f"""你是 OLAV 网络诊断专家。评估验证结果是否支持假设。
+        # Format tool data for prompt
+        tool_data = "No data"
+        if latest_obs.tool_output and latest_obs.tool_output.data:
+            tool_data = str(latest_obs.tool_output.data[:5])
 
-## 假设
-{state.current_hypothesis.description}
-
-## 验证结果
-工具: {latest_obs.tool}
-数据: {latest_obs.tool_output.data[:5] if latest_obs.tool_output and latest_obs.tool_output.data else "No data"}
-
-## 任务
-分析验证结果是否支持假设。更新置信度。
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"supports_hypothesis": true, "updated_confidence": 0.85, "reasoning": "分析结果说明..."}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/deep_path",
+                "confidence_update",
+                hypothesis_description=state.current_hypothesis.description,
+                tool_name=latest_obs.tool,
+                tool_data=tool_data,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load confidence_update prompt: {e}, using fallback")
+            prompt = f"Evaluate if data supports hypothesis: {state.current_hypothesis.description}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -644,30 +622,20 @@ class DeepPathStrategy:
         )
 
         hypotheses_text = "\n".join(
-            [f"- {h.description} (置信度: {h.confidence:.2f})" for h in state.hypotheses]
+            [f"- {h.description} (confidence: {h.confidence:.2f})" for h in state.hypotheses]
         )
 
-        prompt = f"""你是 OLAV 网络诊断专家。基于推理过程，回答用户的问题。
-
-## 原始问题
-{state.original_query}
-
-## 推理过程
-{observations_text}
-
-## 测试的假设
-{hypotheses_text}
-
-## 任务
-综合所有信息，回答用户问题。包括：
-1. 根本原因（如果找到）
-2. 支持证据
-3. 建议的解决方案（如果适用）
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"conclusion": "详细的结论，包含根本原因、证据和建议（2-3 段话）", "confidence": 0.85}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/deep_path",
+                "conclusion_synthesis",
+                original_query=state.original_query,
+                observations_text=observations_text,
+                hypotheses_text=hypotheses_text,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load conclusion_synthesis prompt: {e}, using fallback")
+            prompt = f"Synthesize conclusion for: {state.original_query}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -682,7 +650,7 @@ class DeepPathStrategy:
 
         except Exception as e:
             logger.error(f"Failed to synthesize conclusion: {e}")
-            state.conclusion = f"基于 {len(state.observations)} 次观察，问题分析尚未完成。"
+            state.conclusion = f"Analysis incomplete after {len(state.observations)} observations."
             state.confidence = 0.5
 
     async def _execute_tool(self, tool_name: str, parameters: dict[str, Any]) -> ToolOutput:

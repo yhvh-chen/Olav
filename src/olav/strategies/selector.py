@@ -15,6 +15,11 @@ Key Benefits:
 - No user decision required: Query analysis handles routing
 - Graceful degradation: Fast→Deep fallback on complexity detection
 
+Fallback Rules:
+- batch_path → fast_path (batch requires YAML config, fallback to simple query)
+- deep_path → fast_path (if reasoning fails, try simple query)
+- fast_path → deep_path (if simple query insufficient, try reasoning)
+
 Example Routing:
 - "查询 R1 BGP 状态" → Fast Path (simple, single device)
 - "为什么 R1 BGP 无法建立？" → Deep Path (diagnostic, needs reasoning)
@@ -25,10 +30,10 @@ import logging
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
 from olav.core.json_utils import robust_structured_output
+from olav.core.prompt_manager import prompt_manager
 from olav.strategies.batch_path import BatchPathStrategy
 from olav.strategies.deep_path import DeepPathStrategy
 from olav.strategies.fast_path import FastPathStrategy
@@ -247,6 +252,8 @@ class StrategySelector:
         """
         LLM-based strategy classification for ambiguous queries.
 
+        Uses prompt template from config/prompts/core/strategy_selection.yaml.
+
         Args:
             user_query: User query
             rule_decision: Initial rule-based decision (for context)
@@ -254,44 +261,18 @@ class StrategySelector:
         Returns:
             StrategyDecision from LLM analysis
         """
-        prompt = f"""你是网络运维策略选择专家。分析用户查询并选择最优执行策略。
-
-## 可选策略
-
-1. **fast_path** (快速路径)
-   - 用途: 简单查询、单设备状态检查
-   - 特点: <2 秒响应、单次工具调用、确定性结果
-   - 示例: "查询 R1 BGP 状态", "显示接口列表", "获取设备 IP"
-
-2. **deep_path** (深度路径)
-   - 用途: 复杂诊断、多步推理、根因分析
-   - 特点: 迭代推理、假设验证、自适应探索
-   - 示例: "为什么 R1 BGP 无法建立？", "诊断丢包原因", "排查路由异常"
-
-3. **batch_path** (批量路径)
-   - 用途: 多设备批量检查、合规审计、健康检查
-   - 特点: 并行执行、零 LLM 验证、报告生成
-   - 示例: "批量检查所有路由器", "审计 BGP 配置", "健康检查所有交换机"
-
-## 用户查询
-{user_query}
-
-## 规则初选建议
-策略: {rule_decision.strategy}
-置信度: {rule_decision.confidence:.2f}
-理由: {rule_decision.reasoning}
-
-## 任务
-分析查询复杂度、设备范围、预期结果类型，选择最优策略。
-
-返回 JSON：
-{{{{
-    "strategy": "fast_path|deep_path|batch_path",
-    "confidence": 0.95,
-    "reasoning": "选择理由（考虑查询类型、复杂度、设备范围）",
-    "fallback": "fast_path|deep_path|batch_path"
-}}}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "core",
+                "strategy_selection",
+                user_query=user_query,
+                rule_strategy=rule_decision.strategy,
+                rule_confidence=f"{rule_decision.confidence:.2f}",
+                rule_reasoning=rule_decision.reasoning,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load strategy selection prompt: {e}, using rule-based")
+            return rule_decision
 
         try:
             # Use robust_structured_output for reliable JSON extraction

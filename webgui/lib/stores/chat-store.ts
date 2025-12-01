@@ -10,7 +10,9 @@ interface ChatState {
   isStreaming: boolean;
   currentThinking: ThinkingStep[];
   activeTool: ToolEvent | null;
+  toolHistory: ToolEvent[];
   streamingContent: string;
+  abortController: AbortController | null;
   
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
@@ -18,9 +20,12 @@ interface ChatState {
   setStreaming: (isStreaming: boolean) => void;
   addThinkingStep: (step: ThinkingStep) => void;
   setActiveTool: (tool: ToolEvent | null) => void;
+  addToolToHistory: (tool: ToolEvent) => void;
   appendStreamingContent: (content: string) => void;
   finalizeStreaming: () => void;
   clearChat: () => void;
+  setAbortController: (controller: AbortController | null) => void;
+  abortStreaming: () => void;
 }
 
 export const useChatStore = create<ChatState>()((set, get) => ({
@@ -28,7 +33,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   isStreaming: false,
   currentThinking: [],
   activeTool: null,
+  toolHistory: [],
   streamingContent: '',
+  abortController: null,
 
   addMessage: (message: Message) => {
     set((state) => ({
@@ -71,6 +78,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set({ activeTool: tool });
   },
 
+  addToolToHistory: (tool: ToolEvent) => {
+    set((state) => ({
+      toolHistory: [...state.toolHistory, tool],
+    }));
+  },
+
   appendStreamingContent: (content: string) => {
     set((state) => ({
       streamingContent: state.streamingContent + content,
@@ -95,6 +108,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         ],
         streamingContent: '',
         currentThinking: [],
+        toolHistory: [],
         isStreaming: false,
         activeTool: null,
       }));
@@ -102,6 +116,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       set({
         isStreaming: false,
         activeTool: null,
+        toolHistory: [],
       });
     }
   },
@@ -112,8 +127,50 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       isStreaming: false,
       currentThinking: [],
       activeTool: null,
+      toolHistory: [],
       streamingContent: '',
+      abortController: null,
     });
+  },
+
+  setAbortController: (controller: AbortController | null) => {
+    set({ abortController: controller });
+  },
+
+  abortStreaming: () => {
+    const { abortController, streamingContent } = get();
+    
+    // Abort the fetch request
+    if (abortController) {
+      abortController.abort();
+    }
+    
+    // Add cancelled message if there was partial content
+    if (streamingContent) {
+      set((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            role: 'assistant' as const,
+            content: streamingContent + '\n\n⚠️ *Response cancelled by user*',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        streamingContent: '',
+        currentThinking: [],
+        isStreaming: false,
+        activeTool: null,
+        abortController: null,
+      }));
+    } else {
+      set({
+        streamingContent: '',
+        currentThinking: [],
+        isStreaming: false,
+        activeTool: null,
+        abortController: null,
+      });
+    }
   },
 }));
 
@@ -137,6 +194,10 @@ export function processStreamEvent(event: StreamEvent): void {
       break;
 
     case 'tool_end':
+      // Add completed tool to history before clearing active
+      if (store.activeTool) {
+        store.addToolToHistory(store.activeTool);
+      }
       store.setActiveTool(null);
       break;
 

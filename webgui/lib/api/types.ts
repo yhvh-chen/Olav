@@ -151,30 +151,27 @@ export interface WorkflowResult {
 }
 
 // ============================================
-// Topology Types
+// Inventory Types
 // ============================================
-export interface TopologyNode {
+export interface InventoryDevice {
   id: string;
   hostname: string;
+  namespace: string;
   device_type?: string;
   vendor?: string;
   model?: string;
-  status: 'up' | 'down';
+  version?: string;
+  serial_number?: string;
+  os?: string;
+  status: 'up' | 'down' | 'unknown';
   management_ip?: string;
+  uptime?: string;
+  last_polled?: string;
 }
 
-export interface TopologyEdge {
-  id: string;
-  source: string;
-  target: string;
-  source_port?: string;
-  target_port?: string;
-  link_type?: string;
-}
-
-export interface TopologyData {
-  nodes: TopologyNode[];
-  edges: TopologyEdge[];
+export interface InventoryData {
+  devices: InventoryDevice[];
+  total: number;
   last_updated?: string;
 }
 

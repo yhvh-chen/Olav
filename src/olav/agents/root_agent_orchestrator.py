@@ -38,6 +38,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 import olav.tools  # noqa: F401
 from olav.agents.dynamic_orchestrator import DynamicIntentRouter
 from olav.core.llm import LLMFactory
+from olav.core.prompt_manager import prompt_manager
 from olav.core.settings import settings
 from olav.strategies import execute_with_strategy_selection
 from olav.workflows.base import WorkflowType
@@ -562,36 +563,22 @@ class WorkflowOrchestrator:
         ]
         task_details_json = json.dumps(task_details, ensure_ascii=False, indent=2)
 
-        analysis_prompt = f"""
-你是 OLAV 执行计划分析专家。用户对当前计划提出了修改请求，请分析并更新执行计划。
+        # Build current plan summary for prompt
+        current_plan_summary = (
+            f"Feasible tasks ({len(current_plan.get('feasible_tasks', []))}): "
+            f"{current_plan.get('feasible_tasks')}\n"
+            f"Uncertain tasks ({len(current_plan.get('uncertain_tasks', []))}): "
+            f"{current_plan.get('uncertain_tasks')}\n"
+            f"Infeasible tasks ({len(current_plan.get('infeasible_tasks', []))}): "
+            f"{current_plan.get('infeasible_tasks')}"
+        )
 
-## 当前执行计划
-可行任务 ({len(current_plan.get("feasible_tasks", []))} 个): {current_plan.get("feasible_tasks")}
-不确定任务 ({len(current_plan.get("uncertain_tasks", []))} 个): {current_plan.get("uncertain_tasks")}
-无法执行任务 ({len(current_plan.get("infeasible_tasks", []))} 个): {current_plan.get("infeasible_tasks")}
-
-## 任务详情
-{task_details_json}
-
-## 用户修改请求
-{user_input}
-
-## 分析要求
-1. 理解用户意图（例如：跳过某些任务、修改查询表、添加过滤条件等）
-2. 更新任务的 feasibility 状态
-3. 修改 recommended_table（如果用户指定了）
-4. 更新 feasible_tasks / uncertain_tasks / infeasible_tasks 列表
-
-返回 JSON 格式的新执行计划：
-{{{{
-    "feasible_tasks": [任务ID列表],
-    "uncertain_tasks": [任务ID列表],
-    "infeasible_tasks": [任务ID列表],
-    "recommendations": {{{{"任务ID": "建议"}}}},
-    "user_approval_required": false,
-    "modification_summary": "对用户请求的理解和执行的修改摘要"
-}}}}
-"""
+        analysis_prompt = prompt_manager.load_prompt(
+            "agents",
+            "plan_modification",
+            current_plan=f"{current_plan_summary}\n\n## Task Details\n{task_details_json}",
+            user_request=user_input,
+        )
 
         response = await self.llm.ainvoke(
             [
@@ -687,7 +674,9 @@ async def create_workflow_orchestrator(expert_mode: bool = False):
         execution_plan: dict | None  # Plan from schema investigation
         todos: list | None  # HITL: task list for approval display
 
-    async def route_to_workflow(state: OrchestratorState) -> OrchestratorState:
+    from langchain_core.runnables import RunnableConfig
+
+    async def route_to_workflow(state: OrchestratorState, config: RunnableConfig) -> OrchestratorState:
         """Route user query to appropriate workflow."""
         # Normalize inbound messages: convert dicts to HumanMessage/AIMessage/SystemMessage
         normalized_messages: list[BaseMessage] = []
@@ -724,10 +713,11 @@ async def create_workflow_orchestrator(expert_mode: bool = False):
                 "messages": [AIMessage(content="未检测到用户查询")],
             }
 
-        # Generate thread_id from state or create new one
-        import time
-
-        thread_id = f"workflow-{int(time.time())}"
+        # Get thread_id from config or generate new one
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            import time
+            thread_id = f"workflow-{int(time.time())}"
 
         # Ensure required defaults if omitted
         if "iteration_count" not in state:

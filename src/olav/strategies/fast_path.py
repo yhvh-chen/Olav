@@ -44,11 +44,11 @@ from typing import Any, Literal
 
 import numpy as np
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
 from olav.core.json_utils import robust_structured_output
 from olav.core.llm_intent_classifier import classify_intent_with_llm
+from olav.core.prompt_manager import prompt_manager
 from olav.core.memory_writer import MemoryWriter
 from olav.core.middleware import FilesystemMiddleware
 from olav.tools.base import ToolOutput, ToolRegistry
@@ -1068,36 +1068,30 @@ class FastPathStrategy:
 
         tools_desc = "\n".join(
             [
-                f"- **{t}** {'(推荐)' if t == preferred_tool else ''}: {all_tools.get(t, '')}"
+                f"- **{t}** {'(recommended)' if t == preferred_tool else ''}: {all_tools.get(t, '')}"
                 for t in tool_order
                 if t in all_tools
             ]
         )
 
-        context_str = ""
+        context_section = ""
         if context:
-            context_str = f"\n\n## 可用上下文\n{context}"
+            context_section = f"\n\n## Available Context\n{context}"
 
-        prompt = f"""你是 OLAV 参数提取专家。从用户查询中提取结构化参数，用于单次工具调用（Fast Path）。
-
-## 用户查询
-{user_query}
-{context_str}
-{schema_section}
-{capability_guide}
-## 可用工具（按推荐顺序）
-{tools_desc}
-
-## 提取要求
-1. **优先使用推荐的工具**：根据意图分类，本次查询应优先使用 **{preferred_tool}**
-2. 如果有 Schema Discovery 结果，必须使用发现的表名/端点，不要猜测！
-3. 提取工具所需的精确参数
-4. 评估该查询是否适合 Fast Path（简单查询 confidence 高，复杂诊断 confidence 低）
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"tool": "suzieq_query", "parameters": {{"table": "bgp", "method": "get"}}, "confidence": 0.9, "reasoning": "查询BGP状态"}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/fast_path",
+                "parameter_extraction",
+                user_query=user_query,
+                context_section=context_section,
+                schema_section=schema_section,
+                capability_guide=capability_guide,
+                tools_desc=tools_desc,
+                preferred_tool=preferred_tool,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load parameter_extraction prompt: {e}, using fallback")
+            prompt = f"Extract parameters for query: {user_query}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -1478,28 +1472,19 @@ class FastPathStrategy:
         # Serialize tool data for LLM (use safe encoder for numpy types)
         data_json = safe_json_dumps(tool_output.data, ensure_ascii=False, indent=2)
 
-        prompt = f"""你是 OLAV 答案格式化专家。基于工具返回的数据，回答用户问题。
-
-## 严格规则
-1. **仅使用工具数据**：答案必须完全基于下方的工具输出，不得推测或添加未验证信息
-2. **引用字段**：在 `data_used` 中列出使用的数据字段
-3. **承认限制**：如果数据不足以完全回答问题，明确说明
-
-## 用户问题
-{user_query}
-
-## 工具输出
-来源: {tool_output.source}
-设备: {tool_output.device}
-数据:
-{data_json}
-
-元数据: {tool_output.metadata}
-
-## 输出格式（必须严格遵守）
-返回纯 JSON，不要包含 markdown 代码块或其他格式：
-{{"answer": "基于数据的简洁答案（2-3 句话）", "data_used": ["hostname", "state"], "confidence": 0.95}}
-"""
+        try:
+            prompt = prompt_manager.load_prompt(
+                "strategies/fast_path",
+                "answer_formatting",
+                user_query=user_query,
+                tool_source=tool_output.source,
+                tool_device=tool_output.device,
+                data_json=data_json,
+                tool_metadata=str(tool_output.metadata),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.warning(f"Failed to load answer_formatting prompt: {e}, using fallback")
+            prompt = f"Format answer for: {user_query}\nData: {data_json}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -1512,7 +1497,7 @@ class FastPathStrategy:
             logger.error(f"Failed to parse formatted answer: {e}")
             # Fallback formatting
             formatted = FormattedAnswer(
-                answer=f"工具返回了 {len(tool_output.data)} 条记录。", data_used=[], confidence=0.5
+                answer=f"Tool returned {len(tool_output.data)} records.", data_used=[], confidence=0.5
             )
 
         return formatted

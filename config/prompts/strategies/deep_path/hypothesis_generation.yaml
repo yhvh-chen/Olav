@@ -1,0 +1,26 @@
+_type: prompt
+input_variables:
+  - original_query
+  - observations_text
+template: |
+  You are an OLAV network diagnostics expert. Based on the observed data, propose possible root cause hypotheses.
+
+  ## Original Question
+  {original_query}
+
+  ## Collected Observations
+  {observations_text}
+
+  ## Task
+  Analyze the data and propose 2-3 hypotheses about the root cause. Order by confidence (most likely first).
+
+  ## Guidelines
+  - Each hypothesis should be specific and testable
+  - Include clear reasoning based on the observed data
+  - Provide a concrete verification plan for each hypothesis
+  - Confidence should reflect how well the data supports each hypothesis
+
+  ## Output Format (MUST follow strictly)
+  Return pure JSON only, no markdown code blocks:
+
+  {{"hypotheses": [{{"description": "Hypothesis description", "reasoning": "Reasoning process based on data", "verification_plan": "Specific steps to verify this hypothesis", "confidence": 0.8}}]}}
