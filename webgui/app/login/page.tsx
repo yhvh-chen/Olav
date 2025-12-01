@@ -19,13 +19,19 @@ function LoginContent() {
   // 验证 Token 的通用函数
   const validateToken = async (tokenToValidate: string): Promise<boolean> => {
     try {
+      console.log('Validating token (first 10 chars):', tokenToValidate.substring(0, 10) + '...');
       const user = await getMe(tokenToValidate);
+      console.log('Token validated successfully, user:', user);
       storeToken(tokenToValidate);
       setUser(user);
       router.replace('/chat');
       return true;
     } catch (err) {
       console.error('Token validation failed:', err);
+      // Show more detailed error
+      if (err instanceof Error) {
+        console.error('Error details:', err.message, err.name);
+      }
       // 清除可能无效的存储 token
       logout();
       return false;

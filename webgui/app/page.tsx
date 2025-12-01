@@ -8,11 +8,17 @@ import { getMe } from '@/lib/api/client';
 function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { token: storedToken, setToken, setUser } = useAuthStore();
-  const [status, setStatus] = useState<'checking' | 'redirecting'>('checking');
+  const { token: storedToken, setToken, setUser, _hasHydrated } = useAuthStore();
+  const [status, setStatus] = useState<'hydrating' | 'checking' | 'redirecting'>('hydrating');
 
   useEffect(() => {
+    // Wait for Zustand to hydrate from localStorage first
+    if (!_hasHydrated) {
+      return;
+    }
+
     const handleAuth = async () => {
+      setStatus('checking');
       const urlToken = searchParams.get('token');
       
       if (urlToken) {
@@ -46,14 +52,14 @@ function HomeContent() {
     };
 
     handleAuth();
-  }, [router, searchParams, storedToken, setToken, setUser]);
+  }, [router, searchParams, storedToken, setToken, setUser, _hasHydrated]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="text-center">
         <div className="animate-spin mx-auto h-8 w-8 rounded-full border-2 border-primary border-t-transparent" />
         <p className="mt-4 text-muted-foreground">
-          {status === 'checking' ? '正在验证...' : '正在跳转...'}
+          {status === 'hydrating' ? '加载中...' : status === 'checking' ? '正在验证...' : '正在跳转...'}
         </p>
       </div>
     </div>
