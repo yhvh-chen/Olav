@@ -46,12 +46,12 @@ from tests.e2e.test_cache import get_current_tracker, perf_logger
 # ============================================
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 CLI_PATH = PROJECT_ROOT / "cli.py"
-TIMEOUT_SIMPLE = 60
-TIMEOUT_COMPLEX = 120
+TIMEOUT_SIMPLE = 90   # Increased for free LLM APIs
+TIMEOUT_COMPLEX = 180
 
 # Performance thresholds (milliseconds)
-PERF_THRESHOLD_SIMPLE = 15000   # 15s for simple queries
-PERF_THRESHOLD_COMPLEX = 45000  # 45s for complex queries
+PERF_THRESHOLD_SIMPLE = 60000   # 60s for simple queries (free LLM APIs are slow)
+PERF_THRESHOLD_COMPLEX = 120000 # 120s for complex queries
 
 
 def _check_cli_available() -> bool:
@@ -495,9 +495,10 @@ class TestErrorHandling:
 class TestSchemaAware:
     """Tests for schema-aware query capabilities."""
     
+    @pytest.mark.slow
     def test_s01_table_discovery(self):
         """S01: Discover available tables."""
-        result = run_cli_query("what SuzieQ tables can I query?")
+        result = run_cli_query("what SuzieQ tables can I query?", timeout=TIMEOUT_COMPLEX)
         
         validation = validate_cli_response(
             result,
@@ -507,9 +508,10 @@ class TestSchemaAware:
         
         assert result.success, f"Query failed: {result.stderr}"
     
+    @pytest.mark.slow
     def test_s02_field_discovery(self):
         """S02: Discover table fields."""
-        result = run_cli_query("what fields are in the BGP table?")
+        result = run_cli_query("what fields are in the BGP table?", timeout=TIMEOUT_COMPLEX)
         
         validation = validate_cli_response(
             result,
@@ -519,9 +521,10 @@ class TestSchemaAware:
         
         assert result.success, f"Query failed: {result.stderr}"
     
+    @pytest.mark.slow
     def test_s03_method_discovery(self):
         """S03: Discover available methods."""
-        result = run_cli_query("what methods can I use to query data?")
+        result = run_cli_query("what methods can I use to query data?", timeout=TIMEOUT_COMPLEX)
         
         validation = validate_cli_response(
             result,
