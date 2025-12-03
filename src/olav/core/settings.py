@@ -38,7 +38,7 @@ class EnvSettings(BaseSettings):
     llm_provider: Literal["openai", "ollama", "azure"] = "openai"
     llm_api_key: str = ""
     llm_base_url: str = "https://openrouter.ai/api/v1"  # OpenRouter by default
-    llm_model_name: str = "x-ai/grok-4.1-fast"  # Grok 4.1 Fast via OpenRouter
+    llm_model_name: str = "x-ai/grok-4.1-fast:free"  # Grok 4.1 Fast (free) via OpenRouter
 
     # ============================================
     # Infrastructure Credentials

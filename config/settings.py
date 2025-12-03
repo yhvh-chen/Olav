@@ -56,7 +56,7 @@ class LLMConfig:
     """
     PROVIDER: Literal["openai", "ollama", "azure"] = "openai"
     BASE_URL: str = "https://openrouter.ai/api/v1"
-    MODEL_NAME = "x-ai/grok-4.1-fast"
+    MODEL_NAME = "x-ai/grok-4.1-fast:free"
     TEMPERATURE = 0.2
     MAX_TOKENS = 16000
     EMBEDDING_MODEL = "text-embedding-3-small"

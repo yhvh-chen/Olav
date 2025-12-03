@@ -129,16 +129,16 @@ def run_cli_query(
     tracker = get_current_tracker()
     step_start = time.perf_counter()
     
-    # Build command
-    cmd = ["uv", "run", "python", str(CLI_PATH)]
+    # Build command - use "query" subcommand
+    cmd = ["uv", "run", "python", str(CLI_PATH), "query"]
     
     # Add mode flag
     if mode == "expert":
-        cmd.extend(["-e"])
+        cmd.extend(["-m", "expert"])
     elif mode == "inspection":
-        cmd.extend(["-i"])
+        cmd.extend(["-m", "inspection"])
     
-    # Add query
+    # Add query text
     cmd.append(query)
     
     # Set environment
