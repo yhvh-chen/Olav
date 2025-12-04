@@ -5,7 +5,7 @@
     "hostname": "NONEXISTENT_DEVICE_XYZ",
     "method": "get"
   },
-  "cached_at": 1764732617.9938567,
+  "cached_at": 1764818295.3839502,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -17,7 +17,7 @@
       "method": "get",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 51
+      "elapsed_ms": 50
     }
   }
 }

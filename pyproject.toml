@@ -43,6 +43,7 @@ dependencies = [
     "croniter>=2.0.0",
     "gradio>=5.0.0",
     "prompt-toolkit>=3.0.0",
+    "langchain-ollama>=1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -1,13 +1,57 @@
 ﻿# OLAV 已知问题与待办事项
 
-> **更新日期**: 2025-01-27  
+> **更新日期**: 2025-12-04  
 > **版本**: v0.5.0-beta  
 > **架构**: **Dynamic Intent Router + Workflows + Memory RAG + Unified Tools**  
 > **核心原则**: **LLM-Driven 设计** - 使用 LLM 进行语义比对，零维护成本  
-> **状态**: ✅ **Single-Token Auth + E2E 测试修复完成** 🎉  
+> **状态**: ✅ **工具分配重构完成** - RAG/Syslog 工具已迁移到 Supervisor  
 > **架构符合度**: 100% (LLM-Driven Sync 100% + All Workflows 100%)  
 > **测试覆盖**: Unit 624/634 (98%), E2E 24/29 (83%) - 5 skipped expected  
 > **代码质量**: Ruff 错误 0, 测试稳定性 100%
+
+---
+
+## ✅ 完成: SupervisorDrivenWorkflow 工具分配重构 (2025-12-04)
+
+### 问题分析
+原实现将 `kb_search` 和 `syslog_search` 分配给了 Quick Analyzer，但根据设计原则：
+- **Supervisor 是决策者**：应该用 RAG/Syslog 指导层级优先级
+- **Quick Analyzer 是执行者**：应该只收集 Supervisor 指定层级的证据
+
+### 已完成事项
+
+#### P0: 工具分配修正 ✅
+- [x] **supervisor_node Round 0 初始化**
+  - [x] 添加 `syslog_search` 调用（查触发事件）
+  - [x] 基于 kb_search + syslog 结果计算 `priority_layer`
+  - [x] 将 `similar_cases` 和 `syslog_events` 存入 state
+
+- [x] **quick_analyzer_node 工具精简**
+  - [x] 移除 `kb_search`（Supervisor 已查）
+  - [x] 移除 `syslog_search`（Supervisor 已查）
+  - [x] 保留：suzieq_*, cli_show, netconf_get
+
+- [x] **State 扩展**
+  - [x] 添加 `priority_layer: str | None` 字段
+  - [x] 添加 `syslog_events: list[dict]` 字段
+  - [x] 添加 `similar_cases: list[dict]` 字段
+
+#### P1: 层级优先级逻辑 ✅
+- [x] **KB Layer Voting**: 从 KB 案例提取层级分布，投票选出优先层
+- [x] **Syslog Keyword Analysis**: 从 Syslog 关键词推断层级 (bgp→L3, link→L1, etc.)
+- [x] **Priority Merge**: KB 优先级高于 Syslog，综合计算 priority_layer
+
+#### P2: diagnosis-reports 索引初始化 ✅
+- [x] 修复 `init_diagnosis_kb.py` 的 OpenSearch API 兼容性（indices.create/refresh）
+- [x] 创建索引并 seed 测试数据（3 个 sample cases）
+- [x] 验证 kb_search 正常工作（返回 root_cause_layer）
+
+#### P3: Embedding/Vision 模型配置 ✅
+- [x] 添加 `EMBEDDING_*` 环境变量到 settings.py
+- [x] 添加 `VISION_*` 环境变量到 settings.py
+- [x] 更新 `.env.example`
+- [x] 更新 `LLMFactory.get_embedding_model()`
+- [x] 添加 `LLMFactory.get_vision_model()`
 
 ---
 

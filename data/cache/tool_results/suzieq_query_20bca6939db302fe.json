@@ -5,7 +5,7 @@
     "method": "summarize",
     "max_age_hours": 24
   },
-  "cached_at": 1764550143.0461817,
+  "cached_at": 1764818320.463753,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -13,20 +13,20 @@
     "data": [
       {
         "state_counts": {
-          "up": 28,
+          "up": 30,
           "down": 2
         },
         "adminState_counts": {
-          "up": 28,
+          "up": 30,
           "down": 2
         },
         "type_counts": {
           "ethernet": 16,
           "csr vnic": 8,
-          "loopback": 4,
+          "loopback": 6,
           "vlan": 2
         },
-        "total_records": 30,
+        "total_records": 32,
         "unique_hosts": 6
       }
     ],
@@ -36,7 +36,7 @@
       "method": "summarize",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 6
+      "elapsed_ms": 31
     }
   }
 }

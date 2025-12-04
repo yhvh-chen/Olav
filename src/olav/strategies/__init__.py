@@ -27,7 +27,12 @@ result = await execute_with_strategy_selection(
 
 from .batch_path import BatchPathStrategy
 from .deep_path import DeepPathStrategy
-from .executor import ExecutionResult, StrategyExecutor, execute_with_strategy_selection
+from .executor import (
+    ExecutionResult,
+    StrategyExecutor,
+    execute_with_mode,
+    execute_with_strategy_selection,
+)
 from .fast_path import FastPathStrategy
 from .selector import StrategyDecision, StrategySelector, create_strategy_selector
 
@@ -40,5 +45,6 @@ __all__ = [
     "StrategyExecutor",
     "StrategySelector",
     "create_strategy_selector",
+    "execute_with_mode",
     "execute_with_strategy_selection",
 ]

@@ -5,7 +5,7 @@
     "method": "summarize",
     "max_age_hours": 24
   },
-  "cached_at": 1764550093.6393719,
+  "cached_at": 1764818312.4700334,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -25,7 +25,7 @@
       "method": "summarize",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 30
+      "elapsed_ms": 11
     }
   }
 }

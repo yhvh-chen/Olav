@@ -303,14 +303,14 @@ class OlavThinClient:
         self,
         message: str,
         thread_id: str,
-        mode: str = "standard",  # "standard", "expert", "inspection"
+        mode: str = "standard",  # "standard" or "expert" (set via CLI -S or -E)
     ) -> ExecutionResult:
         """Execute a chat query (non-streaming).
         
         Args:
             message: User message
             thread_id: Conversation thread ID
-            mode: Query mode
+            mode: Query mode ("standard" or "expert", set at startup via CLI flags)
             
         Returns:
             ExecutionResult with response

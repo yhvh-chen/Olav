@@ -22,6 +22,7 @@ Workflow:
             [Final Answer]
 """
 
+import logging
 import sys
 
 if sys.platform == "win32":
@@ -38,6 +39,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
+from olav.middleware.tool_middleware import tool_middleware
 from olav.tools.document_tool import search_documents, search_rfc, search_vendor_docs
 from olav.tools.netbox_tool import netbox_api_call, netbox_schema_search
 from olav.tools.nornir_tool import cli_tool, netconf_tool
@@ -50,6 +52,8 @@ from olav.tools.syslog_tool import syslog_search
 
 from .base import BaseWorkflow, BaseWorkflowState
 from .registry import WorkflowRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class QueryDiagnosticState(BaseWorkflowState):
@@ -237,18 +241,30 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
         micro_tools_node = ToolNode(micro_tools)
 
         async def macro_analysis_node(state: QueryDiagnosticState) -> QueryDiagnosticState:
-            """Macro analysis using SuzieQ historical data."""
+            """Macro analysis using SuzieQ historical data.
+            
+            Uses ToolMiddleware to automatically inject tool descriptions.
+            """
             llm = LLMFactory.get_chat_model()
             llm_with_tools = llm.bind_tools(macro_tools)
 
             # Use the initial user query for prompt context
             user_query = state["messages"][0].content
-            macro_prompt = prompt_manager.load_prompt(
+            
+            # Load simplified base prompt
+            base_prompt = prompt_manager.load_prompt(
                 "workflows/query_diagnostic", "macro_analysis", user_query=user_query
+            )
+            
+            # Use ToolMiddleware to enrich prompt with tool descriptions
+            enriched_prompt = tool_middleware.enrich_prompt(
+                base_prompt=base_prompt,
+                tools=macro_tools,
+                include_guides=True,  # Include capability guides for SuzieQ
             )
 
             response = await llm_with_tools.ainvoke(
-                [SystemMessage(content=macro_prompt), *state["messages"]]
+                [SystemMessage(content=enriched_prompt), *state["messages"]]
             )
 
             return {
@@ -299,15 +315,24 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
 
             user_query = state["messages"][0].content
             macro_data = state.get("macro_data", {})
+            
+            # Load simplified prompt and enrich with ToolMiddleware
             micro_prompt = prompt_manager.load_prompt(
                 "workflows/query_diagnostic",
                 "micro_diagnosis",
                 user_query=user_query,
-                macro_data=str(macro_data),
+                macro_analysis_result=str(macro_data),
+            )
+            
+            # Use module-level tool_middleware singleton
+            enriched_prompt = tool_middleware.enrich_prompt(
+                base_prompt=micro_prompt,
+                tools=micro_tools,
+                include_guides=True,  # Include capability guides for diagnosis
             )
 
             response = await llm_with_tools.ainvoke(
-                [SystemMessage(content=micro_prompt), *state["messages"]]
+                [SystemMessage(content=enriched_prompt), *state["messages"]]
             )
 
             return {

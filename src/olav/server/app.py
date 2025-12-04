@@ -2324,6 +2324,11 @@ def create_app() -> FastAPI:
 
         Accepts test payload format without requiring full OrchestratorState.
         Returns workflow routing result including messages and interrupt info.
+        
+        The mode parameter in config.configurable determines execution strategy:
+        - standard: Fast path (single tool call, optimized for speed)
+        - expert: Deep path (iterative reasoning for complex diagnostics)
+        - inspection: Batch path (parallel execution with YAML config)
         """
         orch_obj = getattr(app.state, "orchestrator_obj", None)
         if orch_obj is None:
@@ -2338,29 +2343,41 @@ def create_app() -> FastAPI:
         if not user_query and payload.input.messages:
             user_query = payload.input.messages[-1].content
 
-        # Thread ID from config or generate
+        # Thread ID and mode from config or generate/default
         thread_id = None
+        mode = "standard"  # Default mode
         if payload.config and payload.config.configurable:
             thread_id = payload.config.configurable.get("thread_id")
+            mode = payload.config.configurable.get("mode", "standard")
         if not thread_id:
             import time
 
             thread_id = f"invoke-{int(time.time())}"
 
         try:
-            result = await orch_obj.route(user_query, thread_id)
+            result = await orch_obj.route(user_query, thread_id, mode=mode)
             # Convert BaseMessage objects to serializable dicts
             from langchain_core.messages import BaseMessage
+            from langgraph.types import Interrupt
 
             def serialize_messages(obj):
-                """Recursively serialize BaseMessage objects to dicts."""
+                """Recursively serialize BaseMessage and Interrupt objects to dicts."""
                 if isinstance(obj, BaseMessage):
                     return {"role": obj.type, "content": obj.content}
+                if isinstance(obj, Interrupt):
+                    # Handle LangGraph Interrupt object (HITL)
+                    return {"type": "interrupt", "value": str(obj.value) if hasattr(obj, 'value') else str(obj)}
                 if isinstance(obj, dict):
                     return {k: serialize_messages(v) for k, v in obj.items()}
                 if isinstance(obj, list):
                     return [serialize_messages(item) for item in obj]
-                return obj
+                # Handle other non-serializable objects
+                try:
+                    import json
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, ValueError):
+                    return str(obj)
 
             serialized_result = serialize_messages(result)
             return JSONResponse(status_code=200, content=serialized_result)
@@ -2452,23 +2469,34 @@ def create_app() -> FastAPI:
         if not user_query and payload.input.messages:
             user_query = payload.input.messages[-1].content
 
-        # Thread ID
+        # Thread ID and mode from config
         thread_id = None
+        mode = "standard"  # Default mode
         if payload.config and payload.config.configurable:
             thread_id = payload.config.configurable.get("thread_id")
+            mode = payload.config.configurable.get("mode", "standard")
         if not thread_id:
             import time
             thread_id = f"stream-{int(time.time())}"
+        
+        logger.info(f"[stream/events] mode={mode}, thread_id={thread_id}, query={user_query[:50]}...")
 
         # Tool display names (English for international compatibility)
         tool_display_names = {
             "suzieq_query": "SuzieQ Query",
             "suzieq_schema_search": "SuzieQ Schema Search",
+            "suzieq_health_check": "SuzieQ Health Check",
+            "suzieq_path_trace": "SuzieQ Path Trace",
+            "suzieq_topology_analyze": "SuzieQ Topology",
             "netbox_api": "NetBox API",
             "netbox_api_call": "NetBox API",
+            "cli_show": "CLI Show",
             "cli_execute": "CLI Execute",
             "cli_executor": "CLI Execute",
+            "cli_config": "CLI Config",
+            "netconf_get": "NETCONF Get",
             "netconf_execute": "NETCONF",
+            "netconf_edit": "NETCONF Edit",
             "netconf_tool": "NETCONF",
             "rag_search": "Knowledge Base Search",
             "episodic_memory_search": "Memory Search",
@@ -2476,23 +2504,41 @@ def create_app() -> FastAPI:
 
         async def event_stream():
             """Generate SSE events from orchestrator execution."""
-            from langchain_core.messages import AIMessage, ToolMessage
+            from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
             seen_tool_ids = set()
             tool_start_times = {}
 
             try:
-                # Get the stateful graph for streaming
-                stateful_graph = getattr(app.state, "stateful_graph", None)
-                if stateful_graph is None:
-                    yield f"data: {json_module.dumps({'type': 'error', 'error': {'code': 'NO_GRAPH', 'message': 'Stateful graph not available'}})}\n\n"
-                    return
+                # Choose execution graph based on mode
+                if mode == "expert":
+                    # Expert mode: Use SupervisorDrivenWorkflow for complex diagnostics
+                    # This enables funnel debugging: SuzieQ (60%) → CLI/NETCONF (95%)
+                    logger.info(f"[stream/events] Using Expert mode (SupervisorDrivenWorkflow)")
+                    from olav.workflows.supervisor_driven import SupervisorDrivenWorkflow
+                    workflow = SupervisorDrivenWorkflow()
+                    stream_graph = workflow.build_graph(checkpointer=orch_obj.checkpointer)
+                    initial_input = {
+                        "messages": [HumanMessage(content=user_query)],
+                        "iteration_count": 0,
+                    }
+                else:
+                    # Standard mode: Use stateful graph (fast_path)
+                    logger.info(f"[stream/events] Using Standard mode (fast_path)")
+                    stream_graph = getattr(app.state, "stateful_graph", None)
+                    if stream_graph is None:
+                        yield f"data: {json_module.dumps({'type': 'error', 'error': {'code': 'NO_GRAPH', 'message': 'Stateful graph not available'}})}\n\n"
+                        return
+                    initial_input = {"messages": [{"role": "user", "content": user_query}]}
 
                 # Stream with values mode to get state updates
-                config = {"configurable": {"thread_id": thread_id}}
+                config = {
+                    "configurable": {"thread_id": thread_id},
+                    "recursion_limit": 100 if mode == "expert" else 25,
+                }
 
-                async for chunk in stateful_graph.astream(
-                    {"messages": [{"role": "user", "content": user_query}]},
+                async for chunk in stream_graph.astream(
+                    initial_input,
                     config=config,
                     stream_mode="values",
                 ):

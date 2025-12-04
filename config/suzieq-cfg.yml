@@ -1,0 +1,8 @@
+# SuzieQ Configuration for OLAV Server Container
+# This config points to the correct data path in the server container
+
+data-directory: /app/data/suzieq-parquet
+temp-directory: /tmp/suzieq
+
+analyzer:
+  timezone: UTC

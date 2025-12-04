@@ -1,0 +1,49 @@
+{
+  "tool": "cli_execute",
+  "parameters": {
+    "device": "R1",
+    "command": "show version"
+  },
+  "cached_at": 1764744915.9429727,
+  "cache_ttl": 300,
+  "tool_output": {
+    "source": "cli",
+    "device": "R1",
+    "data": [
+      {
+        "software_image": "X86_64_LINUX_IOSD-UNIVERSALK9-M",
+        "version": "17.1.1",
+        "release": "fc3",
+        "rommon": "IOS-XE",
+        "hostname": "R1",
+        "uptime": "1 week, 4 days, 18 hours, 58 minutes",
+        "uptime_years": "",
+        "uptime_weeks": "1",
+        "uptime_days": "4",
+        "uptime_hours": "18",
+        "uptime_minutes": "58",
+        "reload_reason": "reload",
+        "running_image": "packages.conf",
+        "hardware": [
+          "ISRV"
+        ],
+        "serial": [
+          "93PRT0ULBPS"
+        ],
+        "config_register": "0x2102",
+        "mac_address": [],
+        "restarted": ""
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "device": "R1",
+      "command": "show version",
+      "config_commands": null,
+      "is_config": false,
+      "elapsed_ms": 1215,
+      "success": true,
+      "requires_approval": false
+    }
+  }
+}

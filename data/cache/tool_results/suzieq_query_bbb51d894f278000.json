@@ -5,7 +5,7 @@
     "hostname": "R1",
     "method": "get"
   },
-  "cached_at": 1764732485.1301584,
+  "cached_at": 1764818281.8790133,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -13,9 +13,9 @@
     "data": [
       {
         "weights": [],
-        "prefix": "192.168.100.101/32",
+        "prefix": "10.1.12.0/24",
         "oifs": [
-          "GigabitEthernet4"
+          "GigabitEthernet1"
         ],
         "nexthopIps": [],
         "source": "",
@@ -25,14 +25,14 @@
         "vrf": "default",
         "validState": "",
         "ipvers": 4,
-        "protocol": "local",
+        "protocol": "connected",
         "hardwareProgrammed": "unknown",
         "metric": 0,
-        "statusChangeTimestamp": 1764730717774,
+        "statusChangeTimestamp": 1764817164487,
         "preference": 0,
-        "deviceSession": 1763726241,
+        "deviceSession": 1763726232,
         "hostname": "R1",
-        "timestamp": 1764730717774,
+        "timestamp": 1764817164487,
         "active": true,
         "sqvers": "3.0",
         "namespace": "default"
@@ -44,7 +44,7 @@
       "method": "get",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 102
+      "elapsed_ms": 175
     }
   }
 }

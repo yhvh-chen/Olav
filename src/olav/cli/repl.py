@@ -35,14 +35,13 @@ SLASH_COMMANDS = [
     "/h", "/help",      # Help
     "/q", "/exit", "/quit",  # Exit
     "/s",              # Standard mode
-    "/e",              # Expert mode  
-    "/i",              # Inspection mode
+    "/e",              # Expert mode
     "/c", "/clear",    # Clear screen
     "/his", "/history", # History
     "/info",           # Session info
 ]
 
-MODE_OPTIONS = ["standard", "expert", "inspection"]
+MODE_OPTIONS = ["standard", "expert"]
 
 EXAMPLE_QUERIES = [
     "check R1 BGP status",
@@ -280,10 +279,19 @@ class REPLSession:
             return None
     
     def set_mode(self, mode: str) -> None:
-        """Change operation mode."""
+        """Change operation mode.
+        
+        User can switch modes in TUI, but workflows are strictly separated:
+        - Standard mode uses fast_path strategy
+        - Expert mode uses SupervisorDrivenWorkflow
+        - No automatic escalation between modes
+        """
         if mode in MODE_OPTIONS:
             self.mode = mode
-            self.console.print(f"[green]Mode changed to: {mode}[/green]")
+            if mode == "standard":
+                self.console.print("[green]✓ Switched to Standard mode[/green] (fast path)")
+            else:
+                self.console.print("[green]✓ Switched to Expert mode[/green] (Supervisor-Driven L1-L4 analysis)")
         else:
             self.console.print(f"[yellow]Invalid mode. Options: {', '.join(MODE_OPTIONS)}[/yellow]")
     
@@ -294,9 +302,8 @@ class REPLSession:
         self.console.print()
         self.console.print("[cyan]/h[/cyan]           Show this help")
         self.console.print("[cyan]/q[/cyan]           Exit REPL (or Ctrl+D)")
-        self.console.print("[cyan]/s[/cyan]           Switch to Standard mode")
-        self.console.print("[cyan]/e[/cyan]           Switch to Expert mode")
-        self.console.print("[cyan]/i[/cyan]           Switch to Inspection mode")
+        self.console.print("[cyan]/s[/cyan]           Switch to Standard mode (fast path)")
+        self.console.print("[cyan]/e[/cyan]           Switch to Expert mode (Supervisor-Driven)")
         self.console.print("[cyan]/c[/cyan]           Clear screen")
         self.console.print("[cyan]/his[/cyan]         Show command history")
         self.console.print("[cyan]/info[/cyan]        Show session info")
@@ -352,6 +359,7 @@ def handle_slash_command(repl: REPLSession, command: str) -> bool:
         repl: REPL session
         command: Full command string (including /)
         
+        
     Returns:
         True if should exit REPL, False otherwise
     """
@@ -375,10 +383,6 @@ def handle_slash_command(repl: REPLSession, command: str) -> bool:
     # Expert mode
     elif cmd == "e":
         repl.set_mode("expert")
-    
-    # Inspection mode
-    elif cmd == "i":
-        repl.set_mode("inspection")
     
     # Clear screen
     elif cmd in ("c", "clear"):

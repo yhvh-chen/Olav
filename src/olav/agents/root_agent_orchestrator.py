@@ -40,7 +40,6 @@ from olav.agents.dynamic_orchestrator import DynamicIntentRouter
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
 from olav.core.settings import settings
-from olav.strategies import execute_with_strategy_selection
 from olav.workflows.base import WorkflowType
 from olav.workflows.deep_dive import DeepDiveWorkflow
 from olav.workflows.device_execution import DeviceExecutionWorkflow
@@ -186,49 +185,17 @@ class WorkflowOrchestrator:
         return await self._legacy_classify_intent(user_query)
 
     async def _legacy_classify_intent(self, user_query: str) -> WorkflowType:
-        """Legacy classification using LLM Workflow Router.
+        """Legacy classification using keyword matching.
 
-        This method has been refactored to use LLMWorkflowRouter for more
-        dynamic, context-aware classification. The hardcoded keyword patterns
-        have been moved to the router as minimal fallback.
-
-        See: olav.core.llm_workflow_router for implementation details.
+        Used as fallback when Dynamic Router is not available.
+        Simple keyword-based classification for workflow selection.
         """
-        from olav.core.llm_workflow_router import LLMWorkflowRouter, WorkflowRouteResult
-
-        # Create router with current expert mode setting
-        router = LLMWorkflowRouter(expert_mode=self.expert_mode)
-
-        try:
-            result: WorkflowRouteResult = await router.route(user_query)
-
-            # Map workflow name to WorkflowType enum
-            workflow_map = {
-                "query_diagnostic": WorkflowType.QUERY_DIAGNOSTIC,
-                "device_execution": WorkflowType.DEVICE_EXECUTION,
-                "netbox_management": WorkflowType.NETBOX_MANAGEMENT,
-                "deep_dive": WorkflowType.DEEP_DIVE,
-                "inspection": WorkflowType.INSPECTION,
-            }
-
-            workflow_type = workflow_map.get(result.workflow, WorkflowType.QUERY_DIAGNOSTIC)
-
-            logger.info(
-                f"LLM Workflow Router: {result.workflow} "
-                f"(confidence: {result.confidence:.2f}, reason: {result.reasoning[:50]}...)"
-            )
-
-            return workflow_type
-
-        except Exception as e:
-            logger.warning(f"LLM Workflow Router failed: {e}, using keyword fallback")
-            return self._classify_by_keywords(user_query)
+        return self._classify_by_keywords(user_query)
 
     def _classify_by_keywords(self, user_query: str) -> WorkflowType:
-        """Minimal keyword fallback when LLM router fails.
+        """Keyword-based workflow classification.
 
-        This is a simplified fallback with reduced keyword set (~25 vs ~100).
-        For full classification, use LLMWorkflowRouter.
+        Simple but reliable keyword matching for workflow selection.
         """
         query_lower = user_query.lower()
 
@@ -257,75 +224,78 @@ class WorkflowOrchestrator:
         # Default: Query diagnostic
         return WorkflowType.QUERY_DIAGNOSTIC
 
-    async def route(self, user_query: str, thread_id: str) -> dict:
+    async def route(self, user_query: str, thread_id: str, mode: str = "standard") -> dict:
         """Route query to appropriate workflow and execute.
+
+        STRICT MODE SEPARATION:
+        - standard (-S): Uses fast_path strategy with single tool calls
+        - expert (-E): Uses SupervisorDrivenWorkflow with L1-L4 layer analysis
+
+        No automatic switching between modes. User explicitly controls via CLI flags.
 
         Args:
             user_query: User's natural language query
             thread_id: Unique thread ID for state persistence
+            mode: Execution mode from CLI (standard/expert)
+                  - standard: Fast path (single tool call, optimized for speed)
+                  - expert: Supervisor-Driven deep dive (L1-L4 layer analysis)
 
         Returns:
             Execution result from selected workflow
         """
-        # 1. Classify intent
+        # ===== EXPERT MODE: Direct to SupervisorDrivenWorkflow =====
+        if mode == "expert":
+            print(f"[Orchestrator] Expert mode (-E): Using SupervisorDrivenWorkflow")
+            return await self._execute_expert_mode(user_query, thread_id)
+
+        # ===== STANDARD MODE: Intent classification + fast_path =====
+        # 1. Classify intent for workflow selection
         workflow_type = await self.classify_intent(user_query)
-        print(f"[Orchestrator] Classified as: {workflow_type.name}")
+        print(f"[Orchestrator] Standard mode (-S): Classified as {workflow_type.name}")
 
         # 2. Validate with workflow
         workflow = self.workflows[workflow_type]
         is_valid, reason = await workflow.validate_input(user_query)
 
         if not is_valid:
-            # Fallback to default (query/diagnostic)
             print(f"[Orchestrator] Validation failed: {reason}, using QueryDiagnostic")
             workflow_type = WorkflowType.QUERY_DIAGNOSTIC
             workflow = self.workflows[workflow_type]
 
-        # 2.5. Strategy Optimization for QUERY_DIAGNOSTIC
-        # Use FastPath/DeepPath/BatchPath for optimized execution
+        # 3. For QUERY_DIAGNOSTIC, use fast_path strategy (standard mode)
         if workflow_type == WorkflowType.QUERY_DIAGNOSTIC and self.use_strategy_optimization:
             try:
-                strategy_result = await self._execute_with_strategy(user_query)
+                strategy_result = await self._execute_standard_mode(user_query)
                 if strategy_result and strategy_result.get("success"):
-                    print(
-                        f"[Orchestrator] Strategy optimization succeeded: {strategy_result.get('strategy_used')}"
-                    )
+                    print(f"[Orchestrator] fast_path succeeded")
                     return {
                         "workflow_type": workflow_type.name,
                         "result": strategy_result,
                         "interrupted": False,
                         "final_message": strategy_result.get("answer"),
-                        "strategy_used": strategy_result.get("strategy_used"),
-                        "strategy_metadata": strategy_result.get("metadata", {}),
+                        "strategy_used": "fast_path",
+                        "mode": "standard",
                     }
-                print("[Orchestrator] Strategy optimization failed, falling back to workflow graph")
+                print("[Orchestrator] fast_path failed, falling back to workflow graph")
             except Exception as e:
-                logger.warning(f"Strategy optimization error: {e}, falling back to workflow graph")
+                logger.warning(f"fast_path error: {e}, falling back to workflow graph")
 
-        # 3. Build and execute workflow graph
-        # DEEP_DIVE always needs checkpointer for HITL interrupt support
-        # Other workflows respect stream_stateless setting for LangServe compatibility
-        # NETBOX_MANAGEMENT, DEVICE_EXECUTION and INSPECTION also need HITL support
+        # 4. Build and execute workflow graph (for non-QUERY_DIAGNOSTIC or fallback)
         if workflow_type in (
             WorkflowType.DEEP_DIVE,
             WorkflowType.NETBOX_MANAGEMENT,
             WorkflowType.DEVICE_EXECUTION,
             WorkflowType.INSPECTION,
         ):
-            # These workflows require stateful execution for HITL approval
             use_stateless = False
-            print(
-                f"[Orchestrator] {workflow_type.name} workflow: forcing stateful mode for HITL support"
-            )
+            print(f"[Orchestrator] {workflow_type.name}: stateful mode for HITL")
         else:
             use_stateless = settings.stream_stateless
         graph = workflow.build_graph(checkpointer=None if use_stateless else self.checkpointer)
 
         config = {
-            "configurable": {
-                "thread_id": thread_id,
-            },
-            "recursion_limit": 100,  # Increased from default 25 for multi-device operations
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100,
         }
 
         initial_state = {
@@ -334,10 +304,8 @@ class WorkflowOrchestrator:
             "iteration_count": 0,
         }
 
-        # 4. Execute workflow
         result = await graph.ainvoke(initial_state, config=config)
 
-        # 5. Interrupt detection (skip for stateless mode)
         if use_stateless:
             return {
                 "workflow_type": workflow_type.name,
@@ -349,7 +317,7 @@ class WorkflowOrchestrator:
         # Stateful mode: check for interrupts
         try:
             state_snapshot = await graph.aget_state(config)
-            if state_snapshot.next:  # Has pending nodes (interrupted)
+            if state_snapshot.next:
                 return {
                     "workflow_type": workflow_type.name,
                     "result": result,
@@ -372,10 +340,184 @@ class WorkflowOrchestrator:
             "final_message": result["messages"][-1].content if result.get("messages") else None,
         }
 
-    async def _execute_with_strategy(self, user_query: str) -> dict | None:
-        """Execute query using StrategySelector optimization.
+    async def _execute_standard_mode(self, user_query: str) -> dict | None:
+        """Execute query using fast_path strategy (Standard mode).
 
-        Uses Fast/Deep/Batch path for optimized execution of QUERY_DIAGNOSTIC queries.
+        Standard mode (-S): Optimized for quick single-tool responses.
+        Uses fast_path strategy for simple queries.
+
+        Args:
+            user_query: User's natural language query
+
+        Returns:
+            Execution result dict or None if strategy execution fails
+        """
+        try:
+            from olav.strategies import execute_with_mode
+
+            llm = LLMFactory.get_chat_model()
+
+            # Execute with fast_path strategy
+            result = await execute_with_mode(
+                user_query=user_query,
+                llm=llm,
+                mode="standard",  # type: ignore[arg-type]
+            )
+
+            if result.success:
+                return {
+                    "success": True,
+                    "answer": result.answer,
+                    "strategy_used": result.strategy_used,
+                    "reasoning_trace": result.reasoning_trace,
+                    "metadata": result.metadata,
+                    "mode": "standard",
+                }
+            # Strategy failed, return None to trigger workflow fallback
+            logger.info(
+                f"fast_path strategy failed: {result.error}, falling back to workflow graph"
+            )
+            return None
+
+        except Exception as e:
+            logger.warning(f"Standard mode execution failed: {e}")
+            return None
+
+    async def _execute_expert_mode(self, user_query: str, thread_id: str) -> dict:
+        """Execute query using SupervisorDrivenWorkflow (Expert mode).
+
+        Expert mode (-E): L1-L4 layer-based network analysis with Supervisor coordination.
+        Uses SupervisorDrivenWorkflow for complex multi-step diagnostics.
+
+        The Supervisor:
+        1. Creates a diagnostic plan based on L1-L4 layer methodology
+        2. Dispatches work to specialized layer analyzers
+        3. Tracks confidence levels and iteration progress
+        4. Synthesizes findings into actionable conclusions
+
+        Args:
+            user_query: User's natural language query
+            thread_id: Thread ID for state persistence
+
+        Returns:
+            Execution result from SupervisorDrivenWorkflow
+        """
+        try:
+            from olav.workflows.supervisor_driven import SupervisorDrivenWorkflow
+
+            # Build SupervisorDrivenWorkflow with checkpointer for state persistence
+            workflow = SupervisorDrivenWorkflow()
+            graph = workflow.build_graph(checkpointer=self.checkpointer)
+
+            config = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 100,  # Complex diagnostics may need more iterations
+            }
+
+            initial_state = {
+                "messages": [HumanMessage(content=user_query)],
+                "workflow_type": WorkflowType.DEEP_DIVE,
+                "iteration_count": 0,
+            }
+
+            # Execute workflow
+            result = await graph.ainvoke(initial_state, config=config)
+
+            # Check for HITL interrupts
+            try:
+                state_snapshot = await graph.aget_state(config)
+                if state_snapshot.next:
+                    return {
+                        "workflow_type": "SUPERVISOR_DRIVEN_DEEP_DIVE",
+                        "result": result,
+                        "interrupted": True,
+                        "pending_nodes": list(state_snapshot.next),
+                        "final_message": result["messages"][-1].content
+                        if result.get("messages")
+                        else None,
+                        "mode": "expert",
+                        "confidence_level": result.get("confidence_level", 0.0),
+                    }
+            except Exception as e:
+                logger.debug(f"State snapshot check failed: {e}")
+
+            return {
+                "workflow_type": "SUPERVISOR_DRIVEN_DEEP_DIVE",
+                "result": result,
+                "interrupted": False,
+                "final_message": result["messages"][-1].content
+                if result.get("messages")
+                else None,
+                "mode": "expert",
+                "confidence_level": result.get("confidence_level", 0.0),
+                "iteration_count": result.get("iteration_count", 0),
+            }
+
+        except Exception as e:
+            logger.error(f"Expert mode (SupervisorDrivenWorkflow) failed: {e}")
+            return {
+                "workflow_type": "SUPERVISOR_DRIVEN_DEEP_DIVE",
+                "result": None,
+                "interrupted": False,
+                "final_message": f"❌ Expert mode execution failed: {e}",
+                "mode": "expert",
+                "error": str(e),
+            }
+
+    async def _execute_with_mode(self, user_query: str, mode: str = "standard") -> dict | None:
+        """Execute query using mode-based strategy selection (DEPRECATED).
+
+        NOTE: This method is deprecated. Use:
+        - _execute_standard_mode() for standard mode (-S)
+        - _execute_expert_mode() for expert mode (-E)
+
+        Kept for backward compatibility only.
+
+        Args:
+            user_query: User's natural language query
+            mode: Execution mode from CLI (standard/expert/inspection)
+
+        Returns:
+            Execution result dict or None if strategy execution fails
+        """
+        try:
+            from olav.strategies import execute_with_mode
+
+            llm = LLMFactory.get_chat_model()
+
+            # Execute with mode-based strategy (no StrategySelector LLM call)
+            result = await execute_with_mode(
+                user_query=user_query,
+                llm=llm,
+                mode=mode,  # type: ignore[arg-type]
+            )
+
+            if result.success:
+                return {
+                    "success": True,
+                    "answer": result.answer,
+                    "strategy_used": result.strategy_used,
+                    "reasoning_trace": result.reasoning_trace,
+                    "metadata": result.metadata,
+                    "mode": mode,
+                }
+            # Strategy failed, return None to trigger workflow fallback
+            logger.info(
+                f"Strategy {result.strategy_used} (mode={mode}) failed: {result.error}, "
+                f"falling back to workflow graph"
+            )
+            return None
+
+        except Exception as e:
+            logger.warning(f"Mode-based strategy execution failed: {e}")
+            return None
+
+    async def _execute_with_strategy(self, user_query: str) -> dict | None:
+        """Execute query using StrategySelector optimization (DEPRECATED).
+
+        This method uses the old StrategySelector which makes an LLM call
+        to determine the strategy. Prefer _execute_with_mode() for better
+        performance.
 
         Args:
             user_query: User's natural language query
@@ -384,9 +526,11 @@ class WorkflowOrchestrator:
             Execution result dict or None if strategy optimization is not applicable
         """
         try:
+            from olav.strategies import execute_with_strategy_selection
+
             llm = LLMFactory.get_chat_model()
 
-            # Execute with automatic strategy selection
+            # Execute with automatic strategy selection (includes LLM call)
             result = await execute_with_strategy_selection(
                 user_query=user_query,
                 llm=llm,
@@ -719,6 +863,9 @@ async def create_workflow_orchestrator(expert_mode: bool = False):
             import time
             thread_id = f"workflow-{int(time.time())}"
 
+        # Get mode from config (CLI passes this via configurable)
+        mode = config.get("configurable", {}).get("mode", "standard")
+
         # Ensure required defaults if omitted
         if "iteration_count" not in state:
             state["iteration_count"] = 0  # type: ignore[index]
@@ -729,8 +876,8 @@ async def create_workflow_orchestrator(expert_mode: bool = False):
         if "execution_plan" not in state:
             state["execution_plan"] = None  # type: ignore[index]
 
-        # Route to appropriate workflow
-        result = await orchestrator.route(user_message, thread_id)
+        # Route to appropriate workflow with mode parameter
+        result = await orchestrator.route(user_message, thread_id, mode=mode)
 
         # Extract messages from result
         # Strategy results have 'answer' in result['result'], workflow results have 'messages'

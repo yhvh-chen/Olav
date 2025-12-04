@@ -20,6 +20,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from olav.workflows.base import WorkflowType
 from olav.workflows.query_diagnostic import QueryDiagnosticWorkflow, QueryDiagnosticState
 from olav.workflows.device_execution import DeviceExecutionWorkflow, DeviceExecutionState
+from olav.workflows.batch_execution import BatchExecutionWorkflow, BatchExecutionState
 from olav.workflows.netbox_management import NetBoxManagementWorkflow
 from olav.agents.root_agent_orchestrator import WorkflowOrchestrator
 from olav.core.prompt_manager import prompt_manager
@@ -62,7 +63,7 @@ class TestPromptManager:
                 if "macro_analysis" in name:
                     kwargs = {"user_query": "test"}
                 elif "micro_diagnosis" in name:
-                    kwargs = {"user_query": "test", "macro_data": {}}
+                    kwargs = {"user_query": "test", "macro_analysis_result": {}}
                 elif "config_planning" in name:
                     kwargs = {"user_query": "test"}
                 elif "config_execution" in name:
@@ -334,6 +335,84 @@ class TestWorkflowStateStructure:
         assert "approval_status" in state
         assert "execution_result" in state
         assert "validation_result" in state
+    
+    def test_batch_execution_state_fields(self):
+        """Test BatchExecutionState has required fields."""
+        state: BatchExecutionState = {
+            "messages": [HumanMessage(content="test")],
+            "user_intent": "给所有交换机添加 VLAN 100",
+            "operation_type": "add_vlan",
+            "operation_params": {"vlan_id": 100},
+            "device_filter": {"role": "switch"},
+            "resolved_devices": ["Switch-A", "Switch-B"],
+            "change_plan": None,
+            "approval_status": None,
+            "device_tasks": None,
+            "device_results": None,
+            "summary": None,
+        }
+        
+        assert "user_intent" in state
+        assert "operation_type" in state
+        assert "resolved_devices" in state
+        assert "approval_status" in state
+        assert "summary" in state
+
+
+class TestBatchExecutionWorkflow:
+    """Test batch execution workflow."""
+    
+    @pytest.fixture
+    def workflow(self):
+        return BatchExecutionWorkflow()
+    
+    @pytest.mark.asyncio
+    async def test_validate_batch_input(self, workflow):
+        """Test validation accepts batch operation keywords."""
+        queries = [
+            "给所有交换机添加 VLAN 100",
+            "批量配置 NTP 服务器",
+            "在全部设备上设置 SNMP community",
+            "所有核心路由器修改 MTU",
+            "batch configure syslog on all devices",
+        ]
+        
+        for query in queries:
+            is_valid, reason = await workflow.validate_input(query)
+            assert is_valid, f"Should accept batch operation: {query}, reason: {reason}"
+    
+    @pytest.mark.asyncio
+    async def test_validate_rejects_single_device(self, workflow):
+        """Test validation rejects single-device operations."""
+        queries = [
+            "修改 R1 的 BGP 配置",
+            "配置 Switch-A 的接口",
+            "configure OSPF on router1",
+        ]
+        
+        for query in queries:
+            is_valid, reason = await workflow.validate_input(query)
+            assert not is_valid, f"Should reject single-device operation: {query}"
+    
+    @pytest.mark.asyncio
+    async def test_validate_rejects_batch_query(self, workflow):
+        """Test validation rejects batch queries (read-only)."""
+        queries = [
+            "查询所有设备状态",
+            "显示全部交换机的接口",
+            "all devices BGP status",
+        ]
+        
+        for query in queries:
+            is_valid, reason = await workflow.validate_input(query)
+            assert not is_valid, f"Should reject batch query (read-only): {query}"
+    
+    def test_workflow_properties(self, workflow):
+        """Test workflow metadata."""
+        assert workflow.name == "batch_execution"
+        assert "批量" in workflow.description or "多设备" in workflow.description
+        assert "netconf_tool" in workflow.tools_required
+        assert "netbox_api_call" in workflow.tools_required
 
 
 if __name__ == "__main__":

@@ -125,6 +125,7 @@ class OLAVClient:
         self.orchestrator_instance: Any = None  # WorkflowOrchestrator for resume()
         self.auth_token = auth_token  # JWT token for authenticated requests
         self.auto_fallback = False  # Whether to auto-fallback to local on remote failure
+        self.query_mode = "standard"  # Query mode: standard, expert, inspection
 
     async def connect(self, expert_mode: bool = False, auto_fallback: bool = False) -> None:
         """
@@ -135,6 +136,8 @@ class OLAVClient:
             auto_fallback: Auto-fallback to local mode if remote connection fails
         """
         self.auto_fallback = auto_fallback
+        # Store query mode based on expert_mode flag
+        self.query_mode = "expert" if expert_mode else "standard"
 
         if self.mode == "remote":
             # Auto-load credentials if no token provided
@@ -284,6 +287,25 @@ class OLAVClient:
         except Exception as e:
             self.console.print(f"[red]❌ Failed to initialize local orchestrator: {e}[/red]")
             raise
+
+    def set_query_mode(self, mode: str) -> None:
+        """Set the query mode for local execution.
+        
+        User can switch modes in TUI. Workflows are strictly separated:
+        - Standard: fast_path strategy (single tool call)
+        - Expert: SupervisorDrivenWorkflow (L1-L4 layer analysis)
+        
+        No automatic escalation between modes - user controls which mode to use.
+        
+        Args:
+            mode: Query mode - "standard" or "expert"
+        """
+        valid_modes = ["standard", "expert"]
+        if mode not in valid_modes:
+            self.console.print(f"[yellow]Invalid mode '{mode}'. Valid: {valid_modes}[/yellow]")
+            return
+        self.query_mode = mode
+        self.console.print(f"[green]Query mode set to: {mode}[/green]")
 
     async def resume(self, thread_id: str, user_input: str, workflow_type: str) -> ExecutionResult:
         """Resume an interrupted workflow with user approval/modification.
@@ -497,7 +519,8 @@ class OLAVClient:
 
         try:
             # Use orchestrator.route() for proper interrupt handling
-            result = await self.orchestrator_instance.route(query, thread_id)
+            # Pass query_mode for strategy selection (standard/expert/inspection)
+            result = await self.orchestrator_instance.route(query, thread_id, mode=self.query_mode)
 
             # Extract messages from result
             messages_buffer = []

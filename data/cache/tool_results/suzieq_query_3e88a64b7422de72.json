@@ -4,7 +4,7 @@
     "table": "ospfNbr",
     "method": "summarize"
   },
-  "cached_at": 1764149803.4850037,
+  "cached_at": 1764751344.4400342,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -12,10 +12,10 @@
     "data": [
       {
         "state_counts": {
-          "full": 2
+          "full": 6
         },
-        "total_records": 2,
-        "unique_hosts": 2
+        "total_records": 6,
+        "unique_hosts": 4
       }
     ],
     "error": null,
@@ -24,7 +24,7 @@
       "method": "summarize",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 50
+      "elapsed_ms": 118
     }
   }
 }

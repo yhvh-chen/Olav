@@ -56,15 +56,41 @@ class LLMConfig:
     """
     PROVIDER: Literal["openai", "ollama", "azure"] = "openai"
     BASE_URL: str = "https://openrouter.ai/api/v1"
-    MODEL_NAME = "x-ai/grok-4.1-fast:free"
+    MODEL_NAME = "x-ai/grok-4.1-fast"
     TEMPERATURE = 0.2
     MAX_TOKENS = 16000
-    EMBEDDING_MODEL = "text-embedding-3-small"
-    EMBEDDING_DIMENSIONS = 1536
     
     # Fallback models for ModelFallbackMiddleware (LangChain 1.10)
     # Format: ["provider:model_name", ...] in priority order
     FALLBACK_MODELS: list[str] = ["openai:gpt-4o-mini"]
+
+
+class EmbeddingConfig:
+    """Embedding model settings for Agentic RAG.
+    
+    Note: OpenRouter does NOT support embeddings API.
+    Use OpenAI direct API or local Ollama for embeddings.
+    
+    nomic-embed-text-v1.5: 768 dimensions (Matryoshka, can truncate to 512/256/128)
+    """
+    PROVIDER: Literal["openai", "ollama"] = "ollama"
+    BASE_URL: str = "http://127.0.0.1:11434"  # Ollama local
+    MODEL: str = "nomic-embed-text:latest"
+    DIMENSIONS: int = 768  # nomic-embed-text native dimension
+
+
+class VisionConfig:
+    """Vision model settings for network diagram analysis.
+    
+    Used for:
+    - Analyzing network topology screenshots
+    - Understanding Visio/draw.io diagrams
+    - Processing monitoring dashboard images
+    """
+    PROVIDER: Literal["openai", "ollama"] = "ollama"
+    BASE_URL: str = "127.0.0.1:11434"  # OpenAI direct (not OpenRouter)
+    MODEL: str = "llava:latest"  # GPT-4o has vision capabilities
+    MAX_TOKENS: int = 4096
 
 
 class LLMRetryConfig:

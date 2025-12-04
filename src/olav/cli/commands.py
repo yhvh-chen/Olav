@@ -43,17 +43,26 @@ console = Console()
 ServerOption = Annotated[
     str | None,
     typer.Option(
-        "--server", "-s",
+        "--server",
         help="API server URL (default: http://localhost:8000)",
         envvar="OLAV_SERVER_URL",
     ),
 ]
 
-ModeOption = Annotated[
-    str,
+# Mode options: -S (standard) and -E (expert) are mutually exclusive
+StandardModeOption = Annotated[
+    bool,
     typer.Option(
-        "--mode", "-m",
-        help="Query mode: standard, expert, inspection",
+        "--standard", "-S",
+        help="Standard mode: fast path with single tool calls (default)",
+    ),
+]
+
+ExpertModeOption = Annotated[
+    bool,
+    typer.Option(
+        "--expert", "-E",
+        help="Expert mode: Supervisor-Driven deep dive with L1-L4 layer analysis",
     ),
 ]
 
@@ -99,6 +108,29 @@ InitStatusOption = Annotated[
 ]
 
 
+def _resolve_mode(standard: bool, expert: bool) -> str:
+    """Resolve mode from mutually exclusive flags.
+    
+    Args:
+        standard: -S/--standard flag
+        expert: -E/--expert flag
+        
+    Returns:
+        Mode string: "standard" or "expert"
+        
+    Raises:
+        typer.BadParameter: If both flags are set
+    """
+    if standard and expert:
+        raise typer.BadParameter("Cannot use both --standard and --expert. Choose one.")
+    
+    if expert:
+        return "expert"
+    
+    # Default to standard
+    return "standard"
+
+
 # ============================================
 # Interactive REPL (Default Command)
 # ============================================
@@ -106,7 +138,8 @@ InitStatusOption = Annotated[
 def main(
     ctx: typer.Context,
     server: ServerOption = None,
-    mode: ModeOption = "standard",
+    standard: StandardModeOption = False,
+    expert: ExpertModeOption = False,
     verbose: VerboseOption = False,
     init: InitOption = False,
     init_full: InitFullOption = False,
@@ -124,6 +157,8 @@ def main(
         raise typer.Exit()
     
     if ctx.invoked_subcommand is None:
+        # Resolve mode from flags
+        mode = _resolve_mode(standard, expert)
         # No subcommand = interactive mode
         asyncio.run(_interactive_session(server, mode, verbose))
 
@@ -450,11 +485,13 @@ async def _interactive_session(
 def query(
     text: Annotated[str, typer.Argument(help="Query text")],
     server: ServerOption = None,
-    mode: ModeOption = "standard",
+    standard: StandardModeOption = False,
+    expert: ExpertModeOption = False,
     verbose: VerboseOption = False,
     json_output: JsonOption = False,
 ) -> None:
     """Execute a single query and exit."""
+    mode = _resolve_mode(standard, expert)
     asyncio.run(_single_query(text, server, mode, verbose, json_output))
 
 

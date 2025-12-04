@@ -4,7 +4,7 @@
     "table": "device",
     "method": "summarize"
   },
-  "cached_at": 1764732443.3067808,
+  "cached_at": 1764818279.4962857,
   "cache_ttl": 300,
   "tool_output": {
     "source": "suzieq",
@@ -24,7 +24,7 @@
       "method": "summarize",
       "max_age_hours": 24,
       "filters": {},
-      "elapsed_ms": 85
+      "elapsed_ms": 149
     }
   }
 }

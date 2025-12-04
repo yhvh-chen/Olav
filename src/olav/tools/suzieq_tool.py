@@ -90,6 +90,23 @@ class SuzieQTool:
         # Load schema dynamically
         suzieq_schema = await self.schema_loader.load_suzieq_schema()
 
+        # Normalize common table name variations (LLM may return singular)
+        table_aliases = {
+            "interface": "interfaces",
+            "route": "routes",
+            "mac": "macs",
+            "vlan": "vlans",
+            "neighbor": "ospfNbr",
+            "ospfNeighbor": "ospfNbr",
+            "ospf_neighbor": "ospfNbr",
+            "ospf_interface": "ospfIf",
+            "ospfInterface": "ospfIf",
+        }
+        if table in table_aliases:
+            logger.info(f"Normalizing table name: {table} -> {table_aliases[table]}")
+            table = table_aliases[table]
+            metadata["table"] = table  # Update metadata with normalized name
+
         # Validate table exists in schema
         if table not in suzieq_schema:
             return ToolOutput(

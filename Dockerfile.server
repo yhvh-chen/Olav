@@ -32,6 +32,11 @@ RUN uv sync --frozen --no-dev
 
 # Create non-root user for security
 RUN useradd -m -u 1000 olav && chown -R olav:olav /app
+
+# Create SuzieQ config directory and copy config
+RUN mkdir -p /home/olav/.suzieq && chown -R olav:olav /home/olav/.suzieq
+COPY --chown=olav:olav config/suzieq-cfg.yml /home/olav/.suzieq/suzieq-cfg.yml
+
 USER olav
 
 # Expose API port

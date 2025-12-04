@@ -41,6 +41,26 @@ class EnvSettings(BaseSettings):
     llm_model_name: str = "x-ai/grok-4.1-fast:free"  # Grok 4.1 Fast (free) via OpenRouter
 
     # ============================================
+    # Embedding Model Configuration
+    # ============================================
+    # Separate API for embeddings (OpenRouter doesn't support embeddings)
+    # Use OpenAI direct API or local Ollama for embeddings
+    embedding_provider: Literal["openai", "ollama"] = "ollama"  # Default: local Ollama
+    embedding_api_key: str = ""  # OpenAI API key for embeddings (if provider=openai)
+    embedding_base_url: str = "http://127.0.0.1:11434"  # Ollama local
+    embedding_model: str = "nomic-embed-text:latest"
+    embedding_dimensions: int = 768  # nomic-embed-text native dimension
+
+    # ============================================
+    # Vision Model Configuration
+    # ============================================
+    # For analyzing network diagrams, screenshots, etc.
+    vision_provider: Literal["openai", "ollama"] = "openai"
+    vision_api_key: str = ""  # Can reuse LLM key if same provider
+    vision_base_url: str = "https://openrouter.ai/api/v1"  # OpenRouter supports vision
+    vision_model: str = "openai/gpt-4o"  # GPT-4o has vision capabilities
+
+    # ============================================
     # Infrastructure Credentials
     # ============================================
     # PostgreSQL

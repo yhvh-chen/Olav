@@ -155,32 +155,78 @@ class LLMFactory:
     def get_embedding_model() -> OpenAIEmbeddings:
         """Create an embedding model instance.
 
+        Uses separate embedding configuration because OpenRouter doesn't support embeddings.
+        Falls back to OpenAI direct API or local Ollama.
+
         Returns:
             Configured embedding model instance
 
         Raises:
             ValueError: If provider is not supported
         """
-        if env_settings.llm_provider == "openai":
+        # Use dedicated embedding settings (not LLM settings)
+        provider = env_settings.embedding_provider
+        api_key = env_settings.embedding_api_key or env_settings.llm_api_key
+        base_url = env_settings.embedding_base_url
+        model = env_settings.embedding_model
+        
+        if provider == "openai":
+            if not api_key:
+                logger.warning("No EMBEDDING_API_KEY set. Embedding features may fail.")
             return OpenAIEmbeddings(
-                model=LLMConfig.EMBEDDING_MODEL,
-                api_key=env_settings.llm_api_key,
-                base_url=LLMConfig.BASE_URL,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
             )
-        if env_settings.llm_provider == "ollama":
+        if provider == "ollama":
             try:
                 from langchain_ollama import OllamaEmbeddings
             except ImportError as e:
                 msg = "langchain-ollama not installed. Run: uv add langchain-ollama"
                 raise ImportError(msg) from e
 
-            return OllamaEmbeddings(model="nomic-embed-text")
-        if env_settings.llm_provider == "azure_openai":
-            return OpenAIEmbeddings(
-                model=LLMConfig.EMBEDDING_MODEL,
-                api_key=env_settings.llm_api_key,
+            # Use model from settings, strip :latest suffix if present for cleaner logging
+            model_name = model.replace(":latest", "") if model else "nomic-embed-text"
+            ollama_url = base_url or "http://127.0.0.1:11434"
+            logger.info(f"Using Ollama embedding model: {model_name} at {ollama_url}")
+            return OllamaEmbeddings(model=model_name, base_url=ollama_url)
+        
+        msg = f"Unsupported embedding provider: {provider}"
+        raise ValueError(msg)
+
+    @staticmethod
+    def get_vision_model():
+        """Create a vision-capable model instance.
+
+        Used for analyzing network diagrams, topology screenshots, etc.
+
+        Returns:
+            Configured vision model instance (ChatOpenAI with vision support)
+        """
+        from langchain_openai import ChatOpenAI
+        
+        provider = env_settings.vision_provider
+        api_key = env_settings.vision_api_key or env_settings.llm_api_key
+        base_url = env_settings.vision_base_url
+        model = env_settings.vision_model
+        
+        if provider == "openai":
+            return ChatOpenAI(
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                max_tokens=4096,
             )
-        msg = f"Unsupported embedding provider: {env_settings.llm_provider}"
+        if provider == "ollama":
+            try:
+                from langchain_ollama import ChatOllama
+            except ImportError as e:
+                msg = "langchain-ollama not installed. Run: uv add langchain-ollama"
+                raise ImportError(msg) from e
+
+            return ChatOllama(model="llava")  # LLaVA for local vision
+        
+        msg = f"Unsupported vision provider: {provider}"
         raise ValueError(msg)
 
     # ============================================
