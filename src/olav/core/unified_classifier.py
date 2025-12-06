@@ -61,7 +61,9 @@ class UnifiedClassificationResult(BaseModel):
     confidence: float = Field(
         ge=0.0, le=1.0, description="Overall confidence in classification and selection"
     )
-    reasoning: str = Field(description="Brief explanation for the classification and tool choice")
+    reasoning: str | None = Field(
+        default=None, description="Optional brief explanation (omit to reduce latency)"
+    )
 
     # Optional: fallback suggestions
     fallback_tool: str | None = Field(
@@ -128,15 +130,14 @@ class UnifiedClassifier:
         """Lazy-load prompt template."""
         if self._prompt is None:
             try:
-                # Try new prompt system first (overrides/ → _defaults/)
-                self._prompt = prompt_manager.load(
-                    "unified_classification",
-                    thinking=False,  # Classification doesn't need extended thinking
-                )
+                # Use load_raw to get template without variable substitution
+                # (unified_classification template has JSON examples with braces
+                #  that would be misinterpreted as variables by PromptTemplate)
+                self._prompt = prompt_manager.load_raw("unified_classification")
             except FileNotFoundError:
                 # Fallback to legacy location
                 try:
-                    self._prompt = prompt_manager.load_prompt("core", "unified_classification")
+                    self._prompt = prompt_manager.load_raw_template("core", "unified_classification")
                 except Exception as e:
                     logger.warning(f"Failed to load unified_classification prompt: {e}")
                     self._prompt = self._get_fallback_prompt()
@@ -186,16 +187,35 @@ Query: "Find device R1 in NetBox"
         self,
         query: str,
         schema_context: dict[str, Any] | None = None,
+        skip_fast_path: bool = False,
     ) -> UnifiedClassificationResult:
         """Classify user query and select tool in a single LLM call.
 
         Args:
             query: User's natural language query.
             schema_context: Optional schema context from discovery (table names, etc.)
+            skip_fast_path: If True, skip regex fast path and always use LLM.
 
         Returns:
             UnifiedClassificationResult with intent, tool, and parameters.
         """
+        import time
+        
+        # =================================================================
+        # Fast Path: Try regex matching first (50ms vs 1.5s LLM)
+        # =================================================================
+        if not skip_fast_path:
+            fast_result = self._try_fast_path(query)
+            if fast_result is not None:
+                logger.info(
+                    f"Fast path hit: {fast_result.tool} "
+                    f"(confidence: {fast_result.confidence:.2f}, pattern: regex)"
+                )
+                return fast_result
+        
+        # =================================================================
+        # Slow Path: LLM classification
+        # =================================================================
         try:
             # Build enhanced prompt with schema context
             enhanced_prompt = self.prompt
@@ -210,18 +230,26 @@ Query: "Find device R1 in NetBox"
                 HumanMessage(content=query),
             ]
 
+            llm_start = time.perf_counter()
             result = await self.structured_llm.ainvoke(messages)
+            llm_duration_ms = (time.perf_counter() - llm_start) * 1000
+            
+            logger.debug(f"LLM classification took {llm_duration_ms:.0f}ms")
 
             if isinstance(result, UnifiedClassificationResult):
+                # Store LLM timing in result for performance tracking
+                result._llm_time_ms = llm_duration_ms
                 logger.info(
                     f"Unified classifier: {result.intent_category}/{result.tool} "
-                    f"(confidence: {result.confidence:.2f})"
+                    f"(confidence: {result.confidence:.2f}, llm: {llm_duration_ms:.0f}ms)"
                 )
                 return result
 
             # Handle dict response
             if isinstance(result, dict):
-                return UnifiedClassificationResult(**result)
+                classification = UnifiedClassificationResult(**result)
+                classification._llm_time_ms = llm_duration_ms
+                return classification
 
             logger.warning(f"Unexpected LLM response type: {type(result)}")
             return self._fallback_classify(query)
@@ -229,6 +257,58 @@ Query: "Find device R1 in NetBox"
         except Exception as e:
             logger.warning(f"Unified classification failed: {e}")
             return self._fallback_classify(query)
+
+    def _try_fast_path(self, query: str) -> UnifiedClassificationResult | None:
+        """
+        Try regex-based fast path classification.
+        
+        Returns UnifiedClassificationResult if a pattern matches, None otherwise.
+        Falls back to None for diagnostic queries (requiring Expert Mode).
+        """
+        try:
+            from olav.modes.shared.preprocessor import preprocess_query
+            
+            result = preprocess_query(query)
+            
+            # Diagnostic queries should not use fast path
+            if result.is_diagnostic:
+                logger.debug(f"Fast path skipped: diagnostic query detected")
+                return None
+            
+            # Check if we have a fast path match
+            if result.can_use_fast_path and result.fast_path_match:
+                match = result.fast_path_match
+                
+                # Map tool to intent category
+                tool_to_category = {
+                    "suzieq_query": "suzieq",
+                    "netbox_api_call": "netbox",
+                    "cli_tool": "cli",
+                    "netconf_tool": "netconf",
+                }
+                intent_category = tool_to_category.get(match.tool, "suzieq")
+                
+                classification = UnifiedClassificationResult(
+                    intent_category=intent_category,
+                    tool=match.tool,
+                    parameters=match.parameters,
+                    confidence=match.confidence,
+                    reasoning=f"Fast path: {match.pattern_name}",
+                )
+                # Mark as fast path for performance tracking
+                classification._llm_time_ms = 0.0
+                classification._fast_path = True
+                
+                return classification
+            
+            return None
+            
+        except ImportError as e:
+            logger.warning(f"Fast path unavailable: {e}")
+            return None
+        except Exception as e:
+            logger.debug(f"Fast path failed: {e}")
+            return None
 
     def _fallback_classify(self, query: str) -> UnifiedClassificationResult:
         """Keyword-based fallback classification.

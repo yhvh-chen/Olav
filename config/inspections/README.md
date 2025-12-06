@@ -117,12 +117,11 @@ message: "Device {device} has {actual} BGP peers (expected {operator} {value})"
 uv run python -m olav.cli batch-inspect config/inspections/bgp_peer_audit.yaml
 
 # From Python code
-from olav.strategies.batch_path import BatchPathStrategy
+from olav.modes.inspection import run_inspection_mode
 from olav.core.llm import LLMFactory
 
 llm = LLMFactory.get_chat_model()
-strategy = BatchPathStrategy(llm=llm)
-result = await strategy.execute(config_path="config/inspections/bgp_peer_audit.yaml")
+result = await run_inspection_mode(config_path="config/inspections/bgp_peer_audit.yaml")
 print(result.to_report(format="table"))
 ```
 

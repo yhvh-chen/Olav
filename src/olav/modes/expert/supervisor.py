@@ -130,6 +130,14 @@ class SupervisorState(BaseModel):
     syslog_events: list[dict[str, Any]] = Field(default_factory=list)
     priority_layer: str | None = None
     
+    # Phase 2 tracking
+    phase2_triggered: bool = False
+    phase2_executed: bool = False
+    phase2_hypothesis: str | None = None
+    phase2_suspected_devices: list[str] = Field(default_factory=list)
+    phase1_findings: list[str] = Field(default_factory=list)
+    phase2_findings: list[str] = Field(default_factory=list)
+    
     # Result
     root_cause_found: bool = False
     root_cause: str | None = None
@@ -347,6 +355,9 @@ class ExpertModeSupervisor:
             status = state.layer_coverage[layer]
             status.update(result.confidence, result.findings)
         
+        # Collect Phase 1 findings for potential Phase 2
+        state.phase1_findings.extend(result.findings)
+        
         # Check for root cause indicators
         if result.findings:
             # Simple heuristic: high-confidence findings might be root cause
@@ -361,6 +372,113 @@ class ExpertModeSupervisor:
         # Increment round
         state.current_round += 1
         state.current_task = None
+        
+        return state
+    
+    def should_trigger_phase2(self, state: SupervisorState) -> bool:
+        """Determine if Phase 2 (Deep Analyzer) is needed.
+        
+        Phase 2 triggers when:
+        1. Phase 1 confidence is insufficient (<80%)
+        2. Suspected issues found but root cause not confirmed
+        3. Query involves configuration policies (SuzieQ blind spot)
+        4. Phase 1 data may be stale
+        
+        Args:
+            state: Current SupervisorState after Phase 1.
+            
+        Returns:
+            True if Phase 2 should be executed.
+        """
+        # Already found root cause with high confidence
+        if state.root_cause_found:
+            # Even if root cause found, check if it's policy-related
+            # which requires Phase 2 confirmation
+            if state.root_cause:
+                policy_keywords = ["route-map", "prefix-list", "acl", "policy", "策略"]
+                if any(kw in state.root_cause.lower() for kw in policy_keywords):
+                    logger.info("Phase 2 needed: root cause is policy-related, needs confirmation")
+                    return True
+            return False
+        
+        # Check max Phase 1 confidence
+        max_confidence = 0.0
+        for layer_status in state.layer_coverage.values():
+            max_confidence = max(max_confidence, layer_status.confidence)
+        
+        # Trigger 1: Confidence below threshold
+        if max_confidence < 0.80:
+            logger.info(f"Phase 2 needed: max confidence {max_confidence:.2f} < 0.80")
+            return True
+        
+        # Trigger 2: Suspected issues but no confirmed root cause
+        if state.phase1_findings and not state.root_cause_found:
+            logger.info("Phase 2 needed: findings exist but no confirmed root cause")
+            return True
+        
+        # Trigger 3: Query involves policy keywords (SuzieQ blind spot)
+        policy_keywords = ["route-map", "prefix-list", "acl", "policy", "策略", "过滤"]
+        query_lower = state.query.lower()
+        if any(kw in query_lower for kw in policy_keywords):
+            logger.info("Phase 2 needed: query involves routing policy")
+            return True
+        
+        # Trigger 4: Check if findings suggest policy issues
+        for finding in state.phase1_findings:
+            finding_lower = finding.lower()
+            # Missing routes often indicate policy blocking
+            if "missing" in finding_lower and "route" in finding_lower:
+                logger.info("Phase 2 needed: missing routes may indicate policy issue")
+                return True
+            # No route to destination
+            if "no route" in finding_lower or "路由缺失" in finding_lower:
+                logger.info("Phase 2 needed: route missing, check policy")
+                return True
+        
+        return False
+    
+    def prepare_phase2_context(self, state: SupervisorState) -> SupervisorState:
+        """Prepare context for Phase 2 execution.
+        
+        Builds hypothesis and identifies suspected devices from Phase 1 findings.
+        
+        Args:
+            state: SupervisorState after Phase 1.
+            
+        Returns:
+            Updated state with Phase 2 context.
+        """
+        state.phase2_triggered = True
+        
+        # Build hypothesis from findings
+        hypothesis_parts = []
+        suspected_devices = set(state.path_devices)
+        
+        for finding in state.phase1_findings[-10:]:  # Last 10 findings
+            # Extract device names
+            import re
+            device_matches = re.findall(r'\b(R\d+|SW\d+|S\d+)\b', finding)
+            suspected_devices.update(device_matches)
+            
+            # Check for policy hints
+            if any(kw in finding.lower() for kw in ["missing", "route", "bgp", "no path"]):
+                hypothesis_parts.append(finding)
+        
+        # Generate hypothesis
+        if hypothesis_parts:
+            state.phase2_hypothesis = (
+                f"Phase 1 发现: {'; '.join(hypothesis_parts[:3])}. "
+                f"假设: 可能存在 BGP route-map/prefix-list 配置阻断路由传递。"
+            )
+        else:
+            state.phase2_hypothesis = (
+                f"Phase 1 未能确认根因。需要检查设备实时配置验证假设。"
+            )
+        
+        state.phase2_suspected_devices = list(suspected_devices)
+        
+        logger.info(f"Phase 2 context prepared: hypothesis={state.phase2_hypothesis[:100]}...")
+        logger.info(f"Phase 2 suspected devices: {state.phase2_suspected_devices}")
         
         return state
     

@@ -34,7 +34,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 # Import tools package to ensure ToolRegistry is populated with all tools
-# This is required for strategies (fast_path, deep_path) that use ToolRegistry.get_tool()
+# This is required for modes (standard, expert, inspection) that use ToolRegistry.get_tool()
 import olav.tools  # noqa: F401
 from olav.agents.dynamic_orchestrator import DynamicIntentRouter
 from olav.agents.network_relevance_guard import (
@@ -57,13 +57,11 @@ logger = logging.getLogger(__name__)
 class WorkflowOrchestrator:
     """Route user queries to appropriate workflow using Dynamic Intent Router.
 
-    Strategy Integration:
-    - For QUERY_DIAGNOSTIC: Uses StrategySelector to choose Fast/Deep/Batch path
-    - Fast Path: Simple queries (< 2s response, single tool call)
-    - Deep Path: Diagnostic queries (iterative reasoning)
-    - Batch Path: Multi-device audits (parallel execution)
-    - Inspection: NetBox sync/diff workflow
-    - Fallback: Full workflow graph if strategy fails
+    Mode Architecture:
+    - Standard Mode (-S): Fast single-tool responses via StandardModeWorkflow
+    - Expert Mode (-E): L1-L4 layer analysis via SupervisorDrivenWorkflow  
+    - Inspection Mode: YAML-driven batch audits via InspectionWorkflow
+    - Fallback: Full workflow graph if mode execution fails
     """
 
     def __init__(
@@ -80,7 +78,7 @@ class WorkflowOrchestrator:
             checkpointer: PostgreSQL checkpointer for workflow state
             expert_mode: Enable Deep Dive workflow for complex tasks
             use_dynamic_router: Use DynamicIntentRouter (default: from env OLAV_USE_DYNAMIC_ROUTER)
-            use_strategy_optimization: Use StrategySelector for QUERY_DIAGNOSTIC (default: True)
+            use_strategy_optimization: Use Standard Mode for QUERY_DIAGNOSTIC (default: True)
         """
         self.checkpointer = checkpointer
         self.expert_mode = expert_mode
@@ -362,42 +360,45 @@ class WorkflowOrchestrator:
         }
 
     async def _execute_standard_mode(self, user_query: str) -> dict | None:
-        """Execute query using fast_path strategy (Standard mode).
+        """Execute query using Standard Mode workflow.
 
         Standard mode (-S): Optimized for quick single-tool responses.
-        Uses fast_path strategy for simple queries.
+        Uses StandardModeWorkflow from modes/standard/.
 
         Args:
             user_query: User's natural language query
 
         Returns:
-            Execution result dict or None if strategy execution fails
+            Execution result dict or None if mode execution fails
         """
         try:
-            from olav.strategies import execute_with_mode
+            from olav.modes.standard import run_standard_mode
+            from olav.tools.base import ToolRegistry
 
-            # Use reasoning=False for standard mode to get concise output without thinking content
-            llm = LLMFactory.get_chat_model(reasoning=False)
-
-            # Execute with fast_path strategy
-            result = await execute_with_mode(
-                user_query=user_query,
-                llm=llm,
-                mode="standard",  # type: ignore[arg-type]
+            result = await run_standard_mode(
+                query=user_query,
+                tool_registry=ToolRegistry(),
+                yolo_mode=True,  # Skip HITL for CLI mode
             )
 
             if result.success:
                 return {
                     "success": True,
                     "answer": result.answer,
-                    "strategy_used": result.strategy_used,
-                    "reasoning_trace": result.reasoning_trace,
+                    "strategy_used": "standard_mode",
+                    "reasoning_trace": [],
                     "metadata": result.metadata,
                     "mode": "standard",
                 }
-            # Strategy failed, return None to trigger workflow fallback
+            # Check for escalation to Expert Mode
+            if result.escalated_to_expert:
+                logger.info(
+                    f"Standard mode escalated to Expert: {result.escalation_reason}"
+                )
+                return None
+            # Mode execution failed
             logger.info(
-                f"fast_path strategy failed: {result.error}, falling back to workflow graph"
+                f"Standard mode failed: {result.error}, falling back to workflow graph"
             )
             return None
 
@@ -486,53 +487,6 @@ class WorkflowOrchestrator:
                 "error": str(e),
             }
 
-    async def _execute_with_mode(self, user_query: str, mode: str = "standard") -> dict | None:
-        """Execute query using mode-based strategy selection (DEPRECATED).
-
-        NOTE: This method is deprecated. Use:
-        - _execute_standard_mode() for standard mode (-S)
-        - _execute_expert_mode() for expert mode (-E)
-
-        Kept for backward compatibility only.
-
-        Args:
-            user_query: User's natural language query
-            mode: Execution mode from CLI (standard/expert/inspection)
-
-        Returns:
-            Execution result dict or None if strategy execution fails
-        """
-        try:
-            from olav.strategies import execute_with_mode
-
-            llm = LLMFactory.get_chat_model()
-
-            # Execute with mode-based strategy (no StrategySelector LLM call)
-            result = await execute_with_mode(
-                user_query=user_query,
-                llm=llm,
-                mode=mode,  # type: ignore[arg-type]
-            )
-
-            if result.success:
-                return {
-                    "success": True,
-                    "answer": result.answer,
-                    "strategy_used": result.strategy_used,
-                    "reasoning_trace": result.reasoning_trace,
-                    "metadata": result.metadata,
-                    "mode": mode,
-                }
-            # Strategy failed, return None to trigger workflow fallback
-            logger.info(
-                f"Strategy {result.strategy_used} (mode={mode}) failed: {result.error}, "
-                f"falling back to workflow graph"
-            )
-            return None
-
-        except Exception as e:
-            logger.warning(f"Mode-based strategy execution failed: {e}")
-            return None
 
     async def resume(self, thread_id: str, user_input: str, workflow_type: WorkflowType) -> dict:
         """Resume interrupted workflow with user input (approval/modification).

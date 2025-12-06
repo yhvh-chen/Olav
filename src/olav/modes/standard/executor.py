@@ -75,6 +75,19 @@ class StandardModeExecutor:
     # NetBox methods that require HITL
     NETBOX_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
     
+    # Parameter name aliases for LLM compatibility
+    # Maps: tool_name -> {llm_param_name: actual_param_name}
+    PARAM_ALIASES = {
+        "netbox_api_call": {
+            "endpoint": "path",
+            "filters": "params",
+        },
+        "netbox_api": {
+            "endpoint": "path",
+            "filters": "params",
+        },
+    }
+    
     def __init__(
         self,
         tool_registry: ToolRegistry,
@@ -128,10 +141,38 @@ class StandardModeExecutor:
         if tool_name in ("netbox_api_call", "netbox_api"):
             method = parameters.get("method", "GET").upper()
             if method in self.NETBOX_WRITE_METHODS:
-                endpoint = parameters.get("endpoint", "")
+                # Support both original (endpoint) and mapped (path) parameter names
+                endpoint = parameters.get("path", parameters.get("endpoint", ""))
                 return True, f"NetBox {method} to {endpoint}"
         
         return False, ""
+    
+    def _map_parameters(
+        self,
+        tool_name: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Map LLM parameter names to actual tool parameter names.
+        
+        Args:
+            tool_name: Name of the tool (may be an alias)
+            parameters: Parameters from LLM classification
+        
+        Returns:
+            Parameters with names mapped to actual tool expectations
+        """
+        # Get alias mapping for this tool
+        aliases = self.PARAM_ALIASES.get(tool_name, {})
+        if not aliases:
+            return parameters
+        
+        # Map parameter names
+        mapped = {}
+        for key, value in parameters.items():
+            mapped_key = aliases.get(key, key)
+            mapped[mapped_key] = value
+        
+        return mapped
     
     async def execute(
         self,
@@ -155,10 +196,11 @@ class StandardModeExecutor:
         tool_name = classification.tool
         parameters = classification.parameters.copy()
         
-        # Add user_query for tools that need it
-        parameters["user_query"] = user_query
+        # Parameter name mapping for LLM compatibility
+        # LLM may use different parameter names than the actual tool expects
+        parameters = self._map_parameters(tool_name, parameters)
         
-        # Check HITL requirement
+        # Check HITL requirement (before removing internal params)
         requires_hitl, hitl_reason = self._requires_hitl(tool_name, parameters)
         
         if requires_hitl:
@@ -181,9 +223,14 @@ class StandardModeExecutor:
                 execution_time_ms=elapsed,
             )
         
+        # Filter parameters to only those accepted by the tool
+        # Remove internal params that tools don't accept
+        internal_params = {"user_query"}
+        tool_params = {k: v for k, v in parameters.items() if k not in internal_params}
+        
         # Execute tool
         try:
-            tool_output = await tool.execute(**parameters)
+            tool_output = await tool.execute(**tool_params)
             elapsed = (time.perf_counter() - start_time) * 1000
             
             if tool_output.error:

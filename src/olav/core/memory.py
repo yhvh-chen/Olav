@@ -130,3 +130,53 @@ class OpenSearchMemory:
             logger.info(f"Stored episodic memory: {intent} → {xpath}")
         except Exception as e:
             logger.error(f"Failed to store episodic memory: {e}")
+
+    async def index_document(
+        self,
+        index: str,
+        document: dict[str, Any],
+        doc_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Index a document into OpenSearch.
+        
+        Generic document indexing method for Agentic learning loop.
+        Used by MemoryStoreTool to index diagnosis reports.
+        
+        Args:
+            index: Target OpenSearch index name
+            document: Document to index (dict)
+            doc_id: Optional document ID. If None, OpenSearch generates one.
+            
+        Returns:
+            OpenSearch indexing response with _id, result, etc.
+            
+        Raises:
+            Exception: On indexing failure
+        """
+        from datetime import datetime
+        
+        # Ensure timestamp exists
+        if "timestamp" not in document:
+            document["timestamp"] = datetime.now(UTC).isoformat()
+        
+        try:
+            if doc_id:
+                response = self.client.index(
+                    index=index,
+                    id=doc_id,
+                    body=document,
+                    refresh=True,  # Make immediately searchable
+                )
+            else:
+                response = self.client.index(
+                    index=index,
+                    body=document,
+                    refresh=True,
+                )
+            
+            logger.info(f"Indexed document to {index}: {response.get('_id')}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Failed to index document to {index}: {e}")
+            raise

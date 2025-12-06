@@ -39,7 +39,6 @@ def _get_orchestrator():
     if _orchestrator is None:
         from olav.agents.root_agent_orchestrator import WorkflowOrchestrator
         from olav.core.llm import LLMFactory
-        from olav.strategies.executor import StrategyExecutor
 
         llm = LLMFactory.get_chat_model()
         _orchestrator = WorkflowOrchestrator(
@@ -47,10 +46,6 @@ def _get_orchestrator():
             checkpointer=None,  # Stateless for Studio
             expert_mode=False,
             use_strategy_optimization=True,
-        )
-        _orchestrator.strategy_executor = StrategyExecutor(
-            llm=llm,
-            auto_fallback=True,
         )
     return _orchestrator
 

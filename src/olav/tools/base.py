@@ -229,18 +229,28 @@ class ToolRegistry:
         cls._tools[tool.name] = tool
         logger.debug(f"Registered tool: {tool.name}")
 
+    # Tool name aliases for LLM compatibility
+    # LLM may use different names than the actual registered tool names
+    _aliases: dict[str, str] = {
+        "netbox_api_call": "netbox_api",
+        "cli_tool": "cli_execute",
+        "netconf_tool": "netconf_execute",
+    }
+
     @classmethod
     def get_tool(cls, name: str) -> BaseTool | None:
         """
         Retrieve tool by name.
 
         Args:
-            name: Tool identifier
+            name: Tool identifier (supports aliases)
 
         Returns:
             Tool instance if found, None otherwise
         """
-        return cls._tools.get(name)
+        # Check aliases first
+        resolved_name = cls._aliases.get(name, name)
+        return cls._tools.get(resolved_name)
 
     @classmethod
     def list_tools(cls) -> list[BaseTool]:

@@ -94,21 +94,36 @@ class QuickAnalyzer:
         """Get SuzieQ tools for querying.
         
         Returns:
-            List of LangChain tools.
+            List of LangChain tools for Parquet-based network data queries.
+            
+        Note:
+            Only includes tools that work with Parquet files directly.
+            SuzieQ library-dependent tools (path_trace, health_check, topology)
+            are excluded as SuzieQ library is not installed.
         """
+        tools = []
+        
+        # Basic query tools (Parquet-based, no SuzieQ library needed)
         try:
             from olav.tools.suzieq_tool import (
                 create_suzieq_query_tool,
                 create_suzieq_schema_tool,
             )
-            
-            return [
+            tools.extend([
                 create_suzieq_query_tool(),
                 create_suzieq_schema_tool(),
-            ]
+            ])
         except ImportError:
-            logger.warning("SuzieQ tools not available, using mock")
-            return []
+            logger.warning("SuzieQ basic tools not available")
+        
+        # Note: suzieq_path_trace, suzieq_health_check, suzieq_topology_analyze
+        # require the SuzieQ library to be installed. Since we only have Parquet
+        # files, we rely on suzieq_query + manual path tracing methodology.
+        
+        if not tools:
+            logger.warning("No SuzieQ tools available, using mock")
+        
+        return tools
     
     def _get_available_tables_desc(self) -> str:
         """Get description of available SuzieQ tables.
@@ -163,62 +178,149 @@ class QuickAnalyzer:
                 error="Tools not configured",
             )
         
-        # Create ReAct agent
+        # Create ReAct agent using LangGraph (modern approach)
         try:
-            from langchain.agents import AgentExecutor, create_react_agent
-            from langchain_core.prompts import PromptTemplate
+            from langgraph.prebuilt import create_react_agent
+            from langgraph.errors import GraphRecursionError
+            from langchain_core.messages import SystemMessage
             
-            # Simple ReAct prompt
-            react_template = """Answer the following questions as best you can. You have access to the following tools:
+            # Build input message with explicit tool usage instructions
+            system_msg = """You are a network diagnostics expert. Your task is to investigate network issues.
 
-{tools}
+IMPORTANT: You MUST use the available tools to gather data before providing any analysis.
+STOP IMMEDIATELY once you have enough data to identify the root cause. Do NOT keep querying indefinitely.
 
-Use the following format:
+## Available Tools
 
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+- **suzieq_schema_search**: Search for available tables and fields (use once at start)
+- **suzieq_query**: Query network data from tables (routes, interfaces, vlan, arpnd, macs, lldp)
 
-Begin!
+## Connectivity Diagnosis Methodology (连通性排错方法)
 
-Question: {input}
-Thought:{agent_scratchpad}"""
+When diagnosing "Device A cannot access Device B" (e.g., "SW1 E0/1下的PC1无法访问SW2 E0/2下的IOT设备"):
+
+### Step 1: Identify the endpoints (2-3 queries max)
+Query interfaces to find the VLAN and IP configuration:
+```
+suzieq_query(table="interfaces", hostname="SW1")  # Find E0/1's VLAN
+suzieq_query(table="interfaces", hostname="SW2")  # Find E0/2's VLAN
+```
+
+### Step 2: Find the gateway devices
+Query vlan table to understand the L3 gateway:
+```
+suzieq_query(table="vlan")  # Find SVI interfaces for each VLAN
+```
+
+### Step 3: Check routing on the gateway (CRITICAL)
+Query the gateway's route table:
+```
+suzieq_query(table="routes", hostname="GATEWAY_DEVICE")
+```
+Look for:
+- Is there a route to the destination subnet?
+- Is the next-hop reachable?
+- Are there any routing issues (no route, blackhole, asymmetric routing)?
+
+### Step 4: Report root cause
+Based on the data, identify:
+- **Missing route**: Gateway lacks route to destination network
+- **Interface down**: L1/L2 issue blocking connectivity
+- **VLAN mismatch**: Endpoints on wrong VLANs
+- **ARP issue**: No ARP entry for gateway
+
+## Key Tables
+- **routes**: Routing table (prefix, nexthop, vrf)
+- **interfaces**: Interface status, IP, VLAN assignment
+- **vlan**: VLAN configuration and SVI mapping
+- **arpnd**: ARP/ND table entries
+
+## IMPORTANT Rules
+1. Make 5-8 targeted queries maximum, then STOP and provide findings
+2. Focus on the specific devices mentioned in the query
+3. Always check the gateway's route table for connectivity issues
+4. Once you identify a likely root cause, STOP and report it
+"""
             
-            react_prompt = PromptTemplate.from_template(react_template)
-            
-            agent = create_react_agent(self.llm, tools, react_prompt)
-            agent_executor = AgentExecutor(
-                agent=agent,
-                tools=tools,
-                max_iterations=self.max_iterations,
-                verbose=False,
-            )
-            
-            # Execute
             input_msg = f"Investigate {task.layer} ({layer_info.get('name', '')}): {task.description}"
             if task.suggested_filters.get("hostname"):
                 input_msg += f"\nDevices to check: {task.suggested_filters['hostname']}"
             
-            # Record in debug context
-            if self.debug_context:
-                self.debug_context.record_tool_call(
-                    tool_name="QuickAnalyzer.execute",
-                    input_data={"task": task.model_dump()},
-                    output_data=None,  # Will be updated after
-                    success=True,
-                )
+            logger.debug(f"QuickAnalyzer input: {input_msg}")
+            logger.debug(f"QuickAnalyzer tools: {[t.name for t in tools]}")
             
-            result = await agent_executor.ainvoke({"input": input_msg})
-            output = result.get("output", "")
+            # Create agent graph with system message
+            agent = create_react_agent(self.llm, tools)
             
-            # Parse result
+            # Collect tool outputs and messages
+            tool_outputs = []
+            output = ""
+            collected_messages = []
+            
+            # Use streaming with updates mode to collect results even on recursion limit
+            input_messages = [
+                SystemMessage(content=system_msg),
+                ("user", input_msg),
+            ]
+            
+            try:
+                # Stream with updates mode - more reliable for collecting tool outputs
+                async for chunk in agent.astream(
+                    {"messages": input_messages},
+                    config={"recursion_limit": 20},
+                    stream_mode="updates",
+                ):
+                    # Each chunk contains node updates
+                    # Format: {"node_name": {"messages": [...]}}
+                    for node_name, node_data in chunk.items():
+                        if "messages" in node_data:
+                            for msg in node_data["messages"]:
+                                collected_messages.append(msg)
+                                msg_type = type(msg).__name__
+                                
+                                # Extract tool outputs from ToolMessage
+                                if msg_type == "ToolMessage":
+                                    tool_content = getattr(msg, "content", "")
+                                    if isinstance(tool_content, str):
+                                        try:
+                                            import json
+                                            parsed = json.loads(tool_content)
+                                            if isinstance(parsed, dict):
+                                                tool_outputs.append(parsed)
+                                        except:
+                                            # Raw string output
+                                            if len(tool_content) > 50:
+                                                tool_outputs.append({"raw": tool_content[:2000]})
+                                    elif isinstance(tool_content, dict):
+                                        tool_outputs.append(tool_content)
+                                        
+            except GraphRecursionError:
+                # Recursion limit hit - expected for complex queries
+                logger.warning(f"QuickAnalyzer hit recursion limit - extracting partial results from {len(tool_outputs)} tool outputs")
+            
+            # Extract AI message output from collected messages
+            for msg in reversed(collected_messages):
+                msg_type = type(msg).__name__
+                if msg_type == "AIMessage" and hasattr(msg, "content"):
+                    content = msg.content
+                    if content and not content.startswith("Sorry"):
+                        output = content
+                        break
+            
+            logger.debug(f"QuickAnalyzer collected {len(tool_outputs)} tool outputs, {len(collected_messages)} messages")
+            logger.debug(f"QuickAnalyzer output: {output[:500] if output else 'EMPTY'}")
+            
+            # Parse findings from both text output and tool outputs
             findings = self._parse_findings(output)
+            
+            # Extract meaningful findings from tool data
+            findings.extend(self._extract_findings_from_tool_data(tool_outputs))
+            
             confidence = self._estimate_confidence(findings)
+            if tool_outputs and not findings:
+                # If we got tool outputs but no findings, set minimum confidence
+                confidence = max(confidence, 0.3)
+                findings = ["Data retrieved from network devices (no specific issues identified)"]
             
             return DiagnosisResult(
                 task_id=task.task_id,
@@ -226,7 +328,7 @@ Thought:{agent_scratchpad}"""
                 success=True,
                 confidence=confidence,
                 findings=findings,
-                tool_outputs=[{"raw_output": output}],
+                tool_outputs=tool_outputs if tool_outputs else [{"raw_output": output}],
             )
         except Exception as e:
             logger.error(f"QuickAnalyzer execution failed: {e}")
@@ -268,6 +370,97 @@ Thought:{agent_scratchpad}"""
                 findings.append(line)
         
         return findings[:10]  # Limit to 10 findings
+    
+    def _extract_findings_from_tool_data(self, tool_outputs: list[dict]) -> list[str]:
+        """Extract meaningful findings from tool output data.
+        
+        Analyzes SuzieQ query results to identify:
+        - Interface status (up/down)
+        - VLAN configurations
+        - Route information
+        - Device connectivity
+        
+        Args:
+            tool_outputs: List of tool output dictionaries.
+        
+        Returns:
+            List of finding strings.
+        """
+        findings = []
+        
+        for tool_data in tool_outputs:
+            if not isinstance(tool_data, dict):
+                continue
+            
+            # Handle raw string output
+            if "raw" in tool_data:
+                raw = tool_data["raw"]
+                if isinstance(raw, str) and len(raw) > 50:
+                    # Look for key patterns in raw output
+                    if "hostname" in raw.lower():
+                        findings.append(f"Device data retrieved: {raw[:200]}...")
+                continue
+            
+            # Handle structured SuzieQ output
+            data = tool_data.get("data", [])
+            source = tool_data.get("source", "tool")
+            metadata = tool_data.get("metadata", {})
+            table = metadata.get("table", "unknown")
+            
+            if not isinstance(data, list) or not data:
+                continue
+            
+            # Analyze based on table type
+            if table == "interfaces":
+                # Look for interface issues
+                down_interfaces = [
+                    d for d in data 
+                    if d.get("state") == "down" or d.get("adminState") == "down"
+                ]
+                if down_interfaces:
+                    for iface in down_interfaces[:3]:
+                        findings.append(
+                            f"Interface DOWN: {iface.get('hostname', '?')}/{iface.get('ifname', '?')} "
+                            f"(state={iface.get('state', '?')})"
+                        )
+                
+                # Extract device IPs
+                for d in data[:5]:
+                    if d.get("ipAddressList"):
+                        ips = d.get("ipAddressList", [])
+                        if ips:
+                            findings.append(
+                                f"Device {d.get('hostname', '?')} {d.get('ifname', '?')}: "
+                                f"IP {ips[0] if isinstance(ips, list) else ips}"
+                            )
+                            
+            elif table == "routes":
+                # Summarize routing info
+                findings.append(f"Route table: {len(data)} routes from {source}")
+                # Look for default routes
+                defaults = [d for d in data if d.get("prefix") == "0.0.0.0/0"]
+                if defaults:
+                    for route in defaults[:2]:
+                        findings.append(
+                            f"Default route on {route.get('hostname', '?')}: "
+                            f"via {route.get('nexthopIps', route.get('nexthop', '?'))}"
+                        )
+                        
+            elif table in ("vlan", "vlans"):
+                # VLAN configuration
+                findings.append(f"VLAN config: {len(data)} VLANs found")
+                for vlan in data[:3]:
+                    findings.append(
+                        f"VLAN {vlan.get('vlan', '?')} on {vlan.get('hostname', '?')}: "
+                        f"{vlan.get('interfaces', vlan.get('state', 'active'))}"
+                    )
+                    
+            else:
+                # Generic summary
+                device = tool_data.get("device", "unknown")
+                findings.append(f"[{source}/{table}] {len(data)} records from {device}")
+        
+        return findings[:15]  # Limit findings
     
     def _estimate_confidence(self, findings: list[str]) -> float:
         """Estimate confidence based on findings.

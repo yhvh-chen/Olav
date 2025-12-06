@@ -151,8 +151,9 @@ class LLMFactory:
             )
         elif provider == "openai":
             config["api_key"] = env_settings.llm_api_key
-            if LLMConfig.BASE_URL:
-                config["base_url"] = LLMConfig.BASE_URL
+            # Use environment variable for base_url (supports OpenRouter, etc.)
+            if env_settings.llm_base_url:
+                config["base_url"] = env_settings.llm_base_url
             # Sequential tool execution for OpenRouter compatibility
             config["model_kwargs"] = {"parallel_tool_calls": False}
             if json_mode:

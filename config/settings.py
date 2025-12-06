@@ -59,8 +59,8 @@ class LLMConfig:
     BASE_URL: str = "http://127.0.0.1:11434"  # Ollama local
    # MODEL_NAME = "x-ai/grok-4.1-fast"
     MODEL_NAME = "qwen3:30b"
-    TEMPERATURE = 0.2
-    MAX_TOKENS = 16000
+    TEMPERATURE = 0  # Use greedy decoding for deterministic classification
+    MAX_TOKENS = 512  # Classification output is ~200 tokens max
     
     # Fallback models for ModelFallbackMiddleware (LangChain 1.10)
     # Format: ["provider:model_name", ...] in priority order

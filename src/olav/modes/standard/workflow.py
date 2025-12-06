@@ -122,7 +122,12 @@ class StandardModeWorkflow:
         
         try:
             # Step 1: Classify query
+            classify_start = time.perf_counter()
             classification = await self.classifier.classify(query, schema_context)
+            classify_time_ms = (time.perf_counter() - classify_start) * 1000
+            
+            # Get LLM time from classification result if available
+            llm_time_ms = getattr(classification, '_llm_time_ms', classify_time_ms)
             
             # Step 2: Check for Expert Mode escalation
             if self.classifier.should_escalate_to_expert(classification):
@@ -199,6 +204,8 @@ class StandardModeWorkflow:
                 metadata={
                     "classification": classification.model_dump(),
                     "tool_execution_ms": exec_result.execution_time_ms,
+                    "llm_time_ms": llm_time_ms,
+                    "classify_time_ms": classify_time_ms,
                 },
             )
             

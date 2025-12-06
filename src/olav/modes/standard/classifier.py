@@ -106,12 +106,14 @@ class StandardModeClassifier:
             "诊断",
         ]
         
-        reasoning_lower = result.reasoning.lower()
-        if any(kw in reasoning_lower for kw in complexity_keywords):
-            logger.info(
-                f"Escalating to Expert Mode: complexity detected in reasoning"
-            )
-            return True
+        # Handle optional reasoning field (None when omitted for performance)
+        if result.reasoning:
+            reasoning_lower = result.reasoning.lower()
+            if any(kw in reasoning_lower for kw in complexity_keywords):
+                logger.info(
+                    f"Escalating to Expert Mode: complexity detected in reasoning"
+                )
+                return True
         
         return False
 

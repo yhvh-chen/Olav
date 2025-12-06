@@ -418,6 +418,86 @@ class SuzieQSchemaSearchTool:
         )
 
 
+# =============================================================================
+# Factory Functions for LangChain Tool Conversion
+# =============================================================================
+
+
+def create_suzieq_query_tool():
+    """Create a LangChain-compatible SuzieQ query tool.
+    
+    Returns:
+        LangChain tool for SuzieQ queries.
+    """
+    from langchain_core.tools import tool
+    
+    tool_instance = SuzieQTool()
+    
+    @tool
+    async def suzieq_query(
+        table: str,
+        method: str = "get",
+        hostname: str | None = None,
+        namespace: str | None = None,
+        max_age_hours: int = 24,
+    ) -> dict:
+        """Query SuzieQ historical network data from Parquet files.
+        
+        Use this tool to access network device state collected by SuzieQ.
+        Schema is discovered dynamically - use suzieq_schema_search first.
+        
+        Args:
+            table: Table name (e.g., 'bgp', 'interfaces', 'routes')
+            method: Query method - 'get' for raw data, 'summarize' for aggregation
+            hostname: Filter by specific device hostname
+            namespace: Filter by namespace
+            max_age_hours: Maximum data age in hours (default 24)
+        
+        Returns:
+            Query results from SuzieQ Parquet data.
+        """
+        result = await tool_instance.execute(
+            table=table,
+            method=method,
+            hostname=hostname,
+            namespace=namespace,
+            max_age_hours=max_age_hours,
+        )
+        return result.model_dump()
+    
+    return suzieq_query
+
+
+def create_suzieq_schema_tool():
+    """Create a LangChain-compatible SuzieQ schema search tool.
+    
+    Returns:
+        LangChain tool for schema search.
+    """
+    from langchain_core.tools import tool
+    
+    tool_instance = SuzieQSchemaSearchTool()
+    
+    @tool
+    async def suzieq_schema_search(query: str) -> dict:
+        """Search SuzieQ schema to discover available tables and fields.
+        
+        Use this tool BEFORE suzieq_query to find out what tables exist
+        and what fields they contain.
+        
+        Args:
+            query: Natural language query describing what data you need
+                   (e.g., "BGP information", "interface status", "routing table")
+        
+        Returns:
+            Matching tables with their fields and descriptions.
+        """
+        result = await tool_instance.execute(query=query)
+        return result.model_dump()
+    
+    return suzieq_schema_search
+
+
 # Register tools with ToolRegistry
 ToolRegistry.register(SuzieQTool())
 ToolRegistry.register(SuzieQSchemaSearchTool())

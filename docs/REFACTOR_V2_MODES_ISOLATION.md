@@ -94,22 +94,25 @@ src/olav/
 │   ├── __init__.py                 # Mode Protocol + 路由
 │   ├── base.py                     # ModeProtocol 基类
 │   │
-│   ├── standard/                   # Phase 1
+│   ├── standard/                   # Phase 1 项目阶段
 │   │   ├── __init__.py
 │   │   ├── executor.py             # FastPath 执行器
 │   │   ├── classifier.py           # UnifiedClassifier (重构自 unified_classifier.py)
 │   │   └── prompts/                # 模式专用 prompts
 │   │
-│   ├── expert/                     # Phase 2
+│   ├── expert/                     # Phase 2 项目阶段 - 两阶段诊断架构
 │   │   ├── __init__.py
-│   │   ├── workflow.py             # Supervisor-Driven Workflow
-│   │   ├── quick_analyzer.py       # SuzieQ 快速分析 (60% 置信)
-│   │   ├── supervisor.py           # KB + Syslog → 层级决策
-│   │   ├── inspectors.py           # L1-L4 并行检查器
+│   │   ├── workflow.py             # 两阶段工作流编排
+│   │   ├── supervisor.py           # 调度控制: KB + Syslog → 决策
+│   │   ├── quick_analyzer.py       # 🔹 Phase 1: SuzieQ 快速分析 (60% 置信)
+│   │   ├── deep_analyzer.py        # 🔹 Phase 2: CLI/NETCONF 实时验证 (95% 置信)
 │   │   ├── report.py               # 报告生成 + RAG 索引
 │   │   └── prompts/                # 模式专用 prompts
+│   │       ├── quick_analyzer.yaml
+│   │       ├── deep_analyzer.yaml
+│   │       └── supervisor.yaml
 │   │
-│   └── inspection/                 # Phase 3
+│   └── inspection/                 # Phase 3 项目阶段
 │       ├── __init__.py
 │       ├── loader.py               # YAML 配置加载
 │       ├── compiler.py             # NL → SQL 编译器 (可选)
@@ -217,74 +220,1082 @@ class HITLMiddleware:
 
 #### 5.1.3 交付物
 
-- [ ] `src/olav/modes/standard/` 目录结构
-- [ ] `executor.py`: 重构自 `fast_path.py`
-- [ ] `classifier.py`: 重构自 `unified_classifier.py`
-- [ ] 删除 `INTENT_PATTERNS_FALLBACK` 硬编码关键词
-- [ ] 单元测试: `tests/unit/modes/test_standard.py`
+- [x] `src/olav/modes/standard/` 目录结构
+- [x] `executor.py`: 重构自 `fast_path.py`
+- [x] `classifier.py`: 重构自 `unified_classifier.py`
+- [x] ~~删除 `INTENT_PATTERNS_FALLBACK` 硬编码关键词~~ (保留用于 legacy 兼容)
+- [x] 单元测试: `tests/unit/modes/test_standard.py` (12 tests)
+
+**✅ Phase 1 完成** (2025-12-06)
+
+性能优化记录:
+- temperature: 0.2 → 0 (贪婪解码)
+- max_tokens: 16000 → 512 (分类任务)
+- reasoning 字段可选 (减少生成)
+- 平均延迟: 5550ms → 2024ms (**63.5% 提升**)
 
 ---
 
-### Phase 2: Expert Mode (3-4 天)
+### Phase 1.5: 性能优化 - 正则快速路径 + Prompt 瘦身 (1天)
+
+> 📅 添加日期: 2025-12-06  
+> 🎯 目标: 简单查询延迟从 1.5s → 50ms
+
+#### 5.1.5.1 E2E 性能测试数据
+
+| 模式 | 通过率 | 平均总时间 | 平均 LLM 时间 | LLM 占比 |
+|------|--------|------------|---------------|---------|
+| Standard | 6/8 (75%) | 2,175ms | 1,950ms | 90-99% |
+| Expert | 3/3 (100%) | 664ms | 464ms | 70% |
+| Inspection | 1/1 (100%) | 100ms | 0ms | 0% |
+
+**关键发现**:
+1. **LLM 是主要瓶颈** - Standard Mode 中 LLM 推理占 90-99%
+2. **首次调用慢** - 冷启动 5.8s vs 正常 1.5s (Ollama 模型加载)
+3. **简单查询无需 LLM** - "列出设备"、"查 BGP" 可正则直接匹配
+
+#### 5.1.5.2 优化策略: 共用预处理 + 分流执行
+
+```
+用户查询
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│      QueryPreprocessor (共用层)          │
+│  1. 正则提取: 设备名、表名、参数         │
+│  2. 意图关键词: diagnostic / query       │
+└─────────────────────────────────────────┘
+    │
+    ├── 诊断类关键词 ("为什么", "诊断", "分析")
+    │         │
+    │         ▼
+    │    Expert Mode (必须走 LLM 规划)
+    │    - 使用预提取的设备作为起点
+    │
+    └── 查询类关键词 ("查询", "显示", "列出")
+              │
+              ▼
+         ┌────────────────┐
+         │ 正则完全匹配?   │
+         └────────────────┘
+              │
+         Yes  │  No
+              ▼   ▼
+         直接执行  LLM 分类
+         (50ms)   (1.5s)
+```
+
+**核心原则**:
+- **提取逻辑共用** - 正则解析设备名、表名、参数
+- **执行路径隔离** - Standard 可跳过 LLM，Expert 必须 LLM 规划
+- **预处理减轻 LLM 负担** - 告诉 LLM "用户问的是 R1 的 BGP"
+
+#### 5.1.5.3 正则快速路径设计
+
+**位置**: `src/olav/modes/shared/preprocessor.py`
+
+```python
+# 关键词分类
+DIAGNOSTIC_KEYWORDS = {"为什么", "诊断", "分析", "排查", "故障", "失败", "不通", "问题", "原因"}
+QUERY_KEYWORDS = {"查询", "显示", "列出", "获取", "查看", "检查", "show", "list", "get"}
+
+# 正则快速匹配 (Standard Mode Only)
+FAST_PATTERNS = [
+    # BGP 查询
+    (r"(?:查询|显示|查看).*?(?P<hostname>\S+).*?(?:的\s*)?BGP", 
+     "suzieq_query", {"table": "bgp"}),
+    
+    # 接口查询
+    (r"(?:查询|显示|查看).*?(?P<hostname>\S+).*?(?:的\s*)?接口",
+     "suzieq_query", {"table": "interface"}),
+    
+    # 路由查询  
+    (r"(?:查询|显示|查看|检查).*?(?P<hostname>\S+).*?(?:的\s*)?路由",
+     "suzieq_query", {"table": "routes"}),
+    
+    # 设备列表 (无设备名)
+    (r"(?:列出|显示|查询).*?(?:所有\s*)?设备",
+     "netbox_api_call", {"endpoint": "/dcim/devices/"}),
+    
+    # 全量接口状态
+    (r"(?:显示|查询).*?所有.*?接口",
+     "suzieq_query", {"table": "interface"}),
+]
+
+# 设备名提取 (共用)
+DEVICE_PATTERN = r"(?:设备|主机|路由器|交换机)?\s*(?P<device>[A-Za-z][\w\-\.]+)"
+```
+
+#### 5.1.5.4 Prompt 瘦身设计
+
+**位置**: `config/prompts/_defaults/unified_classification.yaml`
+
+**优化点**:
+1. ❌ 删除 `reasoning` 字段要求 (已完成)
+2. ⏳ 压缩 few-shot 示例为单行格式
+3. ⏳ 移除冗余工具描述
+4. ⏳ 动态注入相关 schema (仅匹配查询的表)
+
+**优化后 Prompt 结构**:
+```yaml
+template: |
+  你是网络意图分类器。分析查询，返回JSON:
+  {"intent_category": "...", "tool": "...", "parameters": {...}, "confidence": 0.0-1.0}
+
+  ## 工具
+  - suzieq_query: 网络状态 {table, hostname}
+  - netbox_api_call: CMDB {endpoint, filters}
+  - cli_tool: CLI命令 {device, command}
+
+  ## 表名
+  bgp, interface, routes, ospf, device, vlan, mac, lldp
+
+  ## 示例
+  "查询R1 BGP" → {"intent_category":"suzieq","tool":"suzieq_query","parameters":{"table":"bgp","hostname":"R1"},"confidence":0.95}
+  "列出设备" → {"intent_category":"netbox","tool":"netbox_api_call","parameters":{"endpoint":"/dcim/devices/"},"confidence":0.9}
+```
+
+**预期 Token 减少**: 150 → 60 tokens (60% 减少)
+
+#### 5.1.5.5 交付物
+
+- [ ] `src/olav/modes/shared/preprocessor.py`: QueryPreprocessor 类
+- [ ] 更新 `unified_classifier.py`: 集成正则快速路径
+- [ ] 优化 `unified_classification.yaml`: Prompt 瘦身
+- [ ] 单元测试: `tests/unit/test_preprocessor.py`
+- [ ] E2E 性能回归测试
+
+#### 5.1.5.6 预期收益
+
+| 指标 | 优化前 | 优化后 | 提升 |
+|------|--------|--------|------|
+| 简单查询延迟 | 1.5s | 50ms | **30x** |
+| 复杂查询延迟 | 1.5s | 1.0s | 1.5x |
+| 首次查询延迟 | 5.8s | 1.5s | 4x (预热) |
+| Prompt Token | 150 | 60 | 60% |
+
+---
+
+### Phase 2: Expert Mode - 两阶段诊断架构 (3-4 天)
 
 **目标**: 复杂故障分析，多轮推理，只读
 
-#### 5.2.1 核心组件
+> 📅 更新日期: 2025-12-06
+> 🎯 核心原则: **SuzieQ 是历史数据，必须通过实时数据作为补充**
 
-| 组件 | 来源 | 说明 |
-|------|------|------|
-| `QuickAnalyzer` | 新建 | SuzieQ aver/path/summarize (60% 置信) |
-| `Supervisor` | 新建 | KB + Syslog → 层级优先级决策 |
-| `LayerInspectors` | 新建 | L1-L4 并行检查器 |
-| `ReportGenerator` | 新建 | 诊断报告 + RAG 索引 |
+#### 5.2.1 两阶段架构设计
 
-#### 5.2.2 诊断流程
+**为什么需要两阶段？**
+
+| 数据源 | 特点 | 置信度上限 | 适用场景 |
+|--------|------|------------|----------|
+| SuzieQ (历史) | 毫秒级查询、预聚合、有采集延迟 | 60% | 快速扫描、缩小范围 |
+| CLI/NETCONF (实时) | 秒级延迟、需要 SSH、最新状态 | 95% | 验证可疑点、配置分析 |
+
+**SuzieQ 的能力边界**:
+
+| 数据类型 | SuzieQ 能力 | 说明 |
+|----------|-------------|------|
+| 运行时状态 (routes, bgp, interfaces) | ✅ 完全支持 | 但有采集延迟 (1-5分钟) |
+| 设备配置 (devconfig) | ✅ 有数据 | 包含 route-map, prefix-list, ACL |
+| 配置语义分析 | ⚠️ 需要解析 | 原始文本需 LLM/正则解析 |
+| 实时 counters/stats | ❌ 滞后 | 需实时 CLI 补充 |
+| STP 状态 | ❌ 不采集 | 需实时 CLI/NETCONF |
+
+> **⚠️ 重要说明**: 即使 SuzieQ `devconfig` 表包含配置数据（route-map, prefix-list 等），
+> 这些仍然是**历史快照**，不是实时配置。如果管理员刚修改了配置但 SuzieQ 还没重新采集，
+> 就会有数据滞后。因此 **Phase 2 实时验证始终是必要的**。
+>
+> **SuzieQ 采集周期**: 通常 1-5 分钟，配置变更后可能有延迟。
+
+#### 5.2.2 核心组件
+
+| 组件 | 来源 | 阶段 | 说明 |
+|------|------|------|------|
+| `Supervisor` | 新建 | 控制 | KB + Syslog → 层级优先级决策 |
+| `QuickAnalyzer` | 新建 | Phase 1 | SuzieQ 快速分析 (60% 置信) |
+| `DeepAnalyzer` | 新建 | Phase 2 | CLI/NETCONF 实时验证 (95% 置信) |
+| `ReportGenerator` | 新建 | 输出 | 诊断报告 + RAG 索引 |
+
+#### 5.2.3 两阶段诊断流程
 
 ```
-User Query: "R1 和 R2 之间的 BGP 为什么断了"
+User Query: "用户报告 192.168.10.1 无法访问 10.0.100.100"
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Round 0: Quick Analyzer                                │
-│  • suzieq.bgp.get(hostname=[R1,R2])                    │
-│  • suzieq.bgp.aver() → 检测异常状态                     │
-│  • 置信度: 60% (缓存数据)                               │
+│  Round 0: Supervisor 初始化                              │
+│  • kb_search("连通性问题") → 历史案例                    │
+│  • syslog_search(severity=error) → 触发事件             │
+│  • 决策: 确定检查优先级 [L3 > L2 > L1]                  │
 └─────────────────────────────────────────────────────────┘
     │
     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Round 1: Supervisor Decision                           │
-│  • kb_search("BGP session down") → 历史案例            │
-│  • syslog_search(hostname=[R1,R2], severity=error)     │
-│  • 决策: "L3 Network 优先，需验证 neighbor config"      │
-└─────────────────────────────────────────────────────────┘
+╔═════════════════════════════════════════════════════════╗
+║  Phase 1: Quick Analyzer (SuzieQ 历史数据)               ║
+║  最高置信度: 60%                                         ║
+╠═════════════════════════════════════════════════════════╣
+║  工具:                                                   ║
+║  • suzieq_query(table="routes") → 检查路由表            ║
+║  • suzieq_query(table="bgp") → BGP 邻居状态             ║
+║  • suzieq_query(table="interfaces") → 接口状态          ║
+║  • suzieq_query(table="arpnd") → ARP/ND 表              ║
+║                                                          ║
+║  发现:                                                   ║
+║  • R3/R4 缺少 10.0.0.0/16 路由                          ║
+║  • R1/R2 BGP 状态 Established (看起来正常)              ║
+║  • 置信度: 50% (发现路由缺失，但原因未知)               ║
+╚═════════════════════════════════════════════════════════╝
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Round 2+: Layer Inspectors (并行)                      │
-│  • netconf_get(device=R1, xpath=/bgp/neighbors)        │
-│  • netconf_get(device=R2, xpath=/bgp/neighbors)        │
-│  • 置信度: 95% (实时数据)                               │
+│  Supervisor 决策                                         │
+│  • Phase 1 置信度 < 80% → 需要 Phase 2 验证              │
+│  • 可疑点: R1/R2 BGP 策略可能阻断路由传递                │
+│  • 调度 Phase 2: 检查 R1/R2 BGP 配置                    │
 └─────────────────────────────────────────────────────────┘
+    │
+    ▼
+╔═════════════════════════════════════════════════════════╗
+║  Phase 2: Deep Analyzer (CLI/NETCONF 实时数据)           ║
+║  置信度: 95%                                             ║
+╠═════════════════════════════════════════════════════════╣
+║  工具:                                                   ║
+║  • cli_show(device="R1", command="show run | sec bgp")  ║
+║  • cli_show(device="R1", command="show route-map")      ║
+║  • cli_show(device="R1", command="show ip prefix-list") ║
+║  • netconf_get(device="R1", xpath="/bgp/neighbors")     ║
+║                                                          ║
+║  发现:                                                   ║
+║  • R1 route-map bgp_out 只允许 192.168.10.0/24          ║
+║  • R2 route-map bgp_in 只允许 192.168.20.0/24           ║
+║  • 10.0.0.0/16 被 deny 规则阻断！                       ║
+║  • 置信度: 95% (实时数据，明确根因)                     ║
+╚═════════════════════════════════════════════════════════╝
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Diagnosis Conclusion                                   │
-│  • 根因: R1 neighbor IP 配置错误                        │
-│  • 证据: [SuzieQ state, NETCONF config diff]           │
-│  • 建议: 修改 R1 BGP neighbor 配置                     │
+│  • 根因: R1/R2 BGP route-map/prefix-list 阻断 10.0.0.0 │
+│  • 层级: L3 (路由策略)                                  │
+│  • 证据链:                                              │
+│    1. [Phase 1] R3/R4 缺少 10.0.0.0/16 路由            │
+│    2. [Phase 2] R1 bgp_out 只放行 192.168.10.0/24      │
+│    3. [Phase 2] R2 bgp_in 只放行 192.168.20.0/24       │
+│  • 建议: 修改 prefix-list 添加 10.0.0.0/16 许可        │
 │  • (只读模式: 不执行修改，仅提供建议)                    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-#### 5.2.3 交付物
+#### 5.2.4 Phase 1 vs Phase 2 工具分配
+
+| 阶段 | 工具 | 用途 | 置信度 |
+|------|------|------|--------|
+| **Phase 1 (Quick)** | `suzieq_query` | 历史状态查询 (routes, bgp, interfaces...) | 60% |
+| | `suzieq_schema_search` | SuzieQ Schema 发现 | - |
+| **Phase 2 (Deep)** | `openconfig_schema_search` | OpenConfig YANG Schema 发现 | - |
+| | `netconf_get` | NETCONF 实时读取 (OpenConfig/Native) | 95% |
+| | `cli_show` | CLI 命令读取 (厂商特定) | 95% |
+| **Supervisor** | `kb_search` | 知识库检索 (历史案例) | - |
+| | `syslog_search` | 日志搜索 (触发事件) | - |
+| **Report** | `memory_store` | 索引诊断报告到 Episodic Memory | - |
+
+**工具隔离原则**:
+
+| 原则 | 说明 |
+|------|------|
+| **Phase 1 只用 SuzieQ** | 历史数据快速扫描，不访问设备 |
+| **Phase 2 只用 OpenConfig/CLI** | 实时数据验证，SSH/NETCONF 连接设备 |
+| **不混用工具** | Phase 2 不再调用 SuzieQ，避免数据源混淆 |
+
+#### 5.2.5 Phase 2 触发条件
+
+```python
+class Supervisor:
+    def should_trigger_phase2(self, phase1_result: Phase1Result) -> bool:
+        """判断是否需要 Phase 2 实时验证"""
+        
+        # 1. 置信度不足
+        if phase1_result.confidence < 0.80:
+            return True
+        
+        # 2. 发现可疑点但无法确认根因
+        if phase1_result.suspected_issues and not phase1_result.root_cause_confirmed:
+            return True
+        
+        # 3. 涉及配置策略类问题 (SuzieQ 盲区)
+        if any(keyword in phase1_result.hypothesis 
+               for keyword in ["route-map", "prefix-list", "ACL", "policy", "STP"]):
+            return True
+        
+        # 4. 数据过时
+        if phase1_result.data_age_seconds > 300:  # 5分钟
+            return True
+        
+        return False
+```
+
+#### 5.2.6 Quick/Deep 循环策略
+
+**架构决定行为**: 循环控制由代码结构强制执行，不依赖 LLM 遵守指令。
+
+```
+                         ┌─────────────────────────────────────┐
+                         │        Workflow Entry Point         │
+                         │  workflow.run(query, max_rounds=5)  │
+                         └──────────────────┬──────────────────┘
+                                            │
+                                            ▼
+                         ┌─────────────────────────────────────┐
+                         │  Round 0: Supervisor Initialization │
+                         │  • kb_search() → 历史案例           │
+                         │  • syslog_search() → 相关事件       │
+                         │  • plan_next_task() → L1-L4 优先级  │
+                         └──────────────────┬──────────────────┘
+                                            │
+        ┌───────────────────────────────────┼───────────────────────────────────┐
+        │                                   │                                   │
+        │ ┌─────────────────────────────────▼─────────────────────────────────┐ │
+        │ │                    ROUND LOOP (max 5 rounds)                      │ │
+        │ │                                                                   │ │
+        │ │  ┌─────────────────────────────────────────────────────────────┐  │ │
+        │ │  │  Phase 1: Quick Analyzer (SuzieQ)                           │  │ │
+        │ │  │  • Tools: suzieq_query, suzieq_schema_search               │  │ │
+        │ │  │  • Max confidence: 60%                                      │  │ │
+        │ │  │  • ReAct iterations: 5-8 per task                          │  │ │
+        │ │  └──────────────────────────┬──────────────────────────────────┘  │ │
+        │ │                             │                                     │ │
+        │ │                             ▼                                     │ │
+        │ │  ┌─────────────────────────────────────────────────────────────┐  │ │
+        │ │  │  Supervisor Decision Point                                  │  │ │
+        │ │  │  • Evaluate Phase 1 confidence                             │  │ │
+        │ │  │  • Check: should_trigger_phase2()                          │  │ │
+        │ │  └──────────────────────────┬──────────────────────────────────┘  │ │
+        │ │                             │                                     │ │
+        │ │              ┌──────────────┴──────────────┐                     │ │
+        │ │              │                             │                     │ │
+        │ │       confidence ≥ 80%              confidence < 80%             │ │
+        │ │       root_cause = True            or suspected_issues           │ │
+        │ │              │                     or policy_keywords            │ │
+        │ │              │                             │                     │ │
+        │ │              ▼                             ▼                     │ │
+        │ │     ┌────────────────┐     ┌─────────────────────────────────┐   │ │
+        │ │     │  Skip Phase 2  │     │  Phase 2: Deep Analyzer         │   │ │
+        │ │     │  → Report      │     │  • Tools: cli_show, netconf_get │   │ │
+        │ │     └────────────────┘     │  • Max confidence: 95%          │   │ │
+        │ │                            │  • Target: suspected devices    │   │ │
+        │ │                            └──────────────────┬──────────────┘   │ │
+        │ │                                               │                   │ │
+        │ │                            ┌──────────────────┘                   │ │
+        │ │                            ▼                                     │ │
+        │ │  ┌─────────────────────────────────────────────────────────────┐  │ │
+        │ │  │  Supervisor: update_state()                                 │  │ │
+        │ │  │  • Update layer confidences                                │  │ │
+        │ │  │  • Check root_cause_found indicators                       │  │ │
+        │ │  │  • Decide next round's priority                            │  │ │
+        │ │  └──────────────────────────┬──────────────────────────────────┘  │ │
+        │ │                             │                                     │ │
+        │ │              ┌──────────────┴──────────────┐                     │ │
+        │ │              │                             │                     │ │
+        │ │     root_cause_found            root_cause NOT found             │ │
+        │ │     or max_rounds                   and has_gaps                 │ │
+        │ │              │                             │                     │ │
+        │ │              ▼                             │                     │ │
+        │ │        EXIT LOOP ◄─────────────────────────┘                     │ │
+        │ │                      (next round)                                 │ │
+        │ └───────────────────────────────────────────────────────────────────┘ │
+        │                                                                       │
+        └───────────────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+                         ┌─────────────────────────────────────┐
+                         │        Report Generation            │
+                         │  • Conclusion with evidence chain   │
+                         │  • Recommendations                  │
+                         │  • Index to RAG for future reuse    │
+                         └─────────────────────────────────────┘
+```
+
+**循环终止条件**:
+
+| 条件 | 说明 | 优先级 |
+|------|------|--------|
+| `root_cause_found = True` | 发现明确根因并有证据链 | **最高** |
+| `current_round >= max_rounds` | 达到最大轮数 (默认 5) | 高 |
+| `all_layers_confidence >= 50%` | 所有层置信度足够 | 中 |
+| `no_new_findings` | 连续 2 轮无新发现 | 低 |
+
+**当前实现状态**:
+
+| 组件 | 实现状态 | 说明 |
+|------|----------|------|
+| Round 循环 | ✅ 已实现 | `supervisor.py` 中 Round 0-N 控制 |
+| Phase 1 (Quick) | ✅ 已实现 | `quick_analyzer.py` SuzieQ 工具 |
+| Phase 2 (Deep) | ❌ **未实现** | 需要 `deep_analyzer.py` |
+| KB + Syslog | ✅ 已实现 | `supervisor.round_zero_context()` |
+| devconfig 分析 | ⚠️ 部分 | 有数据，缺 ConfigSectionExtractor |
+
+#### 5.2.7 L1-L4 故障覆盖率
+
+| 层级 | Phase 1 (SuzieQ) | Phase 2 (CLI/NETCONF) | 组合覆盖 |
+|------|------------------|----------------------|----------|
+| L1 物理层 | 70% | 95% | **~85%** |
+| L2 链路层 | 55% | 85% | **~70%** |
+| L3 网络层 | 75% | 90% | **~85%** |
+| L4 策略层 | 15% | 75% | **~50%** |
+
+**L4 策略层详细覆盖**:
+
+| 故障类型 | Phase 1 | Phase 2 | 说明 |
+|----------|---------|---------|------|
+| route-map 阻断 | ⚠️ 间接 | ✅ | Phase 1 看到路由缺失，Phase 2 确认策略 |
+| prefix-list 错误 | ⚠️ 间接 | ✅ | 同上 |
+| ACL 阻断 | ❌ | ✅ | 需要 CLI 读取 ACL 规则 |
+| NAT 问题 | ❌ | ⚠️ | 厂商特定命令 |
+| QoS 丢包 | ⚠️ | ⚠️ | 需要 counters |
+
+#### 5.2.8 交付物
 
 - [ ] `src/olav/modes/expert/` 目录结构
-- [ ] `quick_analyzer.py`: SuzieQ 快速分析
-- [ ] `supervisor.py`: KB + Syslog 决策
-- [ ] `inspectors.py`: L1-L4 并行检查
-- [ ] `report.py`: 报告生成 + RAG 索引
+- [ ] `supervisor.py`: 两阶段调度控制
+- [ ] `quick_analyzer.py`: Phase 1 SuzieQ 快速分析
+- [ ] `deep_analyzer.py`: Phase 2 OpenConfig/CLI 实时验证
+- [ ] `report.py`: 报告生成 + Episodic Memory 索引 (Agentic 闭环)
+- [ ] `src/olav/shared/tools/`:
+  - [ ] `config_extractor.py`: 配置段落提取器 (Token 优化)
+  - [ ] `openconfig.py`: `openconfig_schema_search`, `netconf_get`
+  - [ ] `cli.py`: `cli_show` (厂商特定命令)
+  - [ ] `opensearch.py`: `memory_store` (Episodic Memory 索引)
+- [ ] `config/prompts/expert/`:
+  - [ ] `quick_analyzer.yaml`: Phase 1 Prompt
+  - [ ] `deep_analyzer.yaml`: Phase 2 Prompt
+  - [ ] `supervisor.yaml`: 调度决策 Prompt
+- [ ] OpenSearch 索引: `olav-episodic-memory` (Agentic 闭环)
 - [ ] 单元测试: `tests/unit/modes/test_expert.py`
+- [ ] 单元测试: `tests/unit/shared/test_config_extractor.py`
+
+#### 5.2.9 Agentic 闭环：报告索引到 Episodic Memory
+
+> **核心原则**: 每次成功诊断的结果都应该被索引到知识库，形成"学习闭环"。
+> 下次遇到类似问题时，Supervisor 的 `kb_search` 可以直接检索到历史案例。
+
+**闭环流程**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        AGENTIC LEARNING LOOP                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────┐   │
+│  │ User Query  │────▶│ Supervisor  │────▶│ kb_search(query)        │   │
+│  │ "R3 无法    │     │ Round 0     │     │ → 检索历史案例          │   │
+│  │  访问 10.x" │     │             │     │ → 发现: 2024-12-05 案例 │   │
+│  └─────────────┘     └─────────────┘     │   "BGP route-map 阻断"  │   │
+│                                          └───────────┬─────────────┘   │
+│                                                      │                  │
+│                                          ┌───────────▼─────────────┐   │
+│                                          │ 利用历史案例加速诊断    │   │
+│                                          │ • 跳过部分 Phase 1 步骤 │   │
+│                                          │ • 直接检查 BGP 策略     │   │
+│                                          └───────────┬─────────────┘   │
+│                                                      │                  │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    DIAGNOSIS COMPLETE                           │   │
+│  │  Root Cause: R1/R2 route-map 阻断 10.0.0.0/16                  │   │
+│  │  Confidence: 95%                                                │   │
+│  │  Evidence: [Phase 1 路由缺失, Phase 2 策略验证]                 │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  ReportGenerator.generate_and_index()                           │   │
+│  │                                                                  │   │
+│  │  1. 生成结构化报告 (Markdown + JSON)                            │   │
+│  │  2. 调用 memory_store() 工具                                    │   │
+│  │  3. 索引到 OpenSearch: olav-episodic-memory                     │   │
+│  │                                                                  │   │
+│  │  索引内容:                                                       │   │
+│  │  {                                                               │   │
+│  │    "query": "R3 无法访问 10.0.100.100",                         │   │
+│  │    "root_cause": "BGP route-map 阻断",                          │   │
+│  │    "layer": "L4",                                                │   │
+│  │    "devices": ["R1", "R2"],                                      │   │
+│  │    "config_sections": ["route-map bgp_out", "prefix-list net10"],│   │
+│  │    "resolution": "修改 prefix-list 添加 10.0.0.0/16",           │   │
+│  │    "evidence_chain": [...],                                      │   │
+│  │    "timestamp": "2024-12-06T10:30:00Z"                           │   │
+│  │  }                                                               │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              │ 下次类似问题                             │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  kb_search("连通性 10.x 无法访问")                               │   │
+│  │  → 检索到本次诊断结果                                            │   │
+│  │  → Supervisor 直接参考历史案例                                   │   │
+│  │  → 诊断时间从 5 分钟 → 30 秒                                    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**ReportGenerator 实现**:
+
+```python
+# modes/expert/report.py
+
+from olav.tools.opensearch import MemoryStoreTool
+
+class ReportGenerator:
+    """诊断报告生成器 - 支持 Agentic 闭环"""
+    
+    def __init__(self):
+        self.memory_store = MemoryStoreTool()
+    
+    async def generate_and_index(
+        self,
+        diagnosis_state: DiagnosisState,
+        index_to_memory: bool = True
+    ) -> DiagnosisReport:
+        """生成报告并索引到 Episodic Memory"""
+        
+        # 1. 生成结构化报告
+        report = self._generate_report(diagnosis_state)
+        
+        # 2. 索引到知识库 (Agentic 闭环)
+        if index_to_memory and report.root_cause_found:
+            await self._index_to_episodic_memory(report)
+        
+        return report
+    
+    async def _index_to_episodic_memory(self, report: DiagnosisReport):
+        """索引成功诊断到 Episodic Memory"""
+        
+        document = {
+            "query": report.original_query,
+            "root_cause": report.root_cause,
+            "root_cause_type": report.root_cause_type,  # "config_policy", "hardware", "protocol"
+            "layer": report.layer,                       # "L1", "L2", "L3", "L4"
+            "devices": report.affected_devices,
+            "config_sections": report.relevant_configs,  # ["route-map bgp_out", ...]
+            "evidence_chain": [
+                {"phase": e.phase, "finding": e.finding, "confidence": e.confidence}
+                for e in report.evidence_chain
+            ],
+            "resolution": report.recommended_resolution,
+            "diagnosis_duration_seconds": report.duration_seconds,
+            "timestamp": report.timestamp.isoformat(),
+        }
+        
+        await self.memory_store.execute(
+            index="olav-episodic-memory",
+            document=document,
+            doc_id=f"diag-{report.timestamp.strftime('%Y%m%d%H%M%S')}-{hash(report.original_query) % 10000}"
+        )
+```
+
+**OpenSearch 索引 Mapping**:
+
+```json
+// olav-episodic-memory index mapping
+{
+  "mappings": {
+    "properties": {
+      "query": { "type": "text", "analyzer": "ik_smart" },
+      "root_cause": { "type": "text", "analyzer": "ik_smart" },
+      "root_cause_type": { "type": "keyword" },
+      "layer": { "type": "keyword" },
+      "devices": { "type": "keyword" },
+      "config_sections": { "type": "keyword" },
+      "evidence_chain": { "type": "nested" },
+      "resolution": { "type": "text" },
+      "diagnosis_duration_seconds": { "type": "float" },
+      "timestamp": { "type": "date" },
+      "embedding": { "type": "knn_vector", "dimension": 1536 }
+    }
+  }
+}
+```
+
+**Supervisor kb_search 集成**:
+
+```python
+# modes/expert/supervisor.py
+
+async def round_zero_context(self, query: str) -> RoundZeroContext:
+    """Round 0: 收集上下文 + 检索历史案例"""
+    
+    # 1. 检索历史诊断案例 (Episodic Memory)
+    historical_cases = await self.kb_search.execute(
+        query=query,
+        index="olav-episodic-memory",
+        size=3
+    )
+    
+    # 2. 如果找到相似案例，提取关键信息
+    if historical_cases:
+        similar_case = historical_cases[0]
+        return RoundZeroContext(
+            has_historical_reference=True,
+            suggested_layer=similar_case["layer"],
+            suggested_devices=similar_case["devices"],
+            suggested_config_sections=similar_case["config_sections"],
+            historical_root_cause=similar_case["root_cause"],
+            # 告诉 Quick Analyzer 优先检查这些
+        )
+    
+    # 3. 没有历史案例，正常流程
+    return RoundZeroContext(has_historical_reference=False)
+```
+
+#### 5.2.10 配置段落提取（Token 优化）
+
+> **问题**: SuzieQ `devconfig.config` 是一个 TEXT BLOB（7000+ 字符），无法分段查询。
+> 直接把整个配置丢给 LLM 会造成 Token 浪费和"lost in the middle"幻觉风险。
+
+**解决方案**: 在 Python 层用正则提取相关配置段落，只把必要部分给 LLM。
+
+```python
+# shared/tools/config_extractor.py
+
+import re
+from typing import Literal
+
+class ConfigSectionExtractor:
+    """从设备配置中提取特定段落，减少 LLM token 消耗"""
+    
+    SECTION_PATTERNS = {
+        "route-map": r'route-map \S+ (?:permit|deny) \d+.*?(?=\nroute-map|\n!|\nrouter|\Z)',
+        "prefix-list": r'ip prefix-list \S+ seq \d+.*?(?=\nip prefix-list|\n!|\Z)',
+        "bgp": r'router bgp \d+.*?(?=\n!|\nrouter (?!bgp)|\Z)',
+        "bgp-neighbor": r'neighbor \S+ .*',
+        "acl": r'ip access-list (?:standard|extended) \S+.*?(?=\nip access-list|\n!|\Z)',
+        "ospf": r'router ospf \d+.*?(?=\n!|\nrouter|\Z)',
+        "interface": r'interface \S+.*?(?=\ninterface|\n!|\Z)',
+    }
+    
+    @classmethod
+    def extract(cls, config: str, sections: list[str]) -> dict[str, str]:
+        """提取多个配置段落
+        
+        Args:
+            config: 完整设备配置文本
+            sections: 要提取的段落类型列表
+            
+        Returns:
+            {section_type: extracted_text}
+        """
+        result = {}
+        for section in sections:
+            pattern = cls.SECTION_PATTERNS.get(section)
+            if pattern:
+                matches = re.findall(pattern, config, re.DOTALL | re.MULTILINE)
+                result[section] = '\n'.join(m.strip() for m in matches)
+        return result
+    
+    @classmethod
+    def extract_for_diagnosis(cls, config: str, hypothesis: str) -> str:
+        """根据诊断假设智能提取相关配置
+        
+        Args:
+            config: 完整设备配置
+            hypothesis: 诊断假设（如 "BGP 路由策略阻断"）
+            
+        Returns:
+            相关配置段落的合并文本
+        """
+        # 根据假设关键词选择要提取的段落
+        sections_map = {
+            "bgp": ["bgp", "bgp-neighbor", "route-map", "prefix-list"],
+            "route-map": ["route-map", "prefix-list"],
+            "prefix-list": ["prefix-list"],
+            "acl": ["acl"],
+            "ospf": ["ospf", "interface"],
+            "interface": ["interface"],
+        }
+        
+        # 匹配关键词
+        sections_to_extract = set()
+        for keyword, sections in sections_map.items():
+            if keyword.lower() in hypothesis.lower():
+                sections_to_extract.update(sections)
+        
+        # 默认提取策略相关配置
+        if not sections_to_extract:
+            sections_to_extract = {"route-map", "prefix-list", "acl"}
+        
+        extracted = cls.extract(config, list(sections_to_extract))
+        return '\n\n'.join(f"=== {k} ===\n{v}" for k, v in extracted.items() if v)
+```
+
+**Token 节省效果**:
+
+| 场景 | 完整配置 | 提取后 | 节省 |
+|------|----------|--------|------|
+| R1 BGP 策略分析 | 1,783 tokens | 356 tokens | **80%** |
+| R1+R2 BGP 策略 | 3,590 tokens | 712 tokens | **80%** |
+| 所有设备配置 | 5,216 tokens | ~1,000 tokens | **80%** |
+
+**在 Phase 2 中的使用**:
+
+```python
+# deep_analyzer.py
+
+async def analyze_bgp_policy(self, device: str, hypothesis: str) -> dict:
+    # 1. 获取完整配置
+    full_config = await self.suzieq_query(table="devconfig", hostname=device)
+    
+    # 2. 提取相关段落（而非整个配置）
+    relevant_config = ConfigSectionExtractor.extract_for_diagnosis(
+        config=full_config,
+        hypothesis=hypothesis  # "BGP route-map 阻断 10.0.0.0/16"
+    )
+    
+    # 3. 只把 ~300 tokens 给 LLM 分析，而非 ~1800 tokens
+    analysis = await self.llm.analyze_config(relevant_config)
+    
+    return analysis
+```
+
+#### 5.2.11 置信度模型
+
+```python
+def calculate_confidence(
+    source: Literal["suzieq", "realtime"],
+    data_type: Literal["state", "config"],
+    data_age_seconds: int
+) -> float:
+    """计算置信度"""
+    
+    # 实时数据高置信
+    if source == "realtime":
+        return 0.95
+    
+    # SuzieQ 历史数据
+    if source == "suzieq":
+        # 配置数据变化慢，置信度可以高一些
+        if data_type == "config":
+            if data_age_seconds < 3600:     # 1小时内
+                return 0.70
+            elif data_age_seconds < 86400:  # 1天内
+                return 0.55
+            else:
+                return 0.40
+        
+        # 状态数据需要更新鲜
+        else:  # data_type == "state"
+            if data_age_seconds < 60:       # 1分钟内
+                return 0.60
+            elif data_age_seconds < 180:    # 3分钟内
+                return 0.50
+            elif data_age_seconds < 300:    # 5分钟内
+                return 0.40
+            else:
+                return 0.25
+    
+    return 0.0
+```
+
+#### 5.2.12 Expert Mode Guard: 两层过滤机制
+
+> **问题**: Expert Mode 的深度诊断涉及真实设备的 CLI/NETCONF 操作，成本高、耗时长。
+> 如果用户输入的不是故障诊断请求（如简单查询、配置变更请求），或信息不足以启动诊断，
+> 应该在入口处过滤或引导，避免浪费资源和产生误诊。
+
+**设计原则**:
+
+| 层次 | 名称 | 目的 | 失败行为 |
+|------|------|------|----------|
+| Layer 1 | **相关性过滤** | 判断是否为故障诊断请求 | 重定向到 Standard Mode |
+| Layer 2 | **充分性检查** | 提取并验证诊断必要信息 | 追问缺失信息 |
+
+**两层过滤架构**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    EXPERT MODE GUARD ARCHITECTURE                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  用户输入: "R3 无法访问 10.0.100.100"                                    │
+│                   │                                                      │
+│                   ▼                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 1: 相关性过滤 (Relevance Filter)                           │    │
+│  │                                                                   │    │
+│  │ LLM 判断输入类型:                                                 │    │
+│  │   • fault_diagnosis  → 继续到 Layer 2                            │    │
+│  │   • simple_query     → 重定向 Standard Mode ("查询 R1 接口")     │    │
+│  │   • config_change    → 重定向 Standard Mode ("配置 OSPF area")   │    │
+│  │   • off_topic        → 直接拒绝 ("今天天气如何")                  │    │
+│  └───────────────────────────────┬─────────────────────────────────┘    │
+│                                  │ is_fault_diagnosis = True            │
+│                                  ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 2: 充分性检查 (Sufficiency Check)                          │    │
+│  │                                                                   │    │
+│  │ 提取诊断上下文:                                                   │    │
+│  │   • symptom: "无法访问"                     ✓ 已知               │    │
+│  │   • symptom_type: "connectivity"            ✓ 推断               │    │
+│  │   • source_device: "R3"                     ✓ 已知               │    │
+│  │   • target_device: "10.0.100.100"           ✓ 已知               │    │
+│  │   • protocol_hint: null                     ? 可选               │    │
+│  │   • layer_hint: null                        ? 可选               │    │
+│  │                                                                   │    │
+│  │ 充分性判断: is_sufficient = True (必要字段已满足)                 │    │
+│  └───────────────────────────────┬─────────────────────────────────┘    │
+│                                  │                                       │
+│                                  ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ OUTPUT: DiagnosisContext                                         │    │
+│  │                                                                   │    │
+│  │ {                                                                 │    │
+│  │   "is_fault_diagnosis": true,                                     │    │
+│  │   "is_sufficient": true,                                          │    │
+│  │   "context": {                                                    │    │
+│  │     "symptom": "无法访问",                                        │    │
+│  │     "symptom_type": "connectivity",                               │    │
+│  │     "source_device": "R3",                                        │    │
+│  │     "target_device": "10.0.100.100",                              │    │
+│  │     "protocol_hint": null,                                        │    │
+│  │     "layer_hint": null                                            │    │
+│  │   }                                                               │    │
+│  │ }                                                                 │    │
+│  └───────────────────────────────┬─────────────────────────────────┘    │
+│                                  │                                       │
+│                                  ▼                                       │
+│                         进入 Expert Workflow                             │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**数据结构定义**:
+
+```python
+# modes/expert/guard.py
+
+from enum import Enum
+from pydantic import BaseModel
+from typing import Optional, Literal
+
+class QueryType(str, Enum):
+    """用户输入类型分类"""
+    FAULT_DIAGNOSIS = "fault_diagnosis"     # 故障诊断 → Expert Mode
+    SIMPLE_QUERY = "simple_query"           # 简单查询 → Standard Mode
+    CONFIG_CHANGE = "config_change"         # 配置变更 → Standard Mode
+    OFF_TOPIC = "off_topic"                 # 非网络话题 → 拒绝
+
+class SymptomType(str, Enum):
+    """故障症状类型"""
+    CONNECTIVITY = "connectivity"           # 连通性问题 (ping/traceroute)
+    PERFORMANCE = "performance"             # 性能问题 (延迟/丢包)
+    ROUTING = "routing"                     # 路由问题 (路由缺失/振荡)
+    PROTOCOL = "protocol"                   # 协议问题 (BGP down/OSPF邻居)
+    HARDWARE = "hardware"                   # 硬件问题 (接口 down/CRC)
+    UNKNOWN = "unknown"                     # 无法判断
+
+class DiagnosisContext(BaseModel):
+    """诊断上下文 - 从用户输入中提取的结构化信息"""
+    symptom: str                                      # "无法访问", "BGP 邻居 down"
+    symptom_type: SymptomType                         # 症状分类
+    source_device: Optional[str] = None               # 发起设备 "R3"
+    target_device: Optional[str] = None               # 目标设备/IP "10.0.100.100"
+    protocol_hint: Optional[str] = None               # 协议提示 "BGP", "OSPF"
+    layer_hint: Optional[Literal["L1", "L2", "L3", "L4"]] = None  # 层次提示
+
+class ExpertModeGuardResult(BaseModel):
+    """Expert Mode Guard 输出"""
+    query_type: QueryType                             # 输入类型
+    is_fault_diagnosis: bool                          # 是否为故障诊断
+    is_sufficient: bool                               # 信息是否充分
+    missing_info: list[str] = []                      # 缺失的信息
+    clarification_prompt: Optional[str] = None        # 追问提示
+    context: Optional[DiagnosisContext] = None        # 提取的诊断上下文
+    redirect_mode: Optional[Literal["standard"]] = None  # 重定向目标
+```
+
+**LLM Structured Output (单次调用)**:
+
+```python
+# 通过 Pydantic with_structured_output 实现单次 LLM 调用
+
+class LLMGuardDecision(BaseModel):
+    """LLM 输出的结构化决策"""
+    
+    # Layer 1: 相关性判断
+    query_type: QueryType
+    query_type_reasoning: str  # 判断理由
+    
+    # Layer 2: 信息提取 (仅当 query_type == fault_diagnosis 时有效)
+    symptom: Optional[str] = None
+    symptom_type: Optional[SymptomType] = None
+    source_device: Optional[str] = None
+    target_device: Optional[str] = None
+    protocol_hint: Optional[str] = None
+    layer_hint: Optional[Literal["L1", "L2", "L3", "L4"]] = None
+    
+    # 充分性判断
+    is_sufficient: bool = False
+    missing_info: list[str] = []
+    clarification_prompt: Optional[str] = None
+```
+
+**Guard 实现**:
+
+```python
+# modes/expert/guard.py
+
+from langchain_core.language_models import BaseChatModel
+from olav.core.prompt_manager import prompt_manager
+
+class ExpertModeGuard:
+    """Expert Mode 入口过滤器 - 两层过滤机制"""
+    
+    def __init__(self, llm: BaseChatModel):
+        self.llm = llm.with_structured_output(LLMGuardDecision)
+        self.prompt = prompt_manager.load_agent_prompt("expert_mode_guard")
+    
+    async def check(self, user_query: str) -> ExpertModeGuardResult:
+        """检查用户输入是否适合 Expert Mode
+        
+        Returns:
+            ExpertModeGuardResult:
+                - is_fault_diagnosis=True, is_sufficient=True → 进入诊断
+                - is_fault_diagnosis=True, is_sufficient=False → 追问用户
+                - is_fault_diagnosis=False → 重定向到 Standard Mode
+        """
+        
+        # 单次 LLM 调用完成两层检查
+        decision: LLMGuardDecision = await self.llm.ainvoke(
+            self.prompt.format(user_query=user_query)
+        )
+        
+        # 非故障诊断请求 → 重定向
+        if decision.query_type != QueryType.FAULT_DIAGNOSIS:
+            return ExpertModeGuardResult(
+                query_type=decision.query_type,
+                is_fault_diagnosis=False,
+                is_sufficient=False,
+                redirect_mode="standard" if decision.query_type in [
+                    QueryType.SIMPLE_QUERY, QueryType.CONFIG_CHANGE
+                ] else None
+            )
+        
+        # 故障诊断请求 → 构建上下文
+        context = DiagnosisContext(
+            symptom=decision.symptom or "未知故障",
+            symptom_type=decision.symptom_type or SymptomType.UNKNOWN,
+            source_device=decision.source_device,
+            target_device=decision.target_device,
+            protocol_hint=decision.protocol_hint,
+            layer_hint=decision.layer_hint,
+        )
+        
+        return ExpertModeGuardResult(
+            query_type=QueryType.FAULT_DIAGNOSIS,
+            is_fault_diagnosis=True,
+            is_sufficient=decision.is_sufficient,
+            missing_info=decision.missing_info,
+            clarification_prompt=decision.clarification_prompt,
+            context=context,
+        )
+```
+
+**Prompt 模板**:
+
+```yaml
+# config/prompts/agents/expert_mode_guard.yaml
+_type: prompt
+input_variables:
+  - user_query
+template: |
+  你是网络故障诊断专家。分析用户输入，判断：
+  1. 这是否是一个故障诊断请求？
+  2. 如果是，信息是否足够启动诊断？
+  
+  ## 输入类型分类
+  
+  - fault_diagnosis: 描述网络故障症状，需要诊断根因
+    例如: "R3 无法访问 10.0.100.100", "BGP 邻居 down", "接口报错"
+    
+  - simple_query: 查询网络状态，无需深度诊断
+    例如: "查询 R1 接口", "显示所有 BGP 邻居", "R2 有哪些路由"
+    
+  - config_change: 配置变更请求
+    例如: "配置 OSPF area 0", "修改 BGP neighbor", "添加 ACL"
+    
+  - off_topic: 非网络相关话题
+    例如: "今天天气如何", "写一首诗"
+  
+  ## 充分性要求
+  
+  故障诊断至少需要：
+  - symptom: 症状描述 (必须)
+  - source_device 或 target_device: 至少一个设备/IP (必须)
+  
+  可选但有助于诊断：
+  - protocol_hint: 协议类型 (BGP, OSPF, etc.)
+  - layer_hint: 问题可能的层次 (L1/L2/L3/L4)
+  
+  ## 用户输入
+  
+  {user_query}
+  
+  请返回结构化的 JSON 决策。
+```
+
+**Workflow 集成**:
+
+```python
+# modes/expert/workflow.py
+
+from olav.modes.expert.guard import ExpertModeGuard, QueryType
+
+async def expert_workflow(state: ExpertState) -> ExpertState:
+    """Expert Mode 主工作流"""
+    
+    # Step 0: Guard 检查
+    guard = ExpertModeGuard(llm=state.llm)
+    guard_result = await guard.check(state.user_query)
+    
+    # 非故障诊断 → 重定向
+    if not guard_result.is_fault_diagnosis:
+        if guard_result.redirect_mode == "standard":
+            return ExpertState(
+                status="redirect",
+                redirect_to="standard_mode",
+                message=f"这是一个{guard_result.query_type.value}请求，将使用标准模式处理"
+            )
+        else:
+            return ExpertState(
+                status="rejected",
+                message="抱歉，这不是一个网络相关的请求"
+            )
+    
+    # 信息不足 → 追问
+    if not guard_result.is_sufficient:
+        return ExpertState(
+            status="clarification_needed",
+            message=guard_result.clarification_prompt,
+            missing_info=guard_result.missing_info
+        )
+    
+    # 信息充分 → 开始诊断
+    state.diagnosis_context = guard_result.context
+    
+    # ... 继续 Phase 1 / Phase 2 诊断流程
+```
+
+**测试用例**:
+
+| 输入 | 预期 query_type | 预期 is_sufficient | 预期行为 |
+|------|-----------------|-------------------|----------|
+| "R3 无法访问 10.0.100.100" | fault_diagnosis | True | 进入诊断 |
+| "网络有问题" | fault_diagnosis | False | 追问: "请描述具体症状和涉及的设备" |
+| "查询 R1 接口状态" | simple_query | N/A | 重定向 Standard Mode |
+| "配置 BGP neighbor" | config_change | N/A | 重定向 Standard Mode |
+| "今天天气如何" | off_topic | N/A | 拒绝 |
+| "BGP 邻居为什么 down" | fault_diagnosis | False | 追问: "请指定哪个设备的 BGP 邻居" |
+| "R1 和 R2 之间 BGP 不通" | fault_diagnosis | True | 进入诊断 |
 
 ---
 
@@ -590,10 +1601,10 @@ config/prompts/
 │   ├── classifier.yaml             # UnifiedClassifier prompt
 │   └── answer_formatting.yaml      # 答案格式化
 │
-├── expert/                         # Expert Mode
-│   ├── quick_analyzer.yaml         # 快速分析
-│   ├── supervisor.yaml             # 决策 prompt
-│   ├── inspectors/                 # L1-L4 检查 prompts
+├── expert/                         # Expert Mode (两阶段架构)
+│   ├── supervisor.yaml             # 调度决策 prompt
+│   ├── quick_analyzer.yaml         # Phase 1: SuzieQ 快速分析
+│   ├── deep_analyzer.yaml          # Phase 2: CLI/NETCONF 实时验证
 │   └── report.yaml                 # 报告生成
 │
 └── inspection/                     # Inspection Mode
@@ -625,13 +1636,25 @@ class StandardModeConfig:
     CACHE_TTL_SECONDS: int = 300           # 缓存 TTL
 
 class ExpertModeConfig:
-    """Expert mode specific settings."""
-    MAX_ITERATIONS: int = 5                # 最大迭代次数
+    """Expert mode - 两阶段诊断配置"""
+    MAX_ROUNDS: int = 5                    # 最大诊断轮次
     KB_SEARCH_TOP_K: int = 5               # KB 搜索返回数量
     SYSLOG_LOOKBACK_HOURS: int = 24        # Syslog 回溯时间
-    PARALLEL_INSPECTORS: int = 4           # 并行检查器数量
-    QUICK_ANALYZER_CONFIDENCE: float = 0.6 # 快速分析置信度
-    REALTIME_CONFIDENCE: float = 0.95      # 实时数据置信度
+    
+    # Phase 1: Quick Analyzer (SuzieQ)
+    PHASE1_MAX_ITERATIONS: int = 5         # Phase 1 最大 ReAct 迭代
+    PHASE1_CONFIDENCE_CAP: float = 0.60    # Phase 1 置信度上限 (历史数据)
+    
+    # Phase 2: Device Inspector (CLI/NETCONF)
+    PHASE2_CONFIDENCE: float = 0.95        # Phase 2 置信度 (实时数据)
+    PHASE2_TRIGGER_THRESHOLD: float = 0.80 # 低于此置信度触发 Phase 2
+    PARALLEL_INSPECTORS: int = 4           # 并行检查设备数
+    
+    # 配置策略类问题关键词 (触发 Phase 2)
+    CONFIG_POLICY_KEYWORDS: list = [
+        "route-map", "prefix-list", "ACL", 
+        "policy", "STP", "filter"
+    ]
 ```
 
 **环境变量** (`src/olav/core/settings.py`):
