@@ -1509,7 +1509,210 @@ class IntentCompiler:
         return plan
 ```
 
-#### 5.3.8 向后兼容
+#### 5.3.8 多数据源回退设计
+
+**问题**: SuzieQ 并非支持所有检查项（如 CPU/内存使用率需要 `device` 表，部分厂商无数据），需要回退到 OpenConfig 或 CLI。
+
+**设计原则**:
+1. **巡检只读**: 所有检查只能使用 `show` 命令，**禁止** config 命令
+2. **复用 Standard Mode**: 回退执行复用 `StandardModeExecutor`，继承工具执行逻辑
+3. **无需 HITL**: show 命令为只读操作，不触发 HITL 审批
+
+**数据源优先级**:
+```
+SuzieQ (Parquet 离线数据)
+    │ 不支持?
+    ▼
+OpenConfig (NETCONF get)
+    │ 设备不支持?
+    ▼
+CLI (show 命令)
+```
+
+**QueryPlan 扩展字段**:
+
+```python
+class QueryPlan(BaseModel):
+    """编译后的查询计划"""
+    
+    # 基本字段
+    table: str
+    method: Literal["get", "summarize", "unique"]
+    filters: dict[str, Any] = {}
+    
+    # 验证规则
+    validation: ValidationRule | None = None
+    
+    # 🆕 数据源控制
+    source: Literal["suzieq", "openconfig", "cli"] = "suzieq"
+    
+    # 🆕 回退配置 (当 source != suzieq 时使用)
+    fallback_tool: str | None = None          # "netconf_get" 或 "cli_show"
+    fallback_params: dict[str, Any] | None = None  # 工具参数
+    
+    # 🆕 安全约束
+    read_only: bool = True  # 巡检模式强制 True
+```
+
+**IntentCompiler 扩展逻辑**:
+
+```python
+class IntentCompiler:
+    # SuzieQ 支持的表 (从 schema 索引动态获取)
+    SUZIEQ_TABLES: set[str] = {"bgp", "ospf", "interfaces", "routes", "macs", "lldp", ...}
+    
+    # 需要实时数据的检查类型 (SuzieQ 可能过时)
+    REALTIME_CHECKS: set[str] = {"cpu", "memory", "temperature", "power"}
+    
+    async def compile(self, intent: str, ...) -> QueryPlan:
+        # 1. Schema Search + LLM 编译
+        plan = await self._llm_compile(intent)
+        
+        # 2. 检查 SuzieQ 是否支持
+        if plan.table not in self.SUZIEQ_TABLES:
+            plan = await self._compile_fallback(intent, plan)
+        
+        # 3. 检查是否需要实时数据
+        if plan.table in self.REALTIME_CHECKS:
+            plan = await self._compile_realtime(intent, plan)
+        
+        # 4. 强制只读
+        plan.read_only = True
+        return plan
+    
+    async def _compile_fallback(self, intent: str, original: QueryPlan) -> QueryPlan:
+        """SuzieQ 不支持时回退到 OpenConfig/CLI"""
+        
+        # 尝试 OpenConfig
+        xpath = await self._intent_to_xpath(intent)
+        if xpath:
+            return QueryPlan(
+                table=original.table,
+                method="get",
+                source="openconfig",
+                fallback_tool="netconf_get",
+                fallback_params={
+                    "xpath": xpath,
+                    "datastore": "running",
+                },
+                validation=original.validation,
+                read_only=True,
+            )
+        
+        # 回退到 CLI show 命令
+        show_command = await self._intent_to_show_command(intent)
+        return QueryPlan(
+            table=original.table,
+            method="get",
+            source="cli",
+            fallback_tool="cli_show",
+            fallback_params={
+                "command": show_command,  # 必须是 show 命令
+            },
+            validation=original.validation,
+            read_only=True,
+        )
+    
+    async def _intent_to_show_command(self, intent: str) -> str:
+        """LLM 生成 show 命令 (禁止 config 命令)"""
+        # Prompt 明确约束只能生成 show 命令
+        # 后处理验证命令以 "show " 开头
+        command = await self._llm_generate_show_command(intent)
+        
+        # 安全检查: 必须是 show 命令
+        if not command.strip().lower().startswith("show "):
+            raise ValueError(f"Invalid command: {command}. Only 'show' commands allowed.")
+        
+        return command
+```
+
+**Controller 执行分发**:
+
+```python
+class InspectionModeController:
+    async def execute_check(self, device: str, check: CheckConfig) -> CheckResult:
+        # 1. 编译查询计划
+        plan = await self.compiler.compile(check.intent, ...)
+        
+        # 2. 根据数据源分发执行
+        if plan.source == "suzieq":
+            result = await self._execute_suzieq(plan)
+        else:
+            # 复用 Standard Mode 执行器
+            result = await self._execute_with_standard_mode(device, plan)
+        
+        # 3. 阈值验证 (零幻觉)
+        return self._validate_threshold(result, plan.validation)
+    
+    async def _execute_with_standard_mode(
+        self, 
+        device: str, 
+        plan: QueryPlan
+    ) -> dict[str, Any]:
+        """复用 Standard Mode 执行 OpenConfig/CLI 查询"""
+        
+        from olav.modes.standard import StandardModeExecutor
+        
+        # 构造 Classification Result (兼容 Standard Mode)
+        from olav.core.unified_classifier import UnifiedClassificationResult
+        
+        classification = UnifiedClassificationResult(
+            intent_category="query",
+            tool=plan.fallback_tool,  # "netconf_get" 或 "cli_show"
+            parameters={
+                "hostname": device,
+                **plan.fallback_params,
+            },
+            confidence=1.0,  # 编译器已确定
+            reasoning="Inspection mode fallback",
+        )
+        
+        # 执行 (yolo_mode=True 因为 show 命令无需 HITL)
+        executor = StandardModeExecutor(
+            tool_registry=self.tool_registry,
+            yolo_mode=True,  # show 命令无需审批
+        )
+        
+        result = await executor.execute(classification, user_query=plan.table)
+        return result.raw_output
+```
+
+**安全约束**:
+
+| 约束 | 实现位置 | 说明 |
+|------|----------|------|
+| 只允许 show 命令 | `_intent_to_show_command()` | Prompt 约束 + 后处理验证 |
+| read_only 强制 True | `QueryPlan.read_only` | 编译器硬编码 |
+| yolo_mode=True | `_execute_with_standard_mode()` | show 命令无需 HITL |
+| 禁止 netconf_edit | 工具白名单 | 巡检模式只能调用 `netconf_get`, `cli_show` |
+
+**Prompt 设计 (show 命令生成)**:
+
+```yaml
+# config/prompts/inspection/show_command_generator.yaml
+_type: prompt
+input_variables:
+  - intent
+  - device_vendor
+template: |
+  你是网络运维专家。根据检查意图生成对应的 show 命令。
+
+  ## 检查意图
+  {intent}
+
+  ## 设备厂商
+  {device_vendor}
+
+  ## 约束
+  - 只能生成 show 命令
+  - 不能生成任何配置命令 (configure, set, delete 等)
+  - 命令必须以 "show " 开头
+
+  ## 输出
+  直接输出一条 show 命令，不要其他解释。
+```
+
+#### 5.3.9 向后兼容
 
 仍支持传统的硬编码配置（适合固定巡检）：
 
@@ -1532,14 +1735,15 @@ checks:
     severity: warning
 ```
 
-#### 5.3.9 交付物
+#### 5.3.10 交付物
 
 - [ ] `src/olav/modes/inspection/` 目录结构
 - [ ] `loader.py`: YAML 配置加载
-- [ ] `compiler.py`: IntentCompiler (LLM 驱动意图编译)
+- [ ] `compiler.py`: IntentCompiler (LLM 驱动意图编译 + 多数据源回退)
 - [ ] `executor.py`: Map-Reduce 并行执行
 - [ ] `validator.py`: ThresholdValidator
 - [ ] `config/prompts/inspection/intent_compiler.yaml`
+- [ ] `config/prompts/inspection/show_command_generator.yaml` 🆕
 - [ ] `config/inspections/` 智能配置示例
 - [ ] 单元测试: `tests/unit/modes/test_inspection.py`
 
