@@ -13,12 +13,12 @@ Capabilities:
 
 Usage:
     from olav.modes.standard import run_standard_mode
-    
+
     result = await run_standard_mode(
         query="查询 R1 BGP 状态",
         tool_registry=registry,
     )
-    
+
     if result.escalated_to_expert:
         # Hand off to Expert Mode
         pass
@@ -35,7 +35,7 @@ from olav.modes.standard.classifier import (
 )
 from olav.modes.standard.executor import (
     ExecutionResult,
-    HITLRequired,
+    HITLRequiredError,
     StandardModeExecutor,
 )
 from olav.modes.standard.workflow import (
@@ -45,16 +45,16 @@ from olav.modes.standard.workflow import (
 )
 
 __all__ = [
-    # Classifier
-    "StandardModeClassifier",
-    "classify_standard",
     # Executor
     "ExecutionResult",
-    "HITLRequired",
+    "HITLRequiredError",
+    # Classifier
+    "StandardModeClassifier",
     "StandardModeExecutor",
     # Workflow
     "StandardModeResult",
     "StandardModeWorkflow",
+    "classify_standard",
     "run_standard_mode",
 ]
 

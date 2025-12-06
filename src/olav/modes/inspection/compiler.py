@@ -11,13 +11,13 @@ Key Features:
 
 Example:
     compiler = IntentCompiler()
-    
+
     # Compile intent to query plan
     plan = await compiler.compile(
         intent="检查 BGP 邻居状态是否 Established",
         severity="critical"
     )
-    
+
     # Result:
     # QueryPlan(
     #     table="bgp",
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 class ValidationRule(BaseModel):
     """Validation rule for threshold checking."""
-    
+
     field: str = Field(description="Field to validate")
     operator: Literal["==", "!=", ">", "<", ">=", "<=", "in", "not_in"] = Field(
         default="!=", description="Comparison operator"
@@ -61,7 +61,7 @@ class ValidationRule(BaseModel):
 
 class QueryPlan(BaseModel):
     """Compiled query plan from intent."""
-    
+
     table: str = Field(description="SuzieQ table name (e.g., bgp, ospf, interfaces)")
     method: Literal["get", "summarize", "unique", "aver"] = Field(
         default="get", description="Query method"
@@ -75,7 +75,7 @@ class QueryPlan(BaseModel):
     validation: ValidationRule | None = Field(
         default=None, description="Threshold validation rule"
     )
-    
+
     # Metadata
     compiled_from_intent: str = Field(default="", description="Original intent")
     confidence: float = Field(default=0.8, description="Compilation confidence")
@@ -83,17 +83,17 @@ class QueryPlan(BaseModel):
 
 class LLMCompilationResult(BaseModel):
     """LLM structured output for intent compilation."""
-    
+
     table: str = Field(description="SuzieQ table name")
     method: Literal["get", "summarize", "unique", "aver"] = Field(default="get")
     filters: dict[str, Any] = Field(default_factory=dict)
     columns: list[str] = Field(default_factory=list)
-    
+
     # Validation
     validation_field: str | None = Field(default=None)
     validation_operator: str = Field(default="!=")
     validation_expected: Any = Field(default=None)
-    
+
     reasoning: str = Field(default="", description="Reasoning for the compilation")
 
 
@@ -159,15 +159,15 @@ INTENT_COMPILER_PROMPT = """你是网络运维专家。根据用户的检查意�
 
 class IntentCompiler:
     """LLM-driven intent to query plan compiler.
-    
+
     Compiles natural language inspection intents into structured SuzieQ
     query plans with validation rules.
-    
+
     Features:
     - Schema-aware compilation using suzieq-schema context
     - Caching to avoid redundant LLM calls
     - Fallback to default plan on LLM failure
-    
+
     Usage:
         compiler = IntentCompiler()
         plan = await compiler.compile(
@@ -175,36 +175,36 @@ class IntentCompiler:
             severity="critical"
         )
     """
-    
+
     def __init__(
         self,
         cache_dir: Path | str = "data/cache/inspection_plans",
         enable_cache: bool = True,
-    ):
+    ) -> None:
         """Initialize compiler.
-        
+
         Args:
             cache_dir: Directory to cache compiled plans.
             enable_cache: Whether to enable caching.
         """
         self.cache_dir = Path(cache_dir)
         self.enable_cache = enable_cache
-        
+
         if enable_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.prompt = ChatPromptTemplate.from_template(INTENT_COMPILER_PROMPT)
         self._llm: BaseChatModel | None = None
-    
+
     def _get_llm(self) -> BaseChatModel:
         """Lazy-load LLM with structured output."""
         if self._llm is None:
             from olav.core.llm import LLMFactory
-            
+
             base_llm = LLMFactory.get_chat_model(json_mode=True)
             self._llm = base_llm.with_structured_output(LLMCompilationResult)
         return self._llm
-    
+
     def _get_cache_key(self, intent: str, check_name: str, severity: str) -> str:
         """Generate cache key from intent parameters."""
         data = json.dumps({
@@ -212,13 +212,13 @@ class IntentCompiler:
             "check_name": check_name,
             "severity": severity,
         }, sort_keys=True)
-        return hashlib.md5(data.encode()).hexdigest()
-    
+        return hashlib.sha256(data.encode()).hexdigest()[:32]
+
     def _load_from_cache(self, cache_key: str) -> QueryPlan | None:
         """Load compiled plan from cache."""
         if not self.enable_cache:
             return None
-        
+
         cache_file = self.cache_dir / f"{cache_key}.json"
         if cache_file.exists():
             try:
@@ -227,12 +227,12 @@ class IntentCompiler:
             except Exception as e:
                 logger.warning(f"Failed to load cache: {e}")
         return None
-    
+
     def _save_to_cache(self, cache_key: str, plan: QueryPlan) -> None:
         """Save compiled plan to cache."""
         if not self.enable_cache:
             return
-        
+
         cache_file = self.cache_dir / f"{cache_key}.json"
         try:
             cache_file.write_text(
@@ -241,7 +241,7 @@ class IntentCompiler:
             )
         except Exception as e:
             logger.warning(f"Failed to save cache: {e}")
-    
+
     async def compile(
         self,
         intent: str,
@@ -249,12 +249,12 @@ class IntentCompiler:
         severity: str = "warning",
     ) -> QueryPlan:
         """Compile intent to query plan.
-        
+
         Args:
             intent: Natural language inspection intent.
             check_name: Name of the check (for context).
             severity: Severity level (critical, warning, info).
-        
+
         Returns:
             QueryPlan with table, filters, and validation rules.
         """
@@ -264,9 +264,9 @@ class IntentCompiler:
         if cached:
             logger.info(f"[IntentCompiler] Cache hit: {check_name}")
             return cached
-        
+
         logger.info(f"[IntentCompiler] Compiling: {intent[:50]}...")
-        
+
         try:
             # Call LLM
             llm = self._get_llm()
@@ -275,9 +275,9 @@ class IntentCompiler:
                 intent=intent,
                 severity=severity,
             )
-            
+
             result: LLMCompilationResult = await llm.ainvoke(messages)
-            
+
             # Build QueryPlan
             validation = None
             if result.validation_field and result.validation_expected is not None:
@@ -286,7 +286,7 @@ class IntentCompiler:
                     operator=result.validation_operator,  # type: ignore
                     expected=result.validation_expected,
                 )
-            
+
             plan = QueryPlan(
                 table=result.table,
                 method=result.method,
@@ -296,23 +296,23 @@ class IntentCompiler:
                 compiled_from_intent=intent,
                 confidence=0.8,
             )
-            
+
             # Cache result
             self._save_to_cache(cache_key, plan)
-            
+
             logger.info(
                 f"[IntentCompiler] Compiled: table={plan.table}, "
                 f"method={plan.method}, validation={plan.validation}"
             )
-            
+
             return plan
-            
+
         except Exception as e:
             logger.error(f"[IntentCompiler] Compilation failed: {e}")
-            
+
             # Fallback: try to infer from intent keywords
             return self._fallback_compile(intent, check_name, severity)
-    
+
     def compile_sync(
         self,
         intent: str,
@@ -322,7 +322,7 @@ class IntentCompiler:
         """Synchronous version of compile."""
         import asyncio
         return asyncio.run(self.compile(intent, check_name, severity))
-    
+
     def _fallback_compile(
         self,
         intent: str,
@@ -331,7 +331,7 @@ class IntentCompiler:
     ) -> QueryPlan:
         """Fallback compilation using keyword matching."""
         intent_lower = intent.lower()
-        
+
         # Keyword to table mapping
         table_keywords = {
             "bgp": ["bgp", "邻居", "neighbor", "peer", "as"],
@@ -343,18 +343,18 @@ class IntentCompiler:
             "lldp": ["lldp", "cdp", "拓扑"],
             "vlan": ["vlan"],
         }
-        
+
         # Find best matching table
         table = "device"  # default
         for tbl, keywords in table_keywords.items():
             if any(kw in intent_lower for kw in keywords):
                 table = tbl
                 break
-        
+
         logger.warning(
             f"[IntentCompiler] Using fallback: table={table} for intent={intent[:30]}"
         )
-        
+
         return QueryPlan(
             table=table,
             method="summarize",
@@ -363,20 +363,20 @@ class IntentCompiler:
             compiled_from_intent=intent,
             confidence=0.3,  # Low confidence for fallback
         )
-    
+
     def clear_cache(self) -> int:
         """Clear all cached plans.
-        
+
         Returns:
             Number of cache files deleted.
         """
         if not self.cache_dir.exists():
             return 0
-        
+
         count = 0
         for f in self.cache_dir.glob("*.json"):
             f.unlink()
             count += 1
-        
+
         logger.info(f"[IntentCompiler] Cleared {count} cached plans")
         return count

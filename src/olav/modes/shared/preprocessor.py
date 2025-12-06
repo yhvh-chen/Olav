@@ -150,24 +150,24 @@ FAST_PATTERNS: list[tuple[re.Pattern[str], str, dict[str, Any], str]] = [
 @dataclass
 class PreprocessResult:
     """Result of query preprocessing."""
-    
+
     # Intent classification
     intent_type: Literal["diagnostic", "query", "unknown"]
-    
+
     # Extracted entities (shared between modes)
     devices: list[str] = field(default_factory=list)
-    
+
     # Fast path result (Standard Mode only)
     fast_path_match: FastPathMatch | None = None
-    
+
     # Original query for reference
     original_query: str = ""
-    
+
     @property
     def can_use_fast_path(self) -> bool:
         """Check if fast path can be used (query intent + pattern match)."""
         return self.intent_type == "query" and self.fast_path_match is not None
-    
+
     @property
     def is_diagnostic(self) -> bool:
         """Check if this is a diagnostic query requiring Expert Mode."""
@@ -177,15 +177,15 @@ class PreprocessResult:
 class QueryPreprocessor:
     """
     Preprocesses user queries to extract entities and determine fast path eligibility.
-    
+
     This is a shared component used by both Standard and Expert modes:
     - Standard Mode: Uses fast path if available, falls back to LLM
     - Expert Mode: Uses extracted devices as investigation starting points
-    
+
     Usage:
         preprocessor = QueryPreprocessor()
         result = preprocessor.process("查询 R1 的 BGP 状态")
-        
+
         if result.can_use_fast_path:
             # Standard Mode fast path
             tool = result.fast_path_match.tool
@@ -197,101 +197,101 @@ class QueryPreprocessor:
             # Fall back to LLM classification
             ...
     """
-    
+
     def __init__(self) -> None:
         """Initialize the preprocessor."""
         self._fast_patterns = FAST_PATTERNS
         self._device_patterns = DEVICE_PATTERNS
-    
+
     def process(self, query: str) -> PreprocessResult:
         """
         Process a query to extract entities and determine intent.
-        
+
         Args:
             query: User's natural language query.
-            
+
         Returns:
             PreprocessResult with intent type, extracted devices, and fast path match.
         """
         # 1. Classify intent (diagnostic vs query)
         intent_type = self._classify_intent(query)
-        
+
         # 2. Extract device names (shared)
         devices = self._extract_devices(query)
-        
+
         # 3. Try fast path matching (only for query intent)
         fast_path_match = None
         if intent_type == "query":
             fast_path_match = self._try_fast_path(query)
-            
+
             # Merge extracted devices into fast path parameters
             if fast_path_match and devices and "hostname" not in fast_path_match.parameters:
                 fast_path_match.parameters["hostname"] = devices[0]
-        
+
         result = PreprocessResult(
             intent_type=intent_type,
             devices=devices,
             fast_path_match=fast_path_match,
             original_query=query,
         )
-        
+
         logger.debug(
             f"Preprocessed query: intent={intent_type}, devices={devices}, "
             f"fast_path={fast_path_match.pattern_name if fast_path_match else None}"
         )
-        
+
         return result
-    
+
     def _classify_intent(self, query: str) -> Literal["diagnostic", "query", "unknown"]:
         """
         Classify query intent based on keywords.
-        
+
         Diagnostic queries require multi-step analysis (Expert Mode).
         Query queries are simple data retrieval (Standard Mode).
         """
         query_lower = query.lower()
-        
+
         # Check diagnostic keywords first (higher priority)
         if any(kw in query_lower for kw in DIAGNOSTIC_KEYWORDS):
             return "diagnostic"
-        
+
         # Check query keywords
         if any(kw in query_lower for kw in QUERY_KEYWORDS):
             return "query"
-        
+
         # Default to query for network-related terms
         network_terms = {"bgp", "ospf", "接口", "路由", "interface", "route", "vlan", "mac", "lldp"}
         if any(term in query_lower for term in network_terms):
             return "query"
-        
+
         return "unknown"
-    
+
     def _extract_devices(self, query: str) -> list[str]:
         """
         Extract device names from query using multiple patterns.
-        
+
         Returns list of unique device names found.
         """
         devices: set[str] = set()
-        
+
         for pattern in self._device_patterns:
             for match in pattern.finditer(query):
                 device = match.group("device")
                 if device and self._is_valid_device_name(device):
                     devices.add(device)
-        
+
         return list(devices)
-    
+
     def _is_valid_device_name(self, name: str) -> bool:
         """
         Validate that a string looks like a device name.
-        
+
         Filters out common false positives like keywords.
         """
         # Too short
         if len(name) < 2:
             return False
-        
+
         # Common false positives
         false_positives = {
             "bgp", "ospf", "vlan", "mac", "lldp", "interface", "route", "show",
@@ -300,13 +300,13 @@ class QueryPreprocessor:
         }
         if name.lower() in false_positives:
             return False
-        
+
         return True
-    
+
     def _try_fast_path(self, query: str) -> FastPathMatch | None:
         """
         Try to match query against fast path patterns.
-        
+
         Returns FastPathMatch if a pattern matches, None otherwise.
         """
         for pattern, tool, base_params, pattern_name in self._fast_patterns:
@@ -314,7 +314,7 @@ class QueryPreprocessor:
             if match:
                 # Build parameters from base + captured groups
                 parameters = base_params.copy()
-                
+
                 # Extract hostname if captured
                 try:
                     hostname = match.group("hostname")
@@ -322,16 +322,16 @@ class QueryPreprocessor:
                         parameters["hostname"] = hostname
                 except IndexError:
                     pass
-                
+
                 logger.debug(f"Fast path match: {pattern_name} -> {tool}({parameters})")
-                
+
                 return FastPathMatch(
                     tool=tool,
                     parameters=parameters,
                     confidence=0.95,
                     pattern_name=pattern_name,
                 )
-        
+
         return None
 
 
@@ -354,10 +354,10 @@ def get_preprocessor() -> QueryPreprocessor:
 def preprocess_query(query: str) -> PreprocessResult:
     """
     Convenience function to preprocess a query.
-    
+
     Args:
         query: User's natural language query.
-        
+
     Returns:
         PreprocessResult with intent, devices, and fast path info.
     """

@@ -20,40 +20,40 @@ Capabilities:
 
 Usage:
     from olav.modes.inspection import InspectionModeController, run_inspection
-    
+
     # From YAML config (supports both intent and explicit mode)
     result = await run_inspection("config/inspections/daily_core_check.yaml")
     print(result.to_markdown())
 """
 
-from olav.modes.inspection.controller import (
-    InspectionModeController,
-    InspectionConfig,
-    CheckConfig,
-    ThresholdConfig,
-    DeviceFilter,
-    CheckResult,
-    InspectionResult,
-    run_inspection,
-)
 from olav.modes.inspection.compiler import (
     IntentCompiler,
     QueryPlan,
     ValidationRule,
 )
+from olav.modes.inspection.controller import (
+    CheckConfig,
+    CheckResult,
+    DeviceFilter,
+    InspectionConfig,
+    InspectionModeController,
+    InspectionResult,
+    ThresholdConfig,
+    run_inspection,
+)
 
 __all__ = [
+    "CheckConfig",
+    "CheckResult",
+    "DeviceFilter",
+    "InspectionConfig",
     # Controller
     "InspectionModeController",
-    "InspectionConfig",
-    "CheckConfig",
-    "ThresholdConfig",
-    "DeviceFilter",
-    "CheckResult",
     "InspectionResult",
-    "run_inspection",
     # Compiler
     "IntentCompiler",
     "QueryPlan",
+    "ThresholdConfig",
     "ValidationRule",
+    "run_inspection",
 ]

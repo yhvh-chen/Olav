@@ -13,7 +13,7 @@ from enum import Enum
 
 class Mode(str, Enum):
     """Execution mode enumeration."""
-    
+
     STANDARD = "standard"
     EXPERT = "expert"
     INSPECTION = "inspection"

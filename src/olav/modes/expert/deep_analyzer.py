@@ -24,10 +24,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from olav.core.llm import LLMFactory
 from olav.modes.expert.supervisor import (
-    DiagnosisResult,
-    DiagnosisTask,
     LAYER_INFO,
     REALTIME_CONFIDENCE,
+    DiagnosisResult,
+    DiagnosisTask,
 )
 from olav.modes.shared.debug import DebugContext
 from olav.tools.config_extractor import ConfigSectionExtractor
@@ -77,7 +77,7 @@ DEEP_ANALYZER_SYSTEM_PROMPT = """你是网络故障诊断专家 OLAV 的深度�
 
 ## 关键检查点 (路由策略问题)
 1. `show run | section route-map` - 查看 route-map 配置
-2. `show run | section prefix-list` - 查看 prefix-list 配置  
+2. `show run | section prefix-list` - 查看 prefix-list 配置
 3. `show bgp neighbors X.X.X.X policy` - 查看 BGP 邻居策略
 4. `show ip bgp X.X.X.X/X longer-prefixes` - 验证前缀是否被通告
 
@@ -97,10 +97,10 @@ DEEP_ANALYZER_SYSTEM_PROMPT = """你是网络故障诊断专家 OLAV 的深度�
 
 class DeepAnalyzer:
     """Phase 2 analyzer for realtime device verification.
-    
+
     Uses OpenConfig/CLI tools to verify hypotheses from Phase 1.
     Only accesses live devices - no historical SuzieQ data.
-    
+
     Usage:
         analyzer = DeepAnalyzer()
         task = DiagnosisTask(
@@ -115,14 +115,14 @@ class DeepAnalyzer:
             hypothesis="BGP route-map/prefix-list on R1/R2 blocking advertisement"
         )
     """
-    
+
     def __init__(
         self,
         max_iterations: int = 5,
         debug_context: DebugContext | None = None,
-    ):
+    ) -> None:
         """Initialize Deep Analyzer.
-        
+
         Args:
             max_iterations: Maximum ReAct iterations per task.
             debug_context: Optional debug context for instrumentation.
@@ -131,38 +131,38 @@ class DeepAnalyzer:
         self.debug_context = debug_context
         self.llm = LLMFactory.get_chat_model()
         self.config_extractor = ConfigSectionExtractor()
-    
+
     def _get_realtime_tools(self) -> list[Any]:
         """Get OpenConfig and CLI tools for realtime device access.
-        
+
         Returns:
             List of LangChain tools for realtime data.
-            
+
         Note:
             Only includes tools that access live devices.
             NO SuzieQ tools - this is Phase 2 (realtime only).
         """
         from langchain_core.tools import tool
-        
+
         tools = []
-        
+
         # Capture config_extractor in closure
         config_extractor = self.config_extractor
-        
+
         # CLI show tool - direct Nornir access
         @tool
         async def cli_show(device: str, command: str) -> str:
             """Execute CLI show command on a network device.
-            
+
             Use this to read device configuration or state in realtime.
-            
+
             Args:
                 device: Target device hostname (e.g., "R1", "R2")
                 command: CLI command (e.g., "show run | section route-map")
-            
+
             Returns:
                 Command output as string.
-            
+
             Example commands for BGP policy investigation:
             - "show run | section route-map"
             - "show run | section ip prefix-list"
@@ -171,21 +171,21 @@ class DeepAnalyzer:
             """
             try:
                 from olav.execution.backends.nornir_sandbox import NornirSandbox
-                
+
                 sandbox = NornirSandbox()
                 result = await sandbox.execute_cli_command(
                     device=device,
                     command=command,
                     use_textfsm=False,  # Raw text for config sections
                 )
-                
+
                 if result.success:
                     # Use config extractor to reduce token usage
                     output = result.output
                     if len(output) > 2000:
                         # Extract relevant sections for policy analysis
                         sections = config_extractor.extract(
-                            output, 
+                            output,
                             ["route-map", "prefix-list", "bgp", "acl"]
                         )
                         if sections:
@@ -197,30 +197,29 @@ class DeepAnalyzer:
                             if extracted:
                                 return f"[Extracted from {len(output)} chars]\n{extracted}"
                     return output
-                else:
-                    return f"Error: {result.error}"
-                    
+                return f"Error: {result.error}"
+
             except Exception as e:
                 logger.error(f"CLI show failed for {device}: {e}")
                 return f"Error executing CLI command on {device}: {e}"
-        
+
         tools.append(cli_show)
-        
+
         # OpenConfig schema search (optional)
         try:
             from olav.tools.opensearch_tool import OpenConfigSchemaTool
-            
+
             schema_tool_instance = OpenConfigSchemaTool()
-            
+
             @tool
             async def openconfig_schema_search(query: str) -> str:
                 """Search OpenConfig YANG schema for configuration paths.
-                
+
                 Use this to find the correct XPath for NETCONF queries.
-                
+
                 Args:
                     query: Search query (e.g., "bgp neighbor", "route-map", "prefix-list")
-                
+
                 Returns:
                     Matching OpenConfig paths and descriptions.
                 """
@@ -232,14 +231,14 @@ class DeepAnalyzer:
                     return str(result)
                 except Exception as e:
                     return f"Schema search error: {e}"
-            
+
             tools.append(openconfig_schema_search)
         except ImportError:
             logger.debug("OpenConfig schema tool not available")
-        
+
         logger.info(f"DeepAnalyzer initialized with {len(tools)} realtime tools")
         return tools
-    
+
     async def execute(
         self,
         task: DiagnosisTask,
@@ -247,38 +246,38 @@ class DeepAnalyzer:
         hypothesis: str,
     ) -> DiagnosisResult:
         """Execute Phase 2 verification using realtime device access.
-        
+
         Args:
             task: Task from Supervisor (includes suspected devices).
             phase1_findings: Findings from Phase 1 (Quick Analyzer).
             hypothesis: Hypothesis to verify.
-        
+
         Returns:
             DiagnosisResult with high-confidence findings.
         """
         layer_info = LAYER_INFO.get(task.layer, {})
         suspected_devices = task.suggested_filters.get("hostname", [])
-        
+
         # Format phase1 findings
         phase1_text = "\n".join(f"- {f}" for f in phase1_findings) if phase1_findings else "无"
-        
+
         # Build prompt
         prompt = ChatPromptTemplate.from_messages([
             ("system", DEEP_ANALYZER_SYSTEM_PROMPT),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        
-        formatted_prompt = prompt.partial(
+
+        prompt.partial(
             layer=task.layer,
             layer_name=layer_info.get("name", "Unknown"),
             hypothesis=hypothesis,
             suspected_devices=", ".join(suspected_devices) if suspected_devices else "未指定",
             phase1_findings=phase1_text,
         )
-        
+
         # Get realtime tools
         tools = self._get_realtime_tools()
-        
+
         if not tools:
             return DiagnosisResult(
                 task_id=task.task_id,
@@ -288,12 +287,12 @@ class DeepAnalyzer:
                 findings=["Realtime tools not available"],
                 error="No OpenConfig/CLI tools configured",
             )
-        
+
         # Create ReAct agent
         try:
-            from langgraph.prebuilt import create_react_agent
             from langgraph.errors import GraphRecursionError
-            
+            from langgraph.prebuilt import create_react_agent
+
             # Build input message
             input_msg = f"""验证假设: {hypothesis}
 
@@ -309,15 +308,15 @@ Phase 1 发现:
 - `cli_show(device="R1", command="show run | section prefix-list")`
 - `cli_show(device="R1", command="show ip bgp neighbors")`
 """
-            
+
             logger.debug(f"DeepAnalyzer input: {input_msg}")
             logger.debug(f"DeepAnalyzer tools: {[t.name for t in tools]}")
-            
+
             agent = create_react_agent(self.llm, tools)
-            
+
             tool_outputs = []
             collected_messages = []
-            
+
             input_messages = [
                 SystemMessage(content=DEEP_ANALYZER_SYSTEM_PROMPT.format(
                     layer=task.layer,
@@ -328,32 +327,32 @@ Phase 1 发现:
                 )),
                 ("user", input_msg),
             ]
-            
+
             try:
                 async for chunk in agent.astream(
                     {"messages": input_messages},
                     config={"recursion_limit": 15},
                     stream_mode="updates",
                 ):
-                    for node_name, node_data in chunk.items():
+                    for _node_name, node_data in chunk.items():
                         if "messages" in node_data:
                             for msg in node_data["messages"]:
                                 collected_messages.append(msg)
                                 msg_type = type(msg).__name__
-                                
+
                                 if msg_type == "ToolMessage":
                                     tool_content = getattr(msg, "content", "")
                                     if isinstance(tool_content, str) and len(tool_content) > 50:
                                         tool_outputs.append({"raw": tool_content[:3000]})
                                     elif isinstance(tool_content, dict):
                                         tool_outputs.append(tool_content)
-                                        
+
             except GraphRecursionError:
                 logger.warning(f"DeepAnalyzer hit recursion limit - {len(tool_outputs)} tool outputs collected")
-            
+
             # Extract final analysis from messages
-            findings, confidence, root_cause = self._extract_analysis(collected_messages, tool_outputs)
-            
+            findings, confidence, _root_cause = self._extract_analysis(collected_messages, tool_outputs)
+
             return DiagnosisResult(
                 task_id=task.task_id,
                 layer=task.layer,
@@ -363,7 +362,7 @@ Phase 1 发现:
                 tool_outputs=tool_outputs,
                 error=None,
             )
-            
+
         except Exception as e:
             logger.exception(f"DeepAnalyzer failed: {e}")
             return DiagnosisResult(
@@ -374,44 +373,44 @@ Phase 1 发现:
                 findings=[f"Analysis failed: {e}"],
                 error=str(e),
             )
-    
+
     def _extract_analysis(
         self,
         messages: list[Any],
         tool_outputs: list[dict],
     ) -> tuple[list[str], float, str | None]:
         """Extract findings, confidence, and root cause from agent output.
-        
+
         Args:
             messages: Collected agent messages.
             tool_outputs: Collected tool outputs.
-            
+
         Returns:
             (findings, confidence, root_cause)
         """
         findings = []
         confidence = 0.0
         root_cause = None
-        
+
         # Look for AI messages with analysis
         for msg in reversed(messages):
             if isinstance(msg, AIMessage):
                 content = msg.content
                 if not content:
                     continue
-                
+
                 # Extract findings from structured output
                 if "根因" in content or "root cause" in content.lower():
                     root_cause = content
                     confidence = 0.90  # High confidence if root cause identified
-                
+
                 # Look for bullet points or numbered items
                 import re
-                items = re.findall(r'[-•]\s*(.+?)(?=\n[-•]|\n\n|\Z)', content, re.DOTALL)
+                items = re.findall(r"[-•]\s*(.+?)(?=\n[-•]|\n\n|\Z)", content, re.DOTALL)
                 findings.extend([item.strip() for item in items[:10]])
-                
+
                 # Look for confidence mentions
-                conf_match = re.search(r'置信度[：:]\s*(\d+(?:\.\d+)?)', content)
+                conf_match = re.search(r"置信度[：:]\s*(\d+(?:\.\d+)?)", content)
                 if conf_match:
                     try:
                         confidence = float(conf_match.group(1))
@@ -419,10 +418,10 @@ Phase 1 发现:
                             confidence /= 100  # Convert percentage
                     except ValueError:
                         pass
-                
+
                 if findings or root_cause:
                     break
-        
+
         # Fallback: extract from tool outputs if no AI analysis
         if not findings and tool_outputs:
             for output in tool_outputs[:5]:
@@ -431,37 +430,37 @@ Phase 1 发现:
                     if "route-map" in raw.lower() or "prefix-list" in raw.lower():
                         findings.append(f"Found config: {raw[:200]}...")
                         confidence = max(confidence, 0.70)
-        
+
         # Auto-detect root cause from policy patterns
         if not root_cause and findings:
             root_cause = self._detect_policy_root_cause(findings, tool_outputs)
             if root_cause:
                 confidence = max(confidence, 0.85)
-        
+
         return findings, confidence, root_cause
-    
+
     def _detect_policy_root_cause(
         self,
         findings: list[str],
         tool_outputs: list[dict],
     ) -> str | None:
         """Auto-detect root cause from policy configuration patterns.
-        
+
         Args:
             findings: Extracted findings from AI analysis.
             tool_outputs: Raw tool outputs.
-            
+
         Returns:
             Root cause description if detected, None otherwise.
         """
         import re
-        
+
         # Combine all text for pattern matching
         all_text = "\n".join(findings)
         for output in tool_outputs:
             if isinstance(output, dict):
                 all_text += "\n" + output.get("raw", "")
-        
+
         # Pattern 1: route-map with deny clause
         if "route-map" in all_text.lower() and "deny" in all_text.lower():
             # Extract route-map name
@@ -471,7 +470,7 @@ Phase 1 发现:
                 # Check if it's blocking traffic
                 if "deny 20" in all_text or "deny 10" in all_text:
                     return f"BGP route-map '{map_name}' 可能阻止了路由通告 (包含 deny 规则)"
-        
+
         # Pattern 2: prefix-list not matching target prefix
         prefix_lists = re.findall(
             r"ip prefix-list\s+(\S+)\s+seq\s+\d+\s+permit\s+(\S+)",
@@ -483,7 +482,7 @@ Phase 1 发现:
             if not matched_10:
                 prefixes = ", ".join(f"{pl[0]}={pl[1]}" for pl in prefix_lists[:3])
                 return f"Prefix-list 未包含目标网络: {prefixes} (未匹配 10.0.0.0/16)"
-        
+
         # Pattern 3: BGP neighbor with route-map
         if "neighbor" in all_text and "route-map" in all_text:
             match = re.search(
@@ -493,9 +492,9 @@ Phase 1 发现:
             if match:
                 neighbor, map_name, direction = match.groups()
                 return f"BGP 邻居 {neighbor} 应用了 route-map {map_name} ({direction}), 可能过滤了路由"
-        
+
         return None
-    
+
     async def verify_config_policy(
         self,
         device: str,
@@ -503,14 +502,14 @@ Phase 1 发现:
         policy_name: str | None = None,
     ) -> dict[str, Any]:
         """Verify a specific configuration policy on a device.
-        
+
         Convenience method for common policy verification.
-        
+
         Args:
             device: Target device hostname.
             policy_type: Type of policy (route-map, prefix-list, acl).
             policy_name: Optional specific policy name to check.
-            
+
         Returns:
             Dictionary with policy configuration and analysis.
         """
@@ -520,24 +519,24 @@ Phase 1 发现:
             "prefix-list": f"show run | section prefix-list{' ' + policy_name if policy_name else ''}",
             "acl": f"show access-list{' ' + policy_name if policy_name else ''}",
         }
-        
+
         command = commands.get(policy_type)
         if not command:
             return {"error": f"Unknown policy type: {policy_type}"}
-        
+
         # Execute CLI command
         try:
             from olav.execution.backends.nornir_sandbox import NornirSandbox
-            
+
             sandbox = NornirSandbox()
             result = await sandbox.execute_cli_show(device, command)
-            
+
             if not result.success:
                 return {"error": result.error, "device": device}
-            
+
             # Extract and parse the relevant section
             sections = self.config_extractor.extract(result.output, [policy_type])
-            
+
             return {
                 "device": device,
                 "policy_type": policy_type,
@@ -546,7 +545,7 @@ Phase 1 发现:
                 "extracted_config": sections.get(policy_type, ""),
                 "success": True,
             }
-            
+
         except Exception as e:
             return {"error": str(e), "device": device}
 
@@ -557,15 +556,15 @@ Phase 1 发现:
         hypotheses: list[str],
     ) -> DeepAnalyzerResult:
         """Execute Deep Analyzer from ExpertModeWorkflow.
-        
+
         Wrapper method for integration with ExpertModeWorkflow.
         Converts workflow parameters to internal task format.
-        
+
         Args:
             query: Original user query.
             target_devices: Devices to investigate.
             hypotheses: Hypotheses from Phase 1 findings.
-            
+
         Returns:
             DeepAnalyzerResult with aggregated findings.
         """
@@ -574,10 +573,10 @@ Phase 1 发现:
         max_confidence = 0.0
         root_cause = None
         root_cause_found = False
-        
+
         # Build hypothesis string from Phase 1 findings
         hypothesis = "\n".join(hypotheses[:10]) if hypotheses else "Phase 1 未发现明确假设"
-        
+
         # Create a synthetic task for each investigation focus
         task = DiagnosisTask(
             task_id=0,
@@ -586,18 +585,18 @@ Phase 1 发现:
             suggested_tables=[],
             suggested_filters={"hostname": target_devices},
         )
-        
+
         try:
             result = await self.execute(
                 task=task,
                 phase1_findings=hypotheses,
                 hypothesis=hypothesis,
             )
-            
+
             all_findings.extend(result.findings)
             all_tool_outputs.extend(result.tool_outputs or [])
             max_confidence = max(max_confidence, result.confidence)
-            
+
             # Check if root cause identified
             for finding in result.findings:
                 finding_lower = finding.lower()
@@ -605,11 +604,11 @@ Phase 1 发现:
                     root_cause_found = True
                     root_cause = finding
                     break
-            
+
         except Exception as e:
             logger.exception(f"Deep analysis failed: {e}")
             all_findings.append(f"深度分析失败: {e}")
-        
+
         return DeepAnalyzerResult(
             success=bool(all_findings),
             confidence=max_confidence,
