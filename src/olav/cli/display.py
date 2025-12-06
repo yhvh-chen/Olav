@@ -621,6 +621,135 @@ class ResultRenderer:
 
 
 # ============================================
+# Debug Output Renderer
+# ============================================
+@dataclass
+class DebugInfo:
+    """Collected debug information from a query."""
+    
+    tool_calls: list[dict] = field(default_factory=list)
+    thinking_steps: list[str] = field(default_factory=list)
+    start_time: float = field(default_factory=time.time)
+    end_time: float = 0.0
+    
+    @property
+    def duration_ms(self) -> float:
+        """Calculate total duration in milliseconds."""
+        if self.end_time > 0:
+            return (self.end_time - self.start_time) * 1000
+        return 0.0
+    
+    def add_tool_call(self, tool_info: dict) -> None:
+        """Record a tool call."""
+        self.tool_calls.append({
+            **tool_info,
+            "timestamp": time.time(),
+        })
+    
+    def add_thinking(self, content: str) -> None:
+        """Record a thinking step."""
+        if content.strip():
+            self.thinking_steps.append(content.strip())
+    
+    def finalize(self) -> None:
+        """Mark end of query processing."""
+        self.end_time = time.time()
+
+
+class DebugRenderer:
+    """Render debug output for --debug mode.
+    
+    Displays:
+    - Tool calls with args and duration
+    - Thinking steps (if captured)
+    - Timing breakdown
+    """
+    
+    def __init__(self, console: Console | None = None):
+        self.console = console or Console()
+    
+    def render(self, debug_info: DebugInfo) -> None:
+        """Render complete debug output."""
+        self.console.print()
+        self.console.print(Panel(
+            self._build_debug_content(debug_info),
+            title="[bold magenta]🔍 Debug Output[/bold magenta]",
+            border_style="magenta",
+            padding=(1, 2),
+        ))
+    
+    def _build_debug_content(self, debug_info: DebugInfo) -> Group:
+        """Build debug content as Rich Group."""
+        elements = []
+        
+        # Summary
+        summary = Text()
+        summary.append("Total Duration: ", style="bold")
+        summary.append(f"{debug_info.duration_ms:.1f}ms", style="cyan")
+        summary.append("  |  ")
+        summary.append("Tool Calls: ", style="bold")
+        summary.append(str(len(debug_info.tool_calls)), style="cyan")
+        elements.append(summary)
+        elements.append(Text())  # Blank line
+        
+        # Tool calls table
+        if debug_info.tool_calls:
+            table = Table(
+                title="Tool Invocations",
+                show_header=True,
+                header_style="bold cyan",
+                border_style="dim",
+            )
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Tool", style="green")
+            table.add_column("Arguments", max_width=50)
+            table.add_column("Duration", justify="right", style="yellow")
+            table.add_column("Status", justify="center")
+            
+            for i, tool in enumerate(debug_info.tool_calls, 1):
+                args_str = self._format_args(tool.get("args", {}))
+                duration = tool.get("duration_ms", 0)
+                duration_str = f"{duration:.0f}ms" if duration else "-"
+                status = "✅" if tool.get("success", True) else "❌"
+                
+                table.add_row(
+                    str(i),
+                    tool.get("display_name") or tool.get("name", "unknown"),
+                    args_str,
+                    duration_str,
+                    status,
+                )
+            
+            elements.append(table)
+        
+        # Thinking steps (collapsed summary)
+        if debug_info.thinking_steps:
+            elements.append(Text())
+            thinking_summary = Text()
+            thinking_summary.append("Thinking Steps: ", style="bold")
+            thinking_summary.append(f"{len(debug_info.thinking_steps)} steps captured", style="dim")
+            elements.append(thinking_summary)
+        
+        return Group(*elements)
+    
+    def _format_args(self, args: dict, max_len: int = 50) -> str:
+        """Format tool arguments for display."""
+        if not args:
+            return "-"
+        
+        parts = []
+        for key, value in args.items():
+            if isinstance(value, str) and len(value) > 20:
+                value = value[:17] + "..."
+            parts.append(f"{key}={value}")
+        
+        result = ", ".join(parts)
+        if len(result) > max_len:
+            result = result[:max_len - 3] + "..."
+        return result
+
+
+# ============================================
 # Dashboard (TUI Mode)
 # ============================================
 class Dashboard:

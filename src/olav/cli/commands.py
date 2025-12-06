@@ -131,6 +131,15 @@ JsonOption = Annotated[
     ),
 ]
 
+# Debug Option
+DebugOption = Annotated[
+    bool,
+    typer.Option(
+        "--debug", "-D",
+        help="Enable debug mode: show LLM calls, tool invocations, and graph states",
+    ),
+]
+
 # Init Options
 InitOption = Annotated[
     bool,
@@ -691,10 +700,11 @@ def query(
     expert: ExpertModeOption = False,
     verbose: VerboseOption = False,
     json_output: JsonOption = False,
+    debug: DebugOption = False,
 ) -> None:
     """Execute a single query and exit."""
     mode = _resolve_mode(standard, expert)
-    asyncio.run(_single_query(text, server, mode, verbose, json_output))
+    asyncio.run(_single_query(text, server, mode, verbose, json_output, debug))
 
 
 async def _single_query(
@@ -703,19 +713,25 @@ async def _single_query(
     mode: str,
     verbose: bool,
     json_output: bool,
+    debug: bool = False,
 ) -> None:
     """Execute single query."""
-    from olav.cli.display import ResultRenderer, ThinkingTree
+    from olav.cli.display import DebugInfo, DebugRenderer, ResultRenderer, ThinkingTree
     from olav.cli.thin_client import OlavThinClient, StreamEventType
 
     config, auth_token = _get_config_from_env(server_url)
 
     renderer = ResultRenderer(console)
     thread_id = f"cli-single-{int(time.time())}"
+    
+    # Initialize debug info if debug mode is enabled
+    debug_info = DebugInfo() if debug else None
 
     async with OlavThinClient(config, auth_token=auth_token) as client:
         if not json_output:
             console.print(f"[bold green]You[/bold green]: {text}")
+            if debug:
+                console.print("[dim magenta]🔍 Debug mode enabled[/dim magenta]")
             console.print()
 
         content_buffer = ""
@@ -731,8 +747,13 @@ async def _single_query(
                 if event_type == StreamEventType.THINKING:
                     # Thinking event: {"type": "thinking", "thinking": {"step": "...", "content": "..."}}
                     thinking = data.get("thinking", {})
-                    tree.add_thinking(thinking.get("content", ""))
+                    content = thinking.get("content", "")
+                    tree.add_thinking(content)
                     thinking_started = True
+                    
+                    # Record in debug info
+                    if debug_info:
+                        debug_info.add_thinking(content)
 
                 elif event_type == StreamEventType.TOOL_START:
                     # Finalize thinking before tool calls
@@ -746,6 +767,10 @@ async def _single_query(
                         tool_info.get("args", {}),
                     )
                     tool_calls.append(tool_info)
+                    
+                    # Record in debug info
+                    if debug_info:
+                        debug_info.add_tool_call(tool_info)
 
                 elif event_type == StreamEventType.TOOL_END:
                     # Tool end: {"type": "tool_end", "tool": {"id": "...", "name": "...", "duration_ms": 123, "success": true}}
@@ -754,6 +779,15 @@ async def _single_query(
                         tool_info.get("name", "unknown"),
                         success=tool_info.get("success", True),
                     )
+                    
+                    # Update tool call with duration in debug info
+                    if debug_info and debug_info.tool_calls:
+                        # Find matching tool call and update with end info
+                        for tc in reversed(debug_info.tool_calls):
+                            if tc.get("id") == tool_info.get("id") or tc.get("name") == tool_info.get("name"):
+                                tc["duration_ms"] = tool_info.get("duration_ms", 0)
+                                tc["success"] = tool_info.get("success", True)
+                                break
 
                 elif event_type == StreamEventType.TOKEN:
                     # Finalize thinking before tokens (response started)
@@ -782,14 +816,30 @@ async def _single_query(
                         renderer.render_error(error_msg or "Unknown error")
                     raise typer.Exit(1)
 
+        # Finalize debug info
+        if debug_info:
+            debug_info.finalize()
+
         if json_output:
             import json
-            print(json.dumps({
+            output = {
                 "content": content_buffer,
                 "tools": tool_calls,
-            }, ensure_ascii=False, indent=2))
+            }
+            if debug_info:
+                output["debug"] = {
+                    "duration_ms": debug_info.duration_ms,
+                    "tool_calls": debug_info.tool_calls,
+                    "thinking_steps": len(debug_info.thinking_steps),
+                }
+            print(json.dumps(output, ensure_ascii=False, indent=2))
         else:
             renderer.render_message(content_buffer)
+            
+            # Render debug output if enabled
+            if debug_info:
+                debug_renderer = DebugRenderer(console)
+                debug_renderer.render(debug_info)
 
 
 # ============================================
