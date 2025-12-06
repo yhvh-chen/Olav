@@ -9,7 +9,7 @@ This index stores historical diagnosis reports for Agentic RAG:
 
 Usage:
     uv run python -m olav.etl.init_diagnosis_kb
-    
+
     # Or via CLI:
     uv run olav --init  # Includes this initialization
 """
@@ -39,16 +39,16 @@ def _get_opensearch_client() -> OpenSearch:
 
 def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> bool:
     """Create the diagnosis-reports index.
-    
+
     Args:
         client: OpenSearch client
         force: If True, delete existing index and recreate
-    
+
     Returns:
         True if index was created/exists, False on error
     """
     index_name = DIAGNOSIS_REPORTS_INDEX
-    
+
     # Check if index exists (OpenSearch-py 2.x API)
     if client.indices.exists(index=index_name):
         if force:
@@ -57,7 +57,7 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
         else:
             logger.info(f"Index {index_name} already exists")
             return True
-    
+
     # Index configuration
     index_body = {
         "settings": {
@@ -83,7 +83,7 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
                 # Identification
                 "report_id": {"type": "keyword"},
                 "timestamp": {"type": "date"},
-                
+
                 # Fault Information - searchable text
                 "fault_description": {
                     "type": "text",
@@ -95,7 +95,7 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
                 "source": {"type": "keyword"},
                 "destination": {"type": "keyword"},
                 "fault_path": {"type": "keyword"},
-                
+
                 # Diagnosis Results
                 "root_cause": {
                     "type": "text",
@@ -104,14 +104,14 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
                 "root_cause_device": {"type": "keyword"},
                 "root_cause_layer": {"type": "keyword"},
                 "confidence": {"type": "float"},
-                
+
                 # Evidence
                 "evidence_chain": {
                     "type": "text",
                     "analyzer": "text_analyzer",
                 },
                 "device_summaries_text": {"type": "text"},
-                
+
                 # Resolution
                 "recommended_action": {
                     "type": "text",
@@ -119,18 +119,18 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
                 },
                 "resolution_applied": {"type": "boolean"},
                 "resolution_result": {"type": "text"},
-                
+
                 # Metadata for filtering
                 "tags": {"type": "keyword"},
                 "affected_protocols": {"type": "keyword"},
                 "affected_layers": {"type": "keyword"},
-                
+
                 # Full report (not indexed, just stored)
                 "markdown_content": {
                     "type": "text",
                     "index": False,
                 },
-                
+
                 # Vector embeddings for semantic search
                 "fault_description_embedding": {
                     "type": "knn_vector",
@@ -157,7 +157,7 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
             },
         },
     }
-    
+
     try:
         client.indices.create(index=index_name, body=index_body)
         logger.info(f"✅ Created index: {index_name}")
@@ -169,12 +169,12 @@ def create_diagnosis_reports_index(client: OpenSearch, force: bool = False) -> b
 
 def seed_sample_reports(client: OpenSearch) -> int:
     """Seed sample diagnosis reports for testing.
-    
+
     Returns:
         Number of reports seeded
     """
     from olav.models.diagnosis_report import DiagnosisReport, DeviceSummary
-    
+
     sample_reports = [
         DiagnosisReport(
             report_id="sample-001",
@@ -267,9 +267,9 @@ def seed_sample_reports(client: OpenSearch) -> int:
             affected_layers=["L3"],
         ),
     ]
-    
+
     count = 0
-    
+
     # Try to get embedding model for vector indexing
     embedding_model = None
     try:
@@ -278,11 +278,11 @@ def seed_sample_reports(client: OpenSearch) -> int:
         logger.info("Using embedding model for sample reports")
     except Exception as e:
         logger.warning(f"Embedding model not available, indexing without vectors: {e}")
-    
+
     for report in sample_reports:
         try:
             doc = report.to_opensearch_doc()
-            
+
             # Generate embeddings if model is available
             if embedding_model:
                 try:
@@ -294,7 +294,7 @@ def seed_sample_reports(client: OpenSearch) -> int:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to generate embedding for {report.report_id}: {e}")
-            
+
             client.index(
                 index=DIAGNOSIS_REPORTS_INDEX,
                 id=report.report_id,
@@ -303,17 +303,17 @@ def seed_sample_reports(client: OpenSearch) -> int:
             count += 1
         except Exception as e:
             logger.error(f"Failed to seed report {report.report_id}: {e}")
-    
+
     if count > 0:
         client.indices.refresh(index=DIAGNOSIS_REPORTS_INDEX)
         logger.info(f"✅ Seeded {count} sample diagnosis reports")
-    
+
     return count
 
 
 def main(force: bool = False, seed: bool = False):
     """Main initialization function.
-    
+
     Args:
         force: Force recreate index (deletes existing data)
         seed: Add sample reports for testing
@@ -321,43 +321,43 @@ def main(force: bool = False, seed: bool = False):
     print("=" * 60)
     print("OLAV - Diagnosis Knowledge Base Initialization")
     print("=" * 60)
-    
+
     try:
         client = _get_opensearch_client()
-        
+
         # Test connection
         info = client.info()
         print(f"✅ Connected to OpenSearch {info['version']['number']}")
-        
+
     except Exception as e:
         print(f"❌ Failed to connect to OpenSearch: {e}")
         print("   Make sure OpenSearch is running (docker-compose up -d opensearch)")
         return False
-    
+
     # Create index
     success = create_diagnosis_reports_index(client, force=force)
     if not success:
         return False
-    
+
     # Optionally seed sample data
     if seed:
         seed_sample_reports(client)
-    
+
     # Verify (OpenSearch-py 2.x API)
     if client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
         count = client.count(index=DIAGNOSIS_REPORTS_INDEX)
         print(f"✅ Index {DIAGNOSIS_REPORTS_INDEX} ready with {count['count']} documents")
-    
+
     print("=" * 60)
     print("Initialization complete!")
     print("=" * 60)
-    
+
     return True
 
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Initialize Diagnosis Knowledge Base")
     parser.add_argument(
         "--force", "-f",
@@ -369,8 +369,8 @@ if __name__ == "__main__":
         action="store_true",
         help="Add sample diagnosis reports for testing"
     )
-    
+
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO)
     main(force=args.force, seed=args.seed)

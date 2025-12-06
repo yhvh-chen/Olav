@@ -267,7 +267,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8001:8000"  # API Server
+      - "8001:8000"  # API Server (host 8001 -> container 8000)
       - "3100:3100"  # Gradio WebGUI (mounted at /ui)
     volumes:
       - ./config:/app/config
@@ -275,6 +275,8 @@ services:
       - ./data/documents:/app/data/documents  # Documents for RAG (writable for uploads)
       - ./data/generated_configs:/app/data/generated_configs  # Generated configs (writable)
       - ./data/inspection-reports:/app/data/inspection-reports  # Inspection reports (writable)
+    # Override Dockerfile CMD: use single worker for async checkpointer compatibility
+    command: ["uv", "run", "uvicorn", "olav.server.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000

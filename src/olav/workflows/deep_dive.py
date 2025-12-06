@@ -368,14 +368,14 @@ class DeepDiveState(TypedDict):
 
 @WorkflowRegistry.register(
     name="deep_dive",
-    description="Deep Dive 漏斗式排错（拓扑分析 → 分层假设 → 宏观扫描 → 微观诊断）",
+    description="Deep Dive Funnel Debugging (Topology Analysis → Layer Hypothesis → Macro Scan → Micro Diagnosis)",
     examples=[
-        "R1 和 R2 之间 BGP 邻居建立失败",
-        "为什么 DataCenter-A 无法访问 DataCenter-B",
-        "OSPF 邻居关系异常，需要排查",
-        "审计所有边界路由器的 BGP 配置",
-        "从 Core-R1 到 Edge-R3 路由不通",
-        "接口 Gi0/0/1 频繁 flapping",
+        "R1 and R2 BGP neighbor establishment failed",
+        "Why can't DataCenter-A access DataCenter-B",
+        "OSPF neighbor relationship abnormal, needs investigation",
+        "Audit all border router BGP configurations",
+        "Route from Core-R1 to Edge-R3 not working",
+        "Interface Gi0/0/1 frequently flapping",
     ],
     triggers=[
         r"邻居.*问题",
@@ -390,6 +390,17 @@ class DeepDiveState(TypedDict):
         r"从.*到",
         r"flapping",
         r"异常",
+        r"neighbor.*issue",
+        r"neighbor.*failed",
+        r"cannot access",
+        r"not reachable",
+        r"why",
+        r"troubleshoot",
+        r"diagnose",
+        r"audit",
+        r"batch",
+        r"from.*to",
+        r"abnormal",
     ],
 )
 class DeepDiveWorkflow(BaseWorkflow):
@@ -411,7 +422,7 @@ class DeepDiveWorkflow(BaseWorkflow):
 
     @property
     def description(self) -> str:
-        return "Deep Dive 漏斗式排错（拓扑分析 → 分层假设 → 宏观扫描 → 微观诊断）"
+        return "Deep Dive Funnel Debugging (Topology Analysis → Layer Hypothesis → Macro Scan → Micro Diagnosis)"
 
     @property
     def tools_required(self) -> list[str]:
@@ -447,8 +458,9 @@ class DeepDiveWorkflow(BaseWorkflow):
         return (False, "Query does not require Deep Dive workflow")
 
     def __init__(self) -> None:
-        self.llm = LLMFactory.get_chat_model(json_mode=False)
-        self.llm_json = LLMFactory.get_chat_model(json_mode=True)
+        # Deep Dive needs reasoning for complex diagnostic thinking
+        self.llm = LLMFactory.get_chat_model(json_mode=False, reasoning=True)
+        self.llm_json = LLMFactory.get_chat_model(json_mode=True, reasoning=True)
 
         # OSI Layer to SuzieQ table mapping - loaded from config
         from olav.sync.rules.loader import get_osi_layer_tables
@@ -660,21 +672,21 @@ class DeepDiveWorkflow(BaseWorkflow):
 
         # Generate user-friendly message
         scope_desc = {
-            "single_device": "单设备问题",
-            "local": "本地链路/邻居问题",
-            "path": "端到端路径问题",
-            "domain": "区域/域问题",
+            "single_device": "Single device issue",
+            "local": "Local link/neighbor issue",
+            "path": "End-to-end path issue",
+            "domain": "Area/domain issue",
         }
 
-        msg = f"""## 🗺️ 拓扑分析
+        msg = f"""## 🗺️ Topology Analysis
 
-**故障范围**: {scope_desc.get(topology["scope"], topology["scope"])}
-**受影响设备**: {", ".join(topology["affected_devices"]) or "待确定"}
-**置信度**: {topology["confidence"]}
+**Fault Scope**: {scope_desc.get(topology["scope"], topology["scope"])}
+**Affected Devices**: {", ".join(topology["affected_devices"]) or "To be determined"}
+**Confidence**: {topology["confidence"]}
 
 {topology_context if topology_context else ""}{historical_context}
 
-正在生成分层诊断计划..."""
+Generating layered diagnosis plan..."""
 
         return {
             "topology": topology,
@@ -941,7 +953,7 @@ class DeepDiveWorkflow(BaseWorkflow):
 
         diagnosis_plan = state.get("diagnosis_plan")
         if not diagnosis_plan:
-            return {"messages": [AIMessage(content="❌ 诊断计划缺失")]}
+            return {"messages": [AIMessage(content="❌ Diagnosis plan missing")]}
 
         user_approval = state.get("user_approval")
 
@@ -958,7 +970,7 @@ class DeepDiveWorkflow(BaseWorkflow):
                     "action": "approval_required",
                     "execution_plan": execution_plan,
                     "diagnosis_plan": diagnosis_plan,
-                    "message": "请审批诊断计划：Y=继续, N=终止",
+                    "message": "Please approve diagnosis plan: Y=continue, N=abort",
                 }
             )
 
@@ -967,15 +979,15 @@ class DeepDiveWorkflow(BaseWorkflow):
                     user_approval = "approved"
                     return {
                         "user_approval": user_approval,
-                        "messages": [AIMessage(content="✅ 诊断计划已批准，开始宏观扫描...")],
+                        "messages": [AIMessage(content="✅ Diagnosis plan approved, starting macro scan...")],
                     }
                 return {
                     "user_approval": "aborted",
-                    "messages": [AIMessage(content="⛔ 用户已中止诊断。")],
+                    "messages": [AIMessage(content="⛔ User aborted diagnosis.")],
                 }
             return {
                 "user_approval": "approved",
-                "messages": [AIMessage(content="✅ 诊断计划已批准，开始宏观扫描...")],
+                "messages": [AIMessage(content="✅ Diagnosis plan approved, starting macro scan...")],
             }
 
         # Execute current phase
@@ -1528,11 +1540,11 @@ class DeepDiveWorkflow(BaseWorkflow):
                         todo["feasibility"] = "uncertain"
                         todo["recommended_table"] = suggested_table
                         todo["schema_notes"] = (
-                            f"任务描述指向 {heuristic_table}，但系统建议使用 {suggested_table} 表"
+                            f"Task description points to {heuristic_table}, but system suggests using {suggested_table} table"
                         )
                         uncertain_tasks.append(task_id)
                         recommendations[task_id] = (
-                            f"请确认：使用 {suggested_table} 还是 {heuristic_table}？"
+                            f"Please confirm: use {suggested_table} or {heuristic_table}?"
                         )
 
                 else:
@@ -1540,17 +1552,17 @@ class DeepDiveWorkflow(BaseWorkflow):
                     suggested_table = available_tables[0]
                     todo["feasibility"] = "uncertain"
                     todo["recommended_table"] = suggested_table
-                    tables_desc = "、".join(available_tables[:3])
-                    todo["schema_notes"] = f"无法自动识别数据源，可能的表: {tables_desc}"
+                    tables_desc = ", ".join(available_tables[:3])
+                    todo["schema_notes"] = f"Cannot auto-identify data source, possible tables: {tables_desc}"
                     uncertain_tasks.append(task_id)
-                    recommendations[task_id] = f"建议使用 {suggested_table} 表，或指定其他数据源"
+                    recommendations[task_id] = f"Suggest using {suggested_table} table, or specify another data source"
 
             except Exception as e:
                 # Schema search failed
                 todo["feasibility"] = "uncertain"
-                todo["schema_notes"] = f"查询数据源时出错: {e!s}"
+                todo["schema_notes"] = f"Error querying data source: {e!s}"
                 uncertain_tasks.append(task_id)
-                recommendations[task_id] = "请重试或手动指定数据源"
+                recommendations[task_id] = "Please retry or manually specify data source"
 
         # Generate execution plan
         # HITL: DeepDive always requires user approval before execution
@@ -1712,7 +1724,7 @@ class DeepDiveWorkflow(BaseWorkflow):
                     "action": "approval_required",
                     "execution_plan": execution_plan,
                     "todos": todos,
-                    "message": "请审批执行计划：approve=继续, abort=终止, 或输入修改请求",
+                    "message": "Please approve execution plan: approve=continue, abort=terminate, or input modification request",
                 }
             )
 
@@ -2626,22 +2638,22 @@ class DeepDiveWorkflow(BaseWorkflow):
             parent_reason = failed.get("failure_reason", "Unknown")
 
             failure_summaries.append(
-                f"  • 失败任务 {parent_task_id}: {parent_task_text}\n"
-                f"    失败原因: {parent_reason}\n"
-                f"    输出摘要: {parent_result}\n"
+                f"  • Failed task {parent_task_id}: {parent_task_text}\n"
+                f"    Failure reason: {parent_reason}\n"
+                f"    Output summary: {parent_result}\n"
             )
 
         recursive_prompt = (
-            f"递归深入分析: 检测到 {len(failures_to_analyze)} 个失败任务，需要生成更细粒度的子任务。\n\n"
-            "失败任务列表:\n" + "\n".join(failure_summaries) + "\n\n"
-            "请遵循要求: \n"
-            f"1) 为每个失败任务生成 1-2 个更具体的子任务（总共 {len(failures_to_analyze) * 2} 个左右）。\n"
-            "2) 子任务需更具体，例如聚焦某协议实例、邻居、接口或字段。\n"
-            "3) 避免与父任务完全重复。\n"
-            '4) 使用 JSON 输出: {\n  "todos": [ {"id": <int>, "task": <str>, "deps": [] } ]\n}。\n'
-            "5) ID 从现有最大 ID + 1 开始递增。\n"
-            "6) 在 task 文本中包含父任务引用: '(parent:<id>)'，例如 '检查 R1 BGP 配置 (parent:3)'。\n"
-            "7) 如果某失败任务无法进一步细化，生成一个验证性任务，例如 '验证采集是否缺失 (parent:<id>)'。\n"
+            f"Recursive deep analysis: Detected {len(failures_to_analyze)} failed tasks, need to generate finer-grained subtasks.\n\n"
+            "Failed task list:\n" + "\n".join(failure_summaries) + "\n\n"
+            "Please follow requirements: \n"
+            f"1) Generate 1-2 more specific subtasks for each failed task (approximately {len(failures_to_analyze) * 2} total).\n"
+            "2) Subtasks should be more specific, e.g., focus on specific protocol instance, neighbor, interface or field.\n"
+            "3) Avoid completely duplicating parent task.\n"
+            '4) Use JSON output: {\n  "todos": [ {"id": <int>, "task": <str>, "deps": [] } ]\n}.\n'
+            "5) IDs start from existing max ID + 1 and increment.\n"
+            "6) Include parent task reference in task text: '(parent:<id>)', e.g., 'Check R1 BGP config (parent:3)'.\n"
+            "7) If a failed task cannot be further refined, generate a validation task, e.g., 'Verify if collection is missing (parent:<id>)'.\n"
         )
 
         return {

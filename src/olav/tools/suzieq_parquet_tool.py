@@ -153,11 +153,38 @@ async def suzieq_query(
     # SuzieQ uses Hive-style partitioning:
     # Coalesced data: data/suzieq-parquet/coalesced/{table}/sqvers={version}/namespace={ns}/...
     # Raw data: data/suzieq-parquet/{table}/sqvers={version}/namespace={ns}/hostname={host}/*.parquet
-    # Prefer coalesced (optimized) over raw data
-    table_dir = parquet_dir / "coalesced" / table
-    if not table_dir.exists():
-        # Fallback to raw data directory
-        table_dir = parquet_dir / table
+    # Strategy: Try coalesced first, fallback to raw if coalesced is too old or empty
+    coalesced_dir = parquet_dir / "coalesced" / table
+    raw_dir = parquet_dir / table
+
+    # Determine which directory to use
+    table_dir = None
+    use_raw_fallback = False
+
+    if coalesced_dir.exists():
+        # Check if coalesced data is fresh enough
+        coalesced_files = list(coalesced_dir.rglob("*.parquet"))
+        if coalesced_files:
+            import time
+            current_time = time.time()
+            # Get the newest file modification time
+            newest_mtime = max(f.stat().st_mtime for f in coalesced_files)
+            age_hours = (current_time - newest_mtime) / 3600
+
+            if age_hours <= max_age_hours:
+                table_dir = coalesced_dir
+            else:
+                # Coalesced data is too old, try raw data
+                use_raw_fallback = True
+                logger.info(f"Coalesced data is {age_hours:.1f}h old, checking raw data...")
+
+    if table_dir is None and raw_dir.exists():
+        table_dir = raw_dir
+        if use_raw_fallback:
+            logger.info(f"Using raw data directory: {raw_dir}")
+
+    if table_dir is None:
+        table_dir = coalesced_dir if coalesced_dir.exists() else raw_dir
 
     if not table_dir.exists():
         # Return explicit NO_DATA_FOUND record to prevent hallucination
@@ -209,13 +236,36 @@ async def suzieq_query(
 
         # CRITICAL: Filter by time window to avoid stale/test data pollution
         # Default: only last 24 hours (configurable via max_age_hours parameter)
+        original_count = len(df)
+        latest_timestamp_ms = None
         if max_age_hours > 0 and "timestamp" in df.columns:
             import time
 
             current_time_ms = int(time.time() * 1000)
             cutoff_time_ms = current_time_ms - (max_age_hours * 3600 * 1000)
+            latest_timestamp_ms = df["timestamp"].max() if len(df) > 0 else None
             df = df[df["timestamp"] >= cutoff_time_ms]
             logger.info(f"Filtered to last {max_age_hours} hours: {len(df)} records remain")
+
+            # Check if time filtering removed all data
+            if len(df) == 0 and original_count > 0 and latest_timestamp_ms is not None:
+                data_age_hours = (current_time_ms - latest_timestamp_ms) / (1000 * 3600)
+                return {
+                    "data": [
+                        {
+                            "status": "DATA_TOO_OLD",
+                            "message": f"Table '{table}' has {original_count} records, but all are older than {max_age_hours} hours",
+                            "data_age_hours": round(data_age_hours, 1),
+                            "hint": f"Data is {round(data_age_hours, 1)} hours old. Try setting max_age_hours={int(data_age_hours) + 1} or max_age_hours=0 for all historical data.",
+                            "suggestion": "Call suzieq_query again with a larger max_age_hours value",
+                        }
+                    ],
+                    "count": 0,
+                    "columns": ["status", "message", "data_age_hours", "hint", "suggestion"],
+                    "table": table,
+                    "original_count": original_count,
+                    "max_age_hours_used": max_age_hours,
+                }
 
         # Apply filters
         if hostname:

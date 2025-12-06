@@ -10,7 +10,6 @@ Rich-based UI components for the CLI:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 
 from rich.align import Align
 from rich.console import Console, Group
-from rich.layout import Layout
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -34,7 +32,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from olav.cli.thin_client import HITLRequest, StreamEvent, StreamEventType, ToolCall
+from olav.cli.thin_client import HITLRequest, StreamEventType, ToolCall
 
 if TYPE_CHECKING:
     from olav.cli.thin_client import OlavThinClient
@@ -96,7 +94,7 @@ def get_snowman_small() -> Text:
 @dataclass
 class ThinkingStep:
     """A step in the thinking process."""
-    
+
     id: str
     description: str
     status: str = "pending"  # pending, running, success, error
@@ -107,17 +105,17 @@ class ThinkingStep:
 
 class ThinkingTree:
     """Real-time visualization of agent thinking process.
-    
+
     Uses Rich Tree with Live display for dynamic updates.
     Supports ReAct agent pattern with hypothesis-verification flow.
-    
+
     Example:
         with ThinkingTree(console) as tree:
             tree.add_step("Analyzing query...")
             tree.add_tool_call("suzieq_query", {"table": "bgp"})
             tree.mark_tool_complete("suzieq_query", success=True)
     """
-    
+
     TOOL_ICONS = {
         "suzieq_query": "📊",
         "suzieq_schema_search": "🔍",
@@ -128,14 +126,14 @@ class ThinkingTree:
         "netbox_api": "📦",
         "rag_search": "📚",
     }
-    
+
     STATUS_ICONS = {
         "pending": "⏳",
         "running": "🔄",
         "success": "✅",
         "error": "❌",
     }
-    
+
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
         self.tree = Tree("[bold cyan]🧠 Thinking Process[/bold cyan]")
@@ -145,7 +143,10 @@ class ThinkingTree:
         self.start_time = time.time()
         self.step_count = 0
         self.hypothesis_node: Any = None
-    
+        # Streaming thinking support
+        self._thinking_buffer: str = ""
+        self._thinking_node: Any = None
+
     def __enter__(self) -> "ThinkingTree":
         """Start live display."""
         self.live = Live(
@@ -156,7 +157,7 @@ class ThinkingTree:
         )
         self.live.__enter__()
         return self
-    
+
     def __exit__(self, *args) -> None:
         """Stop live display."""
         if self.live:
@@ -164,9 +165,34 @@ class ThinkingTree:
             elapsed = time.time() - self.start_time
             self.tree.add(f"[dim]⏱️ Total time: {elapsed:.2f}s[/dim]")
             self.live.__exit__(*args)
-    
-    def add_thinking(self, text: str) -> None:
-        """Add a thinking step."""
+
+    def add_thinking(self, text: str, streaming: bool = True) -> None:
+        """Add a thinking step.
+
+        Args:
+            text: The thinking content (can be a token or full text)
+            streaming: If True, accumulates text into a single node (for streaming tokens).
+                      If False, creates a new node for each call (legacy behavior).
+        """
+        if streaming:
+            # Streaming mode: accumulate into single node
+            self._thinking_buffer += text
+
+            # Update or create the thinking node
+            display_text = self._thinking_buffer
+            # Truncate display if too long (keep last 200 chars for display)
+            if len(display_text) > 200:
+                display_text = "..." + display_text[-197:]
+
+            if self._thinking_node is None:
+                self._thinking_node = self.tree.add(f"[yellow]💭 {display_text}[/yellow]")
+            else:
+                # Update existing node label
+                self._thinking_node.label = f"[yellow]💭 {display_text}[/yellow]"
+            self._refresh()
+            return
+
+        # Legacy non-streaming mode
         self.step_count += 1
         # Detect hypothesis-related thinking
         text_lower = text.lower()
@@ -182,7 +208,25 @@ class ThinkingTree:
         else:
             self.current_step = self.tree.add(f"[yellow]💭 {text}[/yellow]")
         self._refresh()
-    
+
+    def finalize_thinking(self) -> None:
+        """Finalize streaming thinking - show full content summary.
+
+        Call this when thinking is complete to update the node with final content.
+        """
+        if self._thinking_buffer and self._thinking_node:
+            # Show word count summary instead of truncated text
+            char_count = len(self._thinking_buffer)
+            # Keep a brief preview
+            preview = self._thinking_buffer[:100].replace('\n', ' ')
+            if len(self._thinking_buffer) > 100:
+                preview += "..."
+            self._thinking_node.label = f"[yellow]💭 思考 ({char_count}字): {preview}[/yellow]"
+            self._refresh()
+        # Reset buffer for next thinking session
+        self._thinking_buffer = ""
+        self._thinking_node = None
+
     def add_hypothesis(self, hypothesis: str, confidence: float = 0.0) -> None:
         """Add a hypothesis step (ReAct pattern)."""
         conf_color = "green" if confidence >= 0.8 else "yellow" if confidence >= 0.5 else "red"
@@ -191,7 +235,7 @@ class ThinkingTree:
             f"[{conf_color}]({confidence:.0%})[/{conf_color}]"
         )
         self._refresh()
-    
+
     def add_evidence(self, evidence: str, supports: bool = True) -> None:
         """Add evidence for/against hypothesis."""
         icon = "✓" if supports else "✗"
@@ -201,58 +245,58 @@ class ThinkingTree:
         else:
             self.tree.add(f"[{color}]📌 {icon} {evidence}[/{color}]")
         self._refresh()
-    
+
     def add_tool_call(self, tool_name: str, args: dict[str, Any]) -> None:
         """Add a tool call node."""
         icon = self.TOOL_ICONS.get(tool_name, "🔧")
-        
+
         # Format args preview
         args_preview = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
         if len(args_preview) > 50:
             args_preview = args_preview[:47] + "..."
-        
+
         node = self.tree.add(f"[yellow]{icon} {tool_name}[/yellow]")
         node.add(f"[dim]{args_preview}[/dim]")
-        
+
         self.tool_nodes[tool_name] = {
             "node": node,
             "start_time": time.time(),
         }
         self._refresh()
-    
+
     def mark_tool_complete(
-        self, 
-        tool_name: str, 
+        self,
+        tool_name: str,
         success: bool = True,
         result_preview: str | None = None,
     ) -> None:
         """Mark a tool call as complete."""
         if tool_name not in self.tool_nodes:
             return
-        
+
         tool_info = self.tool_nodes[tool_name]
         node = tool_info["node"]
         elapsed = time.time() - tool_info["start_time"]
-        
+
         icon = self.TOOL_ICONS.get(tool_name, "🔧")
         status = "✅" if success else "❌"
-        
+
         node.label = Text.from_markup(
             f"[{'green' if success else 'red'}]{icon} {tool_name} {status}[/] "
             f"[dim]({elapsed:.2f}s)[/dim]"
         )
-        
+
         if result_preview:
             preview = result_preview[:100] + "..." if len(result_preview) > 100 else result_preview
             node.add(f"[dim]→ {preview}[/dim]")
-        
+
         self._refresh()
-    
+
     def add_error(self, message: str) -> None:
         """Add an error node."""
         self.tree.add(f"[red]❌ Error: {message}[/red]")
         self._refresh()
-    
+
     def _refresh(self) -> None:
         """Refresh the live display."""
         if self.live:
@@ -264,47 +308,47 @@ class ThinkingTree:
 # ============================================
 class HITLPanel:
     """Display HITL approval requests and handle user input.
-    
+
     Example:
         panel = HITLPanel(console)
         decision = panel.prompt(hitl_request)
         # decision is "Y", "N", or modification text
     """
-    
+
     RISK_COLORS = {
         "low": "green",
-        "medium": "yellow", 
+        "medium": "yellow",
         "high": "red",
     }
-    
+
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
-    
+
     def display(self, request: HITLRequest) -> None:
         """Display HITL request details."""
         risk_color = self.RISK_COLORS.get(request.risk_level, "yellow")
-        
+
         # Build info table
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column("Label", style="bold")
         table.add_column("Value")
-        
+
         table.add_row("Workflow", request.workflow_type)
         table.add_row("Operation", request.operation)
         table.add_row("Target Device", request.target_device)
         table.add_row("Risk Level", f"[{risk_color}]{request.risk_level.upper()}[/{risk_color}]")
-        
+
         # Commands list
         if request.commands:
             commands_text = "\n".join(f"  • {cmd}" for cmd in request.commands[:5])
             if len(request.commands) > 5:
                 commands_text += f"\n  ... {len(request.commands)} commands total"
             table.add_row("Commands", commands_text)
-        
+
         # Reasoning
         if request.reasoning:
             table.add_row("AI Reasoning", request.reasoning[:200])
-        
+
         # Create panel
         panel = Panel(
             table,
@@ -312,28 +356,28 @@ class HITLPanel:
             border_style="red" if request.risk_level == "high" else "yellow",
             subtitle="[dim]Your approval is required to continue[/dim]",
         )
-        
+
         self.console.print()
         self.console.print(panel)
-    
+
     def display_execution_plan(self, request: HITLRequest) -> None:
         """Display execution plan with todo items."""
         if not request.execution_plan and not request.todos:
             return
-        
+
         self.console.print()
         self.console.print("=" * 60)
         self.console.print("[bold]📋 Execution Plan[/bold]")
         self.console.print("=" * 60)
-        
+
         if request.execution_plan:
             plan = request.execution_plan
-            
+
             # Summary
             if plan.get("summary"):
                 self.console.print(plan["summary"])
                 self.console.print("-" * 60)
-            
+
             # Feasible tasks
             feasible = plan.get("feasible_tasks", [])
             if feasible:
@@ -341,7 +385,7 @@ class HITLPanel:
                 for task_id in feasible:
                     task_desc = self._get_task_description(task_id, request.todos)
                     self.console.print(f"  • Task {task_id}: {task_desc}")
-            
+
             # Uncertain tasks
             uncertain = plan.get("uncertain_tasks", [])
             if uncertain:
@@ -349,7 +393,7 @@ class HITLPanel:
                 for task_id in uncertain:
                     task_desc = self._get_task_description(task_id, request.todos)
                     self.console.print(f"  • Task {task_id}: {task_desc}")
-            
+
             # Infeasible tasks
             infeasible = plan.get("infeasible_tasks", [])
             if infeasible:
@@ -357,38 +401,38 @@ class HITLPanel:
                 for task_id in infeasible:
                     task_desc = self._get_task_description(task_id, request.todos)
                     self.console.print(f"  • Task {task_id}: {task_desc}")
-        
+
         self.console.print("=" * 60)
-    
+
     def _get_task_description(self, task_id: int, todos: list[dict] | None) -> str:
         """Get task description from todos list."""
         if not todos:
             return "(no description)"
-        
+
         for todo in todos:
             if isinstance(todo, dict) and todo.get("id") == task_id:
                 return todo.get("task", "(no description)")
-        
+
         return "(no description)"
-    
+
     def prompt(self, request: HITLRequest) -> str:
         """Display request and prompt for user decision.
-        
+
         Returns:
             "Y" for approve, "N" for reject, or modification text
         """
         self.display(request)
         self.display_execution_plan(request)
-        
+
         self.console.print()
         self.console.print("[bold]Choose an action:[/bold]")
         self.console.print("  [green]Y / yes[/green]  - Approve")
         self.console.print("  [red]N / no[/red]   - Reject")
         self.console.print("  [cyan]Other[/cyan]    - Modify request")
         self.console.print()
-        
+
         user_input = self.console.input("[bold]Your decision: [/bold]").strip()
-        
+
         if user_input.lower() in ("y", "yes", "approve", "批准"):
             return "Y"
         elif user_input.lower() in ("n", "no", "reject", "拒绝", "abort"):
@@ -402,13 +446,13 @@ class HITLPanel:
 # ============================================
 class InspectionProgress:
     """Display inspection progress with multiple bars.
-    
+
     Shows:
     - Overall progress (total checks)
     - Current batch progress (devices in batch)
     - Current device progress (checks on device)
     """
-    
+
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
         self.progress = Progress(
@@ -420,34 +464,34 @@ class InspectionProgress:
             console=self.console,
         )
         self.tasks: dict[str, Any] = {}
-    
+
     def __enter__(self) -> "InspectionProgress":
         self.progress.__enter__()
         return self
-    
+
     def __exit__(self, *args) -> None:
         self.progress.__exit__(*args)
-    
+
     def add_overall(self, total: int, description: str = "Overall") -> None:
         """Add overall progress bar."""
         self.tasks["overall"] = self.progress.add_task(description, total=total)
-    
+
     def add_device(self, device_name: str, total_checks: int) -> None:
         """Add device-level progress bar."""
         self.tasks["device"] = self.progress.add_task(
             f"📡 {device_name}", total=total_checks
         )
-    
+
     def update_overall(self, advance: int = 1) -> None:
         """Advance overall progress."""
         if "overall" in self.tasks:
             self.progress.update(self.tasks["overall"], advance=advance)
-    
+
     def update_device(self, advance: int = 1) -> None:
         """Advance device progress."""
         if "device" in self.tasks:
             self.progress.update(self.tasks["device"], advance=advance)
-    
+
     def complete_device(self) -> None:
         """Complete and remove device progress bar."""
         if "device" in self.tasks:
@@ -460,23 +504,23 @@ class InspectionProgress:
 # ============================================
 class ResultRenderer:
     """Render execution results with proper formatting.
-    
+
     Handles:
     - Markdown text
     - Data tables
     - JSON/YAML
     - Error messages
     """
-    
+
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
-    
+
     def render_message(self, content: str, role: str = "assistant") -> None:
         """Render a chat message."""
         if role in ("assistant", "ai"):
             # Unescape literal \n
             content = content.replace("\\n", "\n").replace("\\t", "\t")
-            
+
             panel = Panel(
                 Markdown(content),
                 title="[bold green]🤖 OLAV[/bold green]",
@@ -484,7 +528,7 @@ class ResultRenderer:
                 padding=(1, 2),
             )
             self.console.print(panel)
-        
+
         elif role in ("user", "human"):
             panel = Panel(
                 content,
@@ -493,10 +537,10 @@ class ResultRenderer:
                 padding=(0, 2),
             )
             self.console.print(panel)
-    
+
     def render_table(
-        self, 
-        data: list[dict], 
+        self,
+        data: list[dict],
         title: str | None = None,
         max_rows: int = 20,
     ) -> None:
@@ -504,75 +548,75 @@ class ResultRenderer:
         if not data:
             self.console.print("[dim]No data[/dim]")
             return
-        
+
         # Get columns from first row
         columns = list(data[0].keys())
-        
+
         table = Table(title=title, show_lines=True)
         for col in columns:
             table.add_column(col)
-        
+
         for row in data[:max_rows]:
             table.add_row(*[str(row.get(col, "")) for col in columns])
-        
+
         if len(data) > max_rows:
             table.caption = f"[dim]Showing {max_rows} of {len(data)} rows[/dim]"
-        
+
         self.console.print(table)
-    
+
     def render_json(self, data: Any, title: str | None = None) -> None:
         """Render JSON data with syntax highlighting."""
         import json
-        
+
         from rich.syntax import Syntax
-        
+
         json_str = json.dumps(data, indent=2, ensure_ascii=False)
         syntax = Syntax(json_str, "json", theme="monokai", line_numbers=True)
-        
+
         if title:
             self.console.print(f"[bold]{title}[/bold]")
         self.console.print(syntax)
-    
+
     def render_error(self, message: str, details: str | None = None) -> None:
         """Render an error message."""
         content = f"[bold red]{message}[/bold red]"
         if details:
             content += f"\n\n[dim]{details}[/dim]"
-        
+
         panel = Panel(
             content,
             title="[bold red]❌ Error[/bold red]",
             border_style="red",
         )
         self.console.print(panel)
-    
+
     def render_success(self, message: str) -> None:
         """Render a success message."""
         self.console.print(f"[bold green]✅ {message}[/bold green]")
-    
+
     def render_warning(self, message: str) -> None:
         """Render a warning message."""
         self.console.print(f"[bold yellow]⚠️ {message}[/bold yellow]")
-    
+
     def render_info(self, message: str) -> None:
         """Render an info message."""
         self.console.print(f"[cyan]ℹ️ {message}[/cyan]")
-    
+
     def render_tool_summary(self, tool_calls: list[ToolCall]) -> None:
         """Render a summary of tool calls."""
         if not tool_calls:
             return
-        
+
         table = Table(title="Tool Calls", show_header=True)
         table.add_column("Tool", style="cyan")
         table.add_column("Status", justify="center")
         table.add_column("Duration", justify="right")
-        
+
         for tool in tool_calls:
             status = "✅" if tool.success else "❌"
             duration = f"{tool.duration_ms:.0f}ms" if tool.duration_ms else "-"
             table.add_row(tool.name, status, duration)
-        
+
         self.console.print(table)
 
 
@@ -580,280 +624,310 @@ class ResultRenderer:
 # Dashboard (TUI Mode)
 # ============================================
 class Dashboard:
-    """Full-screen TUI dashboard for OLAV.
-    
+    """Full-screen TUI dashboard for OLAV with chat interface.
+
     Features:
-    - Real-time system status
-    - Device overview
-    - Recent activity log
+    - Chat-style conversation interface
+    - Real-time streaming responses
     - Colorful OLAV branding with snowman
-    
+
     Usage:
         dashboard = Dashboard(client, console)
         await dashboard.run()
     """
-    
+
     def __init__(
         self,
         client: "OlavThinClient",
         console: Console | None = None,
+        mode: str = "standard",
     ):
         self.client = client
         self.console = console or Console()
+        self.mode = mode
         self.running = False
-        self._activity_log: list[tuple[str, str]] = []
-        self._last_health: dict = {}
-        self._device_count: int = 0
-        self._table_count: int = 0
-    
-    def _make_header(self) -> Panel:
-        """Create header with OLAV logo and snowman."""
+        self._chat_history: list[tuple[str, str, str]] = []  # (role, content, timestamp)
+
+    def _print_header(self) -> None:
+        """Print header with OLAV logo and snowman."""
         # Combine logo and snowman side by side
         header_table = Table.grid(padding=1)
         header_table.add_column(justify="center", ratio=2)
         header_table.add_column(justify="center", ratio=1)
-        
+
         logo_text = Text.from_markup(OLAV_LOGO)
         snowman_text = Text.from_markup(SNOWMAN_ASCII)
-        
+
         header_table.add_row(logo_text, snowman_text)
-        
-        # Add subtitle with winter theme
+
+        # Add subtitle with mode indicator
         subtitle = Text()
         subtitle.append("\n")
         subtitle.append("❄ ", style="cyan")
         subtitle.append("Omni-Layer Autonomous Verifier", style="bold white")
-        subtitle.append(" ❄", style="cyan")
+        subtitle.append(" ❄ ", style="cyan")
+        mode_style = "bold yellow" if self.mode == "expert" else "bold green"
+        subtitle.append(f"[{self.mode.upper()}]", style=mode_style)
         subtitle.append("\n")
         subtitle.append("❆ ", style="white")
-        subtitle.append("NetAIChatOps", style="dim")
+        subtitle.append("Type your query, ", style="dim")
+        subtitle.append("/h", style="bold cyan")
+        subtitle.append(" for help, ", style="dim")
+        subtitle.append("Ctrl+C", style="bold cyan")
+        subtitle.append(" to exit", style="dim")
         subtitle.append(" ❆", style="white")
-        
+
         content = Group(
             Align.center(header_table),
             Align.center(subtitle),
         )
-        
-        return Panel(
+
+        panel = Panel(
             content,
             border_style="cyan",
             padding=(0, 2),
         )
-    
-    def _make_status_panel(self) -> Panel:
-        """Create system status panel."""
-        table = Table(show_header=False, box=None, padding=(0, 1))
-        table.add_column("Label", style="bold cyan")
-        table.add_column("Value")
-        
-        # Server status
-        if self._last_health:
-            status_icon = "🟢" if self._last_health.get("status") == "healthy" else "🔴"
-            table.add_row("Server", f"{status_icon} {self._last_health.get('status', 'unknown')}")
-            table.add_row("Version", self._last_health.get("version", "N/A"))
-            table.add_row("Environment", self._last_health.get("environment", "N/A"))
-            orchestrator = "✅" if self._last_health.get("orchestrator_ready") else "❌"
-            table.add_row("Orchestrator", orchestrator)
-        else:
-            table.add_row("Server", "⏳ Connecting...")
-        
-        table.add_row("", "")
-        table.add_row("Devices", f"📡 {self._device_count}")
-        table.add_row("SuzieQ Tables", f"📊 {self._table_count}")
-        table.add_row("Current Time", datetime.now().strftime("%H:%M:%S"))
-        
-        return Panel(
-            table,
-            title=f"[bold green]📊 System Status[/bold green] {SNOWMAN_MINI}",
-            border_style="green",
-        )
-    
-    def _make_activity_panel(self) -> Panel:
-        """Create recent activity panel."""
-        if not self._activity_log:
-            content = Text("[dim]No activity yet[/dim]")
-        else:
-            lines = []
-            for timestamp, message in self._activity_log[-10:]:
-                lines.append(f"[dim]{timestamp}[/dim] {message}")
-            content = Text.from_markup("\n".join(lines))
-        
-        return Panel(
-            content,
-            title="[bold yellow]📜 Activity Log[/bold yellow]",
-            border_style="yellow",
-        )
-    
-    def _make_help_panel(self) -> Panel:
-        """Create help/shortcuts panel."""
-        help_text = Text()
-        help_text.append("Shortcuts:\n\n", style="bold")
-        help_text.append("  q / Ctrl+C  ", style="cyan")
-        help_text.append("Quit dashboard\n")
-        help_text.append("  r           ", style="cyan")
-        help_text.append("Refresh data\n")
-        help_text.append("  /           ", style="cyan")
-        help_text.append("Query mode\n")
-        help_text.append("  ?           ", style="cyan")
-        help_text.append("Show help\n")
-        
-        return Panel(
-            help_text,
-            title="[bold magenta]⌨️ Help[/bold magenta]",
-            border_style="magenta",
-        )
-    
-    def _make_footer(self) -> Panel:
-        """Create footer with winter theme."""
-        footer_text = Text()
-        footer_text.append(" ❄ ", style="cyan")
-        footer_text.append("OLAV CLI", style="bold white")
-        footer_text.append(" | ", style="dim")
-        footer_text.append("Press ", style="dim")
-        footer_text.append("q", style="bold cyan")
-        footer_text.append(" to quit | ", style="dim")
-        footer_text.append("Press ", style="dim")
-        footer_text.append("/", style="bold cyan")
-        footer_text.append(" to query", style="dim")
-        footer_text.append(" ❆ ", style="white")
-        
-        return Panel(
-            Align.center(footer_text),
-            style="on dark_blue",
-            border_style="blue",
-        )
-    
-    def _make_layout(self) -> Layout:
-        """Create the dashboard layout."""
-        layout = Layout()
-        
-        # Main structure
-        layout.split_column(
-            Layout(name="header", size=18),
-            Layout(name="body"),
-            Layout(name="footer", size=3),
-        )
-        
-        # Body split
-        layout["body"].split_row(
-            Layout(name="left", ratio=1),
-            Layout(name="right", ratio=2),
-        )
-        
-        # Left panel split
-        layout["left"].split_column(
-            Layout(name="status"),
-            Layout(name="help"),
-        )
-        
-        return layout
-    
-    def _update_layout(self, layout: Layout) -> None:
-        """Update layout with current data."""
-        layout["header"].update(self._make_header())
-        layout["status"].update(self._make_status_panel())
-        layout["help"].update(self._make_help_panel())
-        layout["right"].update(self._make_activity_panel())
-        layout["footer"].update(self._make_footer())
-    
-    def add_activity(self, message: str) -> None:
-        """Add an activity log entry."""
+        self.console.print(panel)
+
+    def _print_chat_history(self) -> None:
+        """Print recent chat history."""
+        if not self._chat_history:
+            return
+
+        self.console.print()
+        for role, msg, ts in self._chat_history[-10:]:  # Show last 10 messages
+            if role == "user":
+                self.console.print(f"[dim]{ts}[/dim] [bold cyan]You:[/bold cyan] {msg}")
+            elif role == "assistant":
+                # Handle multi-line responses
+                lines = msg.split("\n")
+                self.console.print(f"[dim]{ts}[/dim] [bold green]OLAV:[/bold green] {lines[0]}")
+                for line in lines[1:]:
+                    self.console.print(f"       [green]{line}[/green]")
+            elif role == "thinking":
+                self.console.print(f"[dim]{ts}[/dim] [yellow]💭 {msg}[/yellow]")
+            elif role == "tool":
+                self.console.print(f"[dim]{ts}[/dim] [magenta]🔧 {msg}[/magenta]")
+        self.console.print()
+
+    def add_message(self, role: str, content: str) -> None:
+        """Add a message to chat history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self._activity_log.append((timestamp, message))
-        # Keep only last 50 entries
-        if len(self._activity_log) > 50:
-            self._activity_log = self._activity_log[-50:]
-    
-    async def _fetch_status(self) -> None:
-        """Fetch current system status."""
-        try:
-            health = await self.client.health()
-            self._last_health = {
-                "status": health.status,
-                "version": health.version,
-                "environment": health.environment,
-                "orchestrator_ready": health.orchestrator_ready,
-            }
-            self.add_activity("[green]✅ Health check OK[/green]")
-        except Exception as e:
-            self._last_health = {"status": "error", "error": str(e)}
-            self.add_activity(f"[red]❌ Health check failed: {e}[/red]")
-        
-        try:
-            devices = await self.client.get_device_names()
-            self._device_count = len(devices)
-            if devices:
-                self.add_activity(f"[blue]📡 Found {len(devices)} devices[/blue]")
-        except Exception:
-            pass
-        
-        try:
-            tables = await self.client.get_suzieq_tables()
-            self._table_count = len(tables)
-            if tables:
-                self.add_activity(f"[blue]📊 Loaded {len(tables)} SuzieQ tables[/blue]")
-        except Exception:
-            pass
-    
-    async def run(self) -> str | None:
-        """Run the dashboard in live mode.
-        
-        Returns:
-            User query if they pressed '/', None if they quit.
-        """
+        self._chat_history.append((role, content, timestamp))
+        # Keep only last 100 messages
+        if len(self._chat_history) > 100:
+            self._chat_history = self._chat_history[-100:]
+
+    def _refresh_display(self) -> None:
+        """Clear screen and redraw header + history."""
+        self.console.clear()
+        self._print_header()
+        self._print_chat_history()
+
+    async def run(self) -> None:
+        """Run the dashboard in interactive mode."""
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.formatted_text import HTML
+        from prompt_toolkit.styles import Style as PTStyle
+
         self.running = True
-        layout = self._make_layout()
-        
-        # Initial data fetch
-        self.add_activity("[cyan]🚀 Dashboard started[/cyan]")
-        await self._fetch_status()
-        
-        self._update_layout(layout)
-        
-        # Run with Live display
-        with Live(
-            layout,
-            console=self.console,
-            refresh_per_second=4,
-            screen=True,
-        ) as live:
-            last_refresh = time.time()
-            
+
+        # Create styled prompt session
+        style = PTStyle.from_dict({
+            "prompt": "cyan bold",
+        })
+        session: PromptSession = PromptSession(style=style)
+
+        # Initial display
+        self._refresh_display()
+
+        try:
             while self.running:
-                # Auto-refresh every 30 seconds
-                if time.time() - last_refresh > 30:
-                    await self._fetch_status()
-                    last_refresh = time.time()
-                
-                self._update_layout(layout)
-                live.update(layout)
-                
-                # Non-blocking check for input
-                # Note: This is simplified; real implementation would use
-                # asyncio keyboard handling or prompt_toolkit
-                await asyncio.sleep(0.25)
-        
-        return None
-    
+                # Get user input using prompt_toolkit
+                try:
+                    user_input = await session.prompt_async(
+                        HTML("<cyan><b>❯ </b></cyan>"),
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    self.running = False
+                    break
+
+                user_input = user_input.strip()
+                if not user_input:
+                    continue
+
+                # Handle slash commands
+                if user_input.startswith("/"):
+                    if user_input in ("/q", "/quit", "/exit"):
+                        self.running = False
+                        break
+                    elif user_input in ("/h", "/help"):
+                        self.add_message("assistant", "Commands: /q quit, /h help, /s standard, /e expert, /c clear, /status system")
+                        self._refresh_display()
+                        continue
+                    elif user_input in ("/status", "/st"):
+                        await self._show_status_inline()
+                        continue
+                    elif user_input == "/s":
+                        self.mode = "standard"
+                        self.add_message("assistant", "✅ Switched to Standard mode")
+                        self._refresh_display()
+                        continue
+                    elif user_input == "/e":
+                        self.mode = "expert"
+                        self.add_message("assistant", "✅ Switched to Expert mode (Deep Dive)")
+                        self._refresh_display()
+                        continue
+                    elif user_input in ("/c", "/clear"):
+                        self._chat_history.clear()
+                        self._refresh_display()
+                        continue
+                    else:
+                        self.add_message("assistant", f"Unknown command: {user_input}. Type /h for help.")
+                        self._refresh_display()
+                        continue
+
+                # Add user message and refresh
+                self.add_message("user", user_input)
+                self._refresh_display()
+
+                # Show thinking indicator
+                self.console.print("[yellow]💭 Thinking...[/yellow]")
+
+                # Send query and stream response
+                try:
+                    import uuid
+                    thread_id = str(uuid.uuid4())
+                    full_response = ""
+
+                    async for event in self.client.chat_stream(user_input, thread_id=thread_id, mode=self.mode):
+                        event_type = event.type if hasattr(event, "type") else None
+
+                        if event_type == StreamEventType.TOOL_START:
+                            tool_name = event.data.get("name", "tool") if hasattr(event, "data") else "tool"
+                            self.console.print(f"[magenta]🔧 Calling {tool_name}...[/magenta]")
+                        elif event_type == StreamEventType.TOOL_END:
+                            tool_name = event.data.get("name", "tool") if hasattr(event, "data") else "tool"
+                            success = event.data.get("success", True) if hasattr(event, "data") else True
+                            icon = "✅" if success else "❌"
+                            self.console.print(f"[magenta]{icon} {tool_name} completed[/magenta]")
+                        elif event_type == StreamEventType.TOKEN:
+                            token = event.data.get("content", "") if hasattr(event, "data") else ""
+                            if token:
+                                full_response += token
+                                # Print token incrementally
+                                self.console.print(token, end="")
+                        elif event_type == StreamEventType.MESSAGE:
+                            # Complete message (from guard rejection or final response)
+                            message = event.data.get("content", "") if hasattr(event, "data") else ""
+                            if message:
+                                full_response = message
+                                self.console.print(message)
+                        elif event_type == StreamEventType.THINKING:
+                            thought = event.data.get("content", "") if hasattr(event, "data") else ""
+                            if thought:
+                                self.console.print(f"[dim yellow]💭 {thought[:80]}...[/dim yellow]")
+
+                    # Add newline after streaming tokens
+                    if full_response:
+                        self.console.print()
+
+                    # Add response to history
+                    if full_response:
+                        self.add_message("assistant", full_response.strip())
+                    else:
+                        self.add_message("assistant", "[dim]No response received[/dim]")
+
+                    # Refresh to show clean history
+                    self._refresh_display()
+
+                except Exception as e:
+                    self.add_message("assistant", f"[red]Error: {e}[/red]")
+                    self._refresh_display()
+
+        except KeyboardInterrupt:
+            pass
+
+        self.console.print()
+        self.console.print("[yellow]👋 Dashboard closed. Goodbye![/yellow]")
+
     def stop(self) -> None:
         """Stop the dashboard."""
         self.running = False
+
+    async def _show_status_inline(self) -> None:
+        """Show system status inline in dashboard."""
+        from rich.panel import Panel
+
+        self.console.print()
+        self.console.print(Panel.fit(
+            "[bold cyan]OLAV System Status[/bold cyan]",
+            border_style="cyan",
+        ))
+
+        # Server health
+        self.console.print("[bold]📊 Server Status[/bold]")
+        try:
+            health = await self.client.health()
+            status_icon = "🟢" if health.status == "healthy" else "🔴"
+            self.console.print(f"  Status:       {status_icon} {health.status}")
+            self.console.print(f"  Version:      {health.version}")
+            self.console.print(f"  Environment:  {health.environment}")
+            orchestrator = "✅ Ready" if health.orchestrator_ready else "❌ Not ready"
+            self.console.print(f"  Orchestrator: {orchestrator}")
+        except Exception as e:
+            self.console.print(f"  [red]❌ Cannot connect to server: {e}[/red]")
+            return
+
+        self.console.print()
+
+        # Devices
+        self.console.print("[bold]📡 Devices[/bold]")
+        try:
+            devices = await self.client.get_device_names()
+            self.console.print(f"  Total: {len(devices)} devices")
+            if devices and len(devices) <= 10:
+                for device in devices:
+                    self.console.print(f"    • {device}")
+            elif devices:
+                for device in devices[:5]:
+                    self.console.print(f"    • {device}")
+                self.console.print(f"    ... and {len(devices) - 5} more")
+        except Exception as e:
+            self.console.print(f"  [yellow]⚠ Cannot fetch devices: {e}[/yellow]")
+
+        self.console.print()
+
+        # SuzieQ tables
+        self.console.print("[bold]📊 SuzieQ Tables[/bold]")
+        try:
+            tables = await self.client.get_suzieq_tables()
+            self.console.print(f"  Total: {len(tables)} tables")
+            if tables and len(tables) <= 10:
+                self.console.print(f"  Tables: {', '.join(tables)}")
+            elif tables:
+                self.console.print(f"  Tables: {', '.join(tables[:10])}, ...")
+        except Exception as e:
+            self.console.print(f"  [yellow]⚠ Cannot fetch tables: {e}[/yellow]")
+
+        self.console.print()
+        self.add_message("assistant", "✅ Status check complete")
 
 
 def show_welcome_banner(console: Console | None = None) -> None:
     """Show welcome banner with OLAV logo and snowman."""
     console = console or Console()
-    
+
     # Create welcome display with big logo and small snowman
     welcome_table = Table.grid(padding=2)
     welcome_table.add_column(justify="center", ratio=3)
     welcome_table.add_column(justify="center", ratio=1)
-    
+
     logo = Text.from_markup(OLAV_LOGO_BIG)
     snowman = Text.from_markup(SNOWMAN_SMALL)
-    
+
     welcome_table.add_row(logo, snowman)
-    
+
     # Subtitle
     subtitle = Text()
     subtitle.append("\n")
@@ -865,7 +939,7 @@ def show_welcome_banner(console: Console | None = None) -> None:
     subtitle.append("Type ", style="dim")
     subtitle.append("/h", style="bold cyan")
     subtitle.append(" for help\n", style="dim")
-    
+
     panel = Panel(
         Group(
             Align.center(welcome_table),
@@ -875,5 +949,5 @@ def show_welcome_banner(console: Console | None = None) -> None:
         title=f"{WINTER_BORDER} OLAV {WINTER_BORDER}",
         subtitle=f"{WINTER_BORDER}",
     )
-    
+
     console.print(panel)

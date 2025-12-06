@@ -318,35 +318,6 @@ class TestCacheManager:
         mock_backend.delete.assert_called_once_with("schema:suzieq")
 
     @pytest.mark.asyncio
-    async def test_get_tool_result(
-        self,
-        manager: CacheManager,
-        mock_backend: AsyncMock,
-    ) -> None:
-        """Test getting cached tool result."""
-        expected_result = {"output": "show ip bgp"}
-        mock_backend.get.return_value = expected_result
-        
-        result = await manager.get_tool_result("abc123")
-        
-        assert result == expected_result
-        mock_backend.get.assert_called_once_with("tool:abc123")
-
-    @pytest.mark.asyncio
-    async def test_set_tool_result(
-        self,
-        manager: CacheManager,
-        mock_backend: AsyncMock,
-    ) -> None:
-        """Test caching tool result."""
-        tool_result = {"output": "show ip bgp"}
-        
-        result = await manager.set_tool_result("abc123", tool_result)
-        
-        assert result is True
-        mock_backend.set.assert_called_once_with("tool:abc123", tool_result, 300)
-
-    @pytest.mark.asyncio
     async def test_get_session(self, manager: CacheManager, mock_backend: AsyncMock) -> None:
         """Test getting cached session."""
         expected_session = {"user": "admin", "context": {}}
@@ -382,20 +353,6 @@ class TestCacheManager:
         mock_backend.clear_namespace.assert_called_once_with("schema:")
 
     @pytest.mark.asyncio
-    async def test_clear_all_tool_results(
-        self,
-        manager: CacheManager,
-        mock_backend: AsyncMock,
-    ) -> None:
-        """Test clearing all tool results."""
-        mock_backend.clear_namespace.return_value = 10
-        
-        result = await manager.clear_all_tool_results()
-        
-        assert result == 10
-        mock_backend.clear_namespace.assert_called_once_with("tool:")
-
-    @pytest.mark.asyncio
     async def test_health_check(self, manager: CacheManager, mock_backend: AsyncMock) -> None:
         """Test health check delegation."""
         mock_backend.health_check.return_value = True
@@ -408,19 +365,18 @@ class TestCacheManager:
     def test_default_ttls(self, manager: CacheManager) -> None:
         """Test default TTL values."""
         assert manager._default_ttls["schema:"] == 3600
-        assert manager._default_ttls["tool:"] == 300
         assert manager._default_ttls["session:"] == 1800
         assert manager._default_ttls["memory:"] == 7200
 
     def test_custom_default_ttls(self, mock_backend: AsyncMock) -> None:
         """Test custom default TTL values."""
-        custom_ttls = {"schema:": 7200, "tool:": 600}
+        custom_ttls = {"schema:": 7200, "session:": 3600}
         manager = CacheManager(mock_backend, default_ttls=custom_ttls)
         
         assert manager._default_ttls["schema:"] == 7200
-        assert manager._default_ttls["tool:"] == 600
+        assert manager._default_ttls["session:"] == 3600
         # Original defaults preserved for non-overridden keys
-        assert manager._default_ttls["session:"] == 1800
+        assert manager._default_ttls["memory:"] == 7200
 
 
 class TestGlobalFunctions:

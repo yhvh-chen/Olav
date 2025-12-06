@@ -49,7 +49,7 @@ from langgraph.types import Send
 
 from olav.core.llm import LLMFactory
 from olav.tools.netbox_tool import netbox_api_call
-from olav.tools.nornir_tool import cli_tool, netconf_tool
+from olav.tools.nornir_tool import netconf_tool
 from olav.tools.suzieq_parquet_tool import suzieq_query
 
 from .base import BaseWorkflow
@@ -685,7 +685,7 @@ class BatchExecutionWorkflow(BaseWorkflow):
 
 def _generate_netconf_config(operation_type: str, params: dict) -> str:
     """Generate NETCONF XML config based on operation type.
-    
+
     This is a simplified implementation. In production, use proper
     OpenConfig/YANG templates.
     """

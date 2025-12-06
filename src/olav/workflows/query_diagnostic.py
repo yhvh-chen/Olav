@@ -156,9 +156,9 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
             "remove",
         ]
         if any(kw in query_lower for kw in config_keywords):
-            return False, "配置变更请求，应使用 device_execution workflow"
+            return False, "Config change request, should use device_execution workflow"
 
-        # 排除 NetBox 管理关键词
+        # Exclude NetBox management keywords
         netbox_keywords = [
             "设备清单",
             "添加设备",
@@ -177,7 +177,7 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
             "netbox",
         ]
         if any(kw in query_lower for kw in netbox_keywords):
-            return False, "NetBox 管理请求，应使用 netbox_management workflow"
+            return False, "NetBox management request, should use netbox_management workflow"
 
         # 匹配查询/诊断关键词
         query_keywords = [
@@ -242,7 +242,7 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
 
         async def macro_analysis_node(state: QueryDiagnosticState) -> QueryDiagnosticState:
             """Macro analysis using SuzieQ historical data.
-            
+
             Uses ToolMiddleware to automatically inject tool descriptions.
             """
             llm = LLMFactory.get_chat_model()
@@ -250,12 +250,12 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
 
             # Use the initial user query for prompt context
             user_query = state["messages"][0].content
-            
+
             # Load simplified base prompt
             base_prompt = prompt_manager.load_prompt(
                 "workflows/query_diagnostic", "macro_analysis", user_query=user_query
             )
-            
+
             # Use ToolMiddleware to enrich prompt with tool descriptions
             enriched_prompt = tool_middleware.enrich_prompt(
                 base_prompt=base_prompt,
@@ -281,22 +281,22 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
             macro_result = state["messages"][-1].content
             macro_data = {"analysis": macro_result}
 
-            eval_prompt = f"""评估当前宏观分析数据是否足以回答用户问题。
+            eval_prompt = f"""Evaluate whether the current macro analysis data is sufficient to answer the user's question.
 
-用户请求: {state["messages"][0].content}
-宏观分析: {macro_result}
+User request: {state["messages"][0].content}
+Macro analysis: {macro_result}
 
-评估标准：
-- 如果用户询问"为什么"/"原因"，仅历史数据不足，需要实时配置验证 → needs_micro=True
-- 如果发现异常状态（NotEstd/down/异常），需要获取实时配置确认根因 → needs_micro=True
-- 如果只是统计/概览/列表，历史数据已足够 → needs_micro=False
+Evaluation criteria:
+- If user asks "why"/"reason", historical data alone is insufficient, needs real-time config verification → needs_micro=True
+- If anomalous state detected (NotEstd/down/error), need real-time config to confirm root cause → needs_micro=True
+- If just statistics/overview/list, historical data is sufficient → needs_micro=False
 
-返回 true 或 false
+Return true or false
 """
 
             await llm.ainvoke([SystemMessage(content=eval_prompt)])
 
-            # 解析响应（简化版：基于触发词）
+            # Parse response (simplified: based on trigger words)
             user_query = state["messages"][0].content.lower()
             trigger_words = ["为什么", "原因", "诊断", "排查", "why", "cause", "down", "failed"]
             needs_micro = any(word in user_query for word in trigger_words)
@@ -315,7 +315,7 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
 
             user_query = state["messages"][0].content
             macro_data = state.get("macro_data", {})
-            
+
             # Load simplified prompt and enrich with ToolMiddleware
             micro_prompt = prompt_manager.load_prompt(
                 "workflows/query_diagnostic",
@@ -323,7 +323,7 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
                 user_query=user_query,
                 macro_analysis_result=str(macro_data),
             )
-            
+
             # Use module-level tool_middleware singleton
             enriched_prompt = tool_middleware.enrich_prompt(
                 base_prompt=micro_prompt,
@@ -349,16 +349,16 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
             micro_result = state["messages"][-1].content if state.get("needs_micro") else None
             micro_data = {"diagnosis": micro_result} if micro_result else None
 
-            final_prompt = f"""综合所有分析，给出最终答案。
+            final_prompt = f"""Synthesize all analysis and provide final answer.
 
-用户请求: {state["messages"][0].content}
-宏观分析: {state.get("macro_data")}
-微观诊断: {micro_data}
+User request: {state["messages"][0].content}
+Macro analysis: {state.get("macro_data")}
+Micro diagnosis: {micro_data}
 
-要求：
-- 直接回答用户问题
-- 如果是诊断任务，给出明确根因
-- 使用清晰的结构化输出（表格/列表）
+Requirements:
+- Answer user's question directly
+- If diagnostic task, provide clear root cause
+- Use clear structured output (tables/lists)
 """
 
             response = await llm.ainvoke([SystemMessage(content=final_prompt)])

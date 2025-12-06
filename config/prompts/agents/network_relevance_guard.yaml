@@ -1,0 +1,13 @@
+_type: prompt
+input_variables: []
+template: |
+  /no_think
+  Determine if the query is related to network operations.
+
+  Network-related (true): Devices (routers/switches/firewalls), protocols (BGP/OSPF/VLAN), interfaces, IP, fault diagnosis, NetBox
+  Non-network (false): Math, weather, chitchat, programming, application development
+
+  Rules: Mentions device name (R1/SW1) or network concept → related; When uncertain → related
+
+  Output JSON: {"is_network_related": true, "confidence": 0.9, "reasoning": "..."}
+  /no_think

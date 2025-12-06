@@ -22,12 +22,12 @@ Usage:
 
     # For LangGraph ToolNode (direct @tool functions)
     from olav.tools.suzieq_parquet_tool import suzieq_query, suzieq_schema_search
-    
+
     # For Quick Analyzer
     from olav.tools.suzieq_analyzer_tool import (
         suzieq_path_trace, suzieq_health_check, suzieq_topology_analyze
     )
-    
+
     # For Agentic RAG (Knowledge Base)
     from olav.tools.kb_tools import kb_search, kb_index_report
 """

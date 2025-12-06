@@ -15,7 +15,7 @@ Design:
 
 Usage:
     from olav.workflows.device_inspector import create_device_inspector, DeviceInspectorInput
-    
+
     inspector = create_device_inspector()
     result = await inspector.ainvoke({
         "device": "R1",
@@ -38,7 +38,6 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from olav.core.llm import LLMFactory
-from olav.core.prompt_manager import prompt_manager
 from olav.models.diagnosis_report import DeviceSummary
 
 logger = logging.getLogger(__name__)
@@ -57,7 +56,7 @@ LAYER_INFO = {
         "checks": ["interface status", "error counters", "link state"],
     },
     "L2": {
-        "name": "Data Link Layer", 
+        "name": "Data Link Layer",
         "tables": ["vlan", "macs", "lldp", "stp"],
         "checks": ["VLAN config", "MAC table", "LLDP neighbors", "STP state"],
     },
@@ -108,7 +107,7 @@ class DeviceInspectorState(TypedDict):
     context: str
     layers_to_check: list[str]
     known_issues: list[str]
-    
+
     # Results
     layer_findings: dict[str, list[str]]  # {layer: [findings]}
     layer_confidence: dict[str, float]  # {layer: confidence}
@@ -143,7 +142,7 @@ def create_initial_state(
 
 async def inspect_node(state: DeviceInspectorState) -> dict:
     """Main inspection node using ReAct with SuzieQ tools.
-    
+
     This node:
     1. Creates a focused prompt for the specific device
     2. Uses ReAct pattern with SuzieQ tools
@@ -153,35 +152,34 @@ async def inspect_node(state: DeviceInspectorState) -> dict:
     context = state["context"]
     layers_to_check = state["layers_to_check"]
     known_issues = state.get("known_issues", [])
-    
+
     # Get SuzieQ tools
     from olav.tools.suzieq_parquet_tool import suzieq_query, suzieq_schema_search
     from olav.tools.suzieq_analyzer_tool import (
         suzieq_health_check,
-        suzieq_path_trace,
         suzieq_topology_analyze,
     )
-    
+
     tools = [
         suzieq_schema_search,
         suzieq_query,
         suzieq_health_check,
         suzieq_topology_analyze,
     ]
-    
+
     # Build layer-specific instructions
     layer_instructions = []
     for layer in layers_to_check:
         info = LAYER_INFO.get(layer, {})
         tables = info.get("tables", [])
         checks = info.get("checks", [])
-        
+
         layer_instructions.append(f"""
 ### {layer} - {info.get('name', layer)}
 - SuzieQ Tables: {', '.join(tables) if tables else 'N/A (limited coverage)'}
 - Checks to perform: {', '.join(checks)}
 """)
-    
+
     # Build known issues section
     known_issues_section = ""
     if known_issues:
@@ -189,7 +187,7 @@ async def inspect_node(state: DeviceInspectorState) -> dict:
 ## Known Issues to Verify
 {chr(10).join(f'- {issue}' for issue in known_issues)}
 """
-    
+
     # System prompt for device inspection
     system_prompt = f"""You are a Device Inspector agent focused on investigating device: **{device}**
 
@@ -226,11 +224,11 @@ OVERALL_STATUS: healthy|degraded|critical
 
 Be thorough but efficient. Focus only on device {device}.
 """
-    
+
     # Create and run ReAct agent
     llm = LLMFactory.get_chat_model()
     react_agent = create_react_agent(llm, tools)
-    
+
     try:
         result = await react_agent.ainvoke({
             "messages": [
@@ -238,17 +236,17 @@ Be thorough but efficient. Focus only on device {device}.
                 HumanMessage(content=f"Inspect device {device} for the following context: {context}"),
             ],
         })
-        
+
         # Extract the final message
         final_messages = result.get("messages", [])
         if final_messages:
             final_content = final_messages[-1].content if hasattr(final_messages[-1], 'content') else str(final_messages[-1])
         else:
             final_content = "No results from inspection."
-        
+
         # Parse findings from response
         layer_findings, layer_confidence, overall_status = parse_inspection_results(final_content)
-        
+
         return {
             "layer_findings": layer_findings,
             "layer_confidence": layer_confidence,
@@ -256,7 +254,7 @@ Be thorough but efficient. Focus only on device {device}.
             "inspection_complete": True,
             "messages": [AIMessage(content=final_content)],
         }
-        
+
     except Exception as e:
         logger.error(f"Device inspection failed for {device}: {e}")
         return {
@@ -272,16 +270,16 @@ def parse_inspection_results(
     content: str,
 ) -> tuple[dict[str, list[str]], dict[str, float], str]:
     """Parse structured results from inspector response.
-    
+
     Returns:
         Tuple of (layer_findings, layer_confidence, overall_status)
     """
     import re
-    
+
     layer_findings: dict[str, list[str]] = {layer: [] for layer in NETWORK_LAYERS}
     layer_confidence: dict[str, float] = {layer: 0.0 for layer in NETWORK_LAYERS}
     overall_status = "unknown"
-    
+
     # Parse LAYER_FINDINGS section
     findings_match = re.search(
         r"LAYER_FINDINGS:\s*\n((?:L[1-4]:.+\n?)+)",
@@ -302,7 +300,7 @@ def parse_inspection_results(
                     if f.strip() and f.strip() not in ("None", "[]", "...")
                 ]
                 layer_findings[layer] = findings
-    
+
     # Parse LAYER_CONFIDENCE section
     confidence_match = re.search(
         r"LAYER_CONFIDENCE:\s*\n((?:L[1-4]:.+\n?)+)",
@@ -320,7 +318,7 @@ def parse_inspection_results(
                     layer_confidence[layer] = min(conf if conf <= 1 else conf / 100, 1.0)
                 except ValueError:
                     pass
-    
+
     # Parse OVERALL_STATUS
     status_match = re.search(
         r"OVERALL_STATUS:\s*(healthy|degraded|critical|unknown)",
@@ -329,7 +327,7 @@ def parse_inspection_results(
     )
     if status_match:
         overall_status = status_match.group(1).lower()
-    
+
     return layer_findings, layer_confidence, overall_status
 
 
@@ -339,20 +337,11 @@ async def summary_node(state: DeviceInspectorState) -> dict:
     layer_findings = state.get("layer_findings", {})
     layer_confidence = state.get("layer_confidence", {})
     overall_status = state.get("overall_status", "unknown")
-    
+
     # Calculate average confidence
     confidences = [c for c in layer_confidence.values() if c > 0]
     avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-    
-    # Create DeviceSummary
-    summary = DeviceSummary(
-        device=device,
-        status=overall_status,
-        layer_findings=layer_findings,
-        confidence=avg_confidence,
-        checked_at=datetime.now(timezone.utc).isoformat(),
-    )
-    
+
     # Generate summary message
     msg = f"""## Device Inspection Summary: {device}
 
@@ -371,7 +360,7 @@ async def summary_node(state: DeviceInspectorState) -> dict:
                 msg += f" (+{len(findings) - 3} more)"
         else:
             msg += f"\n**{layer}** ({conf*100:.0f}%): No issues found"
-    
+
     return {
         "messages": [AIMessage(content=msg)],
     }
@@ -384,22 +373,22 @@ async def summary_node(state: DeviceInspectorState) -> dict:
 
 def create_device_inspector() -> StateGraph:
     """Create the Device Inspector sub-graph.
-    
+
     Returns:
         Compiled StateGraph for device inspection
     """
     # Build graph
     builder = StateGraph(DeviceInspectorState)
-    
+
     # Add nodes
     builder.add_node("inspect", inspect_node)
     builder.add_node("summary", summary_node)
-    
+
     # Define edges
     builder.add_edge(START, "inspect")
     builder.add_edge("inspect", "summary")
     builder.add_edge("summary", END)
-    
+
     return builder.compile()
 
 
@@ -410,28 +399,28 @@ async def inspect_device(
     known_issues: list[str] | None = None,
 ) -> DeviceInspectorOutput:
     """High-level function to inspect a single device.
-    
+
     Args:
         device: Device name to inspect
         context: Investigation context
         layers_to_check: Optional list of layers to focus on
         known_issues: Optional list of known issues to verify
-    
+
     Returns:
         DeviceInspectorOutput with results
     """
     inspector = create_device_inspector()
-    
+
     initial_state = create_initial_state(
         device=device,
         context=context,
         layers_to_check=layers_to_check,
         known_issues=known_issues,
     )
-    
+
     try:
         result = await inspector.ainvoke(initial_state)
-        
+
         # Build DeviceSummary
         summary = DeviceSummary(
             device=device,
@@ -440,11 +429,11 @@ async def inspect_device(
             confidence=sum(result.get("layer_confidence", {}).values()) / 4,
             checked_at=datetime.now(timezone.utc).isoformat(),
         )
-        
+
         # Get raw findings from messages
         messages = result.get("messages", [])
         raw_findings = messages[-1].content if messages else ""
-        
+
         return DeviceInspectorOutput(
             device=device,
             summary=summary.model_dump(),
@@ -452,7 +441,7 @@ async def inspect_device(
             success=True,
             error=None,
         )
-        
+
     except Exception as e:
         logger.error(f"Device inspection failed: {e}")
         return DeviceInspectorOutput(
@@ -485,20 +474,20 @@ async def parallel_inspect_devices(
     layers_to_check: list[str] | None = None,
 ) -> list[DeviceInspectorOutput]:
     """Inspect multiple devices in parallel using asyncio.gather.
-    
+
     This is the async-based parallel inspection.
     For LangGraph Send()-based parallelism, use the graph nodes directly.
-    
+
     Args:
         devices: List of device names
         context: Investigation context
         layers_to_check: Optional layers to focus on
-    
+
     Returns:
         List of DeviceInspectorOutput for each device
     """
     import asyncio
-    
+
     tasks = [
         inspect_device(
             device=device,
@@ -507,9 +496,9 @@ async def parallel_inspect_devices(
         )
         for device in devices
     ]
-    
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     # Convert exceptions to error outputs
     outputs: list[DeviceInspectorOutput] = []
     for device, result in zip(devices, results):
@@ -523,5 +512,5 @@ async def parallel_inspect_devices(
             ))
         else:
             outputs.append(result)
-    
+
     return outputs

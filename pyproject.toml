@@ -30,6 +30,7 @@ dependencies = [
     "pyyaml>=6.0.0",
     "httpx[http2]>=0.27.0",
     "requests>=2.31.0",
+    "ollama>=0.4.0",
     "nornir-netmiko>=1.0.1",
     "nornir-napalm>=0.5.0",
     "napalm>=5.0.0",

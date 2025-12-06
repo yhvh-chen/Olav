@@ -1,6 +1,6 @@
 """SuzieQ Analyzer Tools - High-level analysis using SuzieQ capabilities.
 
-This module provides advanced analysis tools that leverage SuzieQ's 
+This module provides advanced analysis tools that leverage SuzieQ's
 path.show(), aver (assertions), and topology.summarize() methods.
 
 Tools:
@@ -8,8 +8,8 @@ Tools:
 - suzieq_health_check: Device health assertions using aver()
 - suzieq_topology_analyze: Topology analysis and anomaly detection
 
-These tools are designed for the "Quick Analyzer" phase of the 
-Supervisor-Inspector pattern, providing fast initial analysis 
+These tools are designed for the "Quick Analyzer" phase of the
+Supervisor-Inspector pattern, providing fast initial analysis
 before detailed device inspection.
 
 Note: SuzieQ data is historical (collected periodically), so confidence

@@ -70,7 +70,7 @@ class OpenSearchMemory:
             user: User who triggered action
         """
         import json
-        
+
         # Normalize result.output to string to avoid mapping conflicts
         # (OpenSearch may have mapped output as object from parsed data)
         normalized_result = result.copy() if isinstance(result, dict) else {"raw": str(result)}
@@ -79,7 +79,7 @@ class OpenSearchMemory:
             if not isinstance(output, str):
                 # Convert list/dict output to JSON string
                 normalized_result["output"] = json.dumps(output, ensure_ascii=False, default=str)
-        
+
         doc = {
             "action": action,
             "command": command,

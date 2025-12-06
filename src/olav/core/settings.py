@@ -32,13 +32,13 @@ class EnvSettings(BaseSettings):
     )
 
     # ============================================
-    # LLM API Keys
+    # LLM Configuration
     # ============================================
-    # Defaults sourced from config/settings.py LLMConfig for consistency
-    llm_provider: Literal["openai", "ollama", "azure"] = "openai"
+    # Defaults: Ollama local (override via .env for Docker)
+    llm_provider: Literal["openai", "ollama", "azure"] = "ollama"
     llm_api_key: str = ""
-    llm_base_url: str = "https://openrouter.ai/api/v1"  # OpenRouter by default
-    llm_model_name: str = "x-ai/grok-4.1-fast:free"  # Grok 4.1 Fast (free) via OpenRouter
+    llm_base_url: str = "http://127.0.0.1:11434"  # Ollama local (Docker uses host.docker.internal)
+    llm_model_name: str = "qwen3:30b"  # Ollama model
 
     # ============================================
     # Embedding Model Configuration
@@ -94,14 +94,14 @@ class EnvSettings(BaseSettings):
     # ============================================
     server_host: str = "0.0.0.0"
     server_port: int = 8000
-    
+
     # CORS Configuration (for WebGUI)
     # Comma-separated list of allowed origins, or "*" for all (dev only)
     cors_origins: str = "*"  # e.g., "http://localhost:3000,https://olav.company.com"
     cors_allow_credentials: bool = True
     cors_allow_methods: str = "*"  # e.g., "GET,POST,PUT,DELETE"
     cors_allow_headers: str = "*"
-    
+
     # API Rate Limiting (requests per minute per user)
     api_rate_limit_rpm: int = 60
     api_rate_limit_enabled: bool = False  # Enable in production
@@ -113,7 +113,7 @@ class EnvSettings(BaseSettings):
     token_max_age_hours: int = 24  # Token valid for 24 hours
     # Disable authentication (for testing/development only!)
     auth_disabled: bool = False
-    
+
     # WebSocket Configuration (for real-time streaming)
     websocket_heartbeat_interval: int = 30  # seconds
     websocket_max_connections: int = 100

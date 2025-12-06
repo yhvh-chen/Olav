@@ -125,9 +125,9 @@ class DeviceExecutionWorkflow(BaseWorkflow):
             "netbox",
         ]
         if any(kw in query_lower for kw in netbox_keywords):
-            return False, "NetBox 管理请求，应使用 netbox_management workflow"
+            return False, "NetBox management request, should use netbox_management workflow"
 
-        # 配置变更关键词（更全面）
+        # Config change keywords (more comprehensive)
         change_keywords = [
             "修改",
             "配置",
@@ -153,9 +153,9 @@ class DeviceExecutionWorkflow(BaseWorkflow):
         ]
 
         if any(kw in query_lower for kw in change_keywords):
-            return True, "匹配设备配置变更场景"
+            return True, "Matches device configuration change scenario"
 
-        return False, "非配置变更请求"
+        return False, "Not a config change request"
 
     def build_graph(self, checkpointer: BaseCheckpointSaver) -> StateGraph:
         """Build device execution workflow graph with proper tool loops."""

@@ -290,13 +290,13 @@ class OLAVClient:
 
     def set_query_mode(self, mode: str) -> None:
         """Set the query mode for local execution.
-        
+
         User can switch modes in TUI. Workflows are strictly separated:
         - Standard: fast_path strategy (single tool call)
         - Expert: SupervisorDrivenWorkflow (L1-L4 layer analysis)
-        
+
         No automatic escalation between modes - user controls which mode to use.
-        
+
         Args:
             mode: Query mode - "standard" or "expert"
         """

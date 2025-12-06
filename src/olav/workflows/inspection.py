@@ -274,7 +274,7 @@ class InspectionWorkflow(BaseWorkflow):
             return {
                 "diff_report": None,
                 "messages": state["messages"]
-                + [AIMessage(content="⚠️ 未找到设备，无法执行巡检。请检查 NetBox 设备清单。")],
+                + [AIMessage(content="⚠️ No devices found, cannot perform inspection. Please check NetBox device inventory.")],
             }
 
         # Convert string back to EntityType

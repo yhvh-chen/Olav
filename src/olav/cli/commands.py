@@ -15,10 +15,14 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from typing import Annotated
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from olav.cli.thin_client import ClientConfig
 
 # Windows async compatibility
 if sys.platform == "win32":
@@ -35,6 +39,51 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+# ============================================
+# Helper: Load .env file
+# ============================================
+def _load_env_file() -> dict[str, str]:
+    """Load .env file from current directory and return as dict."""
+    env_path = Path.cwd() / ".env"
+    env_vars: dict[str, str] = {}
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    env_vars[key.strip()] = value.strip()
+    return env_vars
+
+
+def _get_config_from_env(server_url: str | None = None) -> tuple["ClientConfig", str | None]:
+    """Get ClientConfig and auth_token from .env file.
+
+    Args:
+        server_url: Optional server URL override from CLI
+
+    Returns:
+        Tuple of (ClientConfig, auth_token)
+    """
+    import os
+    from olav.cli.thin_client import ClientConfig
+
+    env_vars = _load_env_file()
+
+    # Get server URL: CLI arg > env var > .env file > default
+    if not server_url:
+        server_url = os.getenv("OLAV_SERVER_URL") or env_vars.get("OLAV_SERVER_URL")
+
+    config = ClientConfig.from_file()
+    if server_url:
+        config.server_url = server_url
+
+    # Get auth token
+    auth_token = os.getenv("OLAV_API_TOKEN") or env_vars.get("OLAV_API_TOKEN")
+
+    return config, auth_token
 
 
 # ============================================
@@ -91,11 +140,11 @@ InitOption = Annotated[
     ),
 ]
 
-InitFullOption = Annotated[
+InitNetBoxOption = Annotated[
     bool,
     typer.Option(
-        "--full",
-        help="Full initialization including NetBox inventory import (use with --init)",
+        "--init-netbox",
+        help="Initialize NetBox connectivity and import inventory",
     ),
 ]
 
@@ -110,92 +159,135 @@ InitStatusOption = Annotated[
 
 def _resolve_mode(standard: bool, expert: bool) -> str:
     """Resolve mode from mutually exclusive flags.
-    
+
     Args:
         standard: -S/--standard flag
         expert: -E/--expert flag
-        
+
     Returns:
         Mode string: "standard" or "expert"
-        
+
     Raises:
         typer.BadParameter: If both flags are set
     """
     if standard and expert:
         raise typer.BadParameter("Cannot use both --standard and --expert. Choose one.")
-    
+
     if expert:
         return "expert"
-    
+
     # Default to standard
     return "standard"
 
 
 # ============================================
-# Interactive REPL (Default Command)
+# CLI Query Argument - NOTE: Cannot use Annotated for variadic args
 # ============================================
+
+StatusOption = Annotated[
+    bool,
+    typer.Option(
+        "--status",
+        help="Show system status (server health, devices, tables)",
+    ),
+]
+
+CliOption = Annotated[
+    bool,
+    typer.Option(
+        "--cli",
+        help="Single-shot CLI mode: execute query and exit (requires query argument)",
+    ),
+]
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    query: Annotated[list[str] | None, typer.Argument(help="Query words (multiple words OK)")] = None,
     server: ServerOption = None,
     standard: StandardModeOption = False,
     expert: ExpertModeOption = False,
     verbose: VerboseOption = False,
     init: InitOption = False,
-    init_full: InitFullOption = False,
+    init_netbox: InitNetBoxOption = False,
     init_status: InitStatusOption = False,
+    cli: CliOption = False,
+    status: StatusOption = False,
 ) -> None:
-    """Start interactive REPL session (default if no command given)."""
+    """Start full-screen TUI dashboard (default if no command given)."""
     # Configure LangSmith tracing if enabled
-    from olav.core.llm import configure_langsmith, is_langsmith_enabled
+    from olav.core.llm import configure_langsmith
     if configure_langsmith():
         console.print("[dim]🔍 LangSmith tracing enabled[/dim]")
-    
-    # Handle --init flags
-    if init or init_full or init_status:
-        _run_init(status_only=init_status, full=init_full)
+
+    # Handle --status flag
+    if status:
+        asyncio.run(_show_status(server))
         raise typer.Exit()
-    
+
+    # Handle --init flags
+    if init or init_status:
+        _run_init(status_only=init_status)
+        raise typer.Exit()
+
+    # Handle --init-netbox separately (NetBox only, no full init)
+    if init_netbox:
+        _run_init_netbox()
+        raise typer.Exit()
+
     if ctx.invoked_subcommand is None:
         # Resolve mode from flags
         mode = _resolve_mode(standard, expert)
-        # No subcommand = interactive mode
-        asyncio.run(_interactive_session(server, mode, verbose))
+
+        # Join query words into a single string
+        query_text = " ".join(query) if query else None
+
+        if cli:
+            # --cli flag: single-shot execution, requires query
+            if not query_text:
+                console.print("[red]Error: --cli requires a query argument[/red]")
+                console.print("[dim]Usage: uv run olav --cli 查询 BGP 状态[/dim]")
+                raise typer.Exit(code=1)
+            # Use existing _single_query (text, server_url, mode, verbose, json_output)
+            asyncio.run(_single_query(query_text, server, mode, verbose, False))
+        elif query_text:
+            # Query provided without --cli: also run single-shot
+            asyncio.run(_single_query(query_text, server, mode, verbose, False))
+        else:
+            # Default: launch full-screen TUI dashboard
+            asyncio.run(_run_dashboard(server, mode, verbose))
 
 
-def _run_init(status_only: bool = False, full: bool = False) -> None:
-    """Run infrastructure initialization.
-    
+def _run_init(status_only: bool = False) -> None:
+    """Run infrastructure initialization (PostgreSQL + OpenSearch indexes).
+
     Args:
         status_only: Only show index status, don't initialize
-        full: Full initialization including NetBox inventory import
     """
-    import subprocess
     from rich.panel import Panel
-    
+
     console.print()
     console.print(Panel.fit(
         "[bold cyan]OLAV Infrastructure Initialization[/bold cyan]",
         border_style="blue",
     ))
     console.print()
-    
+
     if status_only:
         console.print("[dim]Checking index status...[/dim]")
         console.print()
     else:
-        if full:
-            console.print("[cyan]📦 Full mode: including NetBox inventory import[/cyan]")
         console.print()
-    
+
     # Step 1: Run init_all for PostgreSQL + Schema indexes
     import sys as _sys
     original_argv = _sys.argv.copy()
     _sys.argv = ["olav.etl.init_all", "--force"]  # Always force refresh
-    
+
     if status_only:
         _sys.argv = ["olav.etl.init_all", "--status"]
-    
+
     try:
         from olav.etl.init_all import main as init_main
         init_main()
@@ -206,74 +298,80 @@ def _run_init(status_only: bool = False, full: bool = False) -> None:
             raise typer.Exit(code=1)
     finally:
         _sys.argv = original_argv
-    
-    # If status only, we're done
-    if status_only:
-        return
-    
-    # Step 2: Full mode - NetBox inventory import + docs + configs
-    if full:
-        console.print()
-        console.print("[bold]📋 Running full initialization steps...[/bold]")
-        console.print()
-        
-        # 2a. Check NetBox connectivity
-        console.print("[dim]Checking NetBox connectivity...[/dim]")
-        try:
-            result = subprocess.run(
-                ["uv", "run", "python", "scripts/check_netbox.py", "--autocreate"],
-                capture_output=True,
-                text=True,
-                cwd=str(_get_project_root()),
-            )
-            if result.returncode != 0:
-                console.print(f"[red]❌ NetBox connectivity check failed[/red]")
-                console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
-                raise typer.Exit(code=1)
-            console.print("[green]  ✓ NetBox connectivity OK[/green]")
-        except FileNotFoundError:
-            console.print("[yellow]  ⚠ NetBox check script not found, skipping[/yellow]")
-        
-        # 2b. Import inventory to NetBox
-        console.print("[dim]Importing inventory to NetBox...[/dim]")
-        try:
-            result = subprocess.run(
-                ["uv", "run", "python", "scripts/netbox_ingest.py"],
-                capture_output=True,
-                text=True,
-                cwd=str(_get_project_root()),
-            )
-            if result.returncode == 0:
-                console.print("[green]  ✓ NetBox inventory imported[/green]")
-            elif result.returncode == 99:
-                console.print("[dim]  ✓ NetBox already has devices, skipped[/dim]")
-            else:
-                console.print(f"[red]❌ NetBox inventory import failed[/red]")
-                console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
-                raise typer.Exit(code=1)
-        except FileNotFoundError:
-            console.print("[yellow]  ⚠ NetBox ingest script not found, skipping[/yellow]")
-        
-        # 2c. Initialize document RAG index
-        console.print("[dim]Initializing document RAG index...[/dim]")
-        try:
-            from olav.etl.init_docs import main as init_docs_main
-            init_docs_main()
-            console.print("[green]  ✓ Document RAG index ready[/green]")
-        except Exception as e:
-            console.print(f"[yellow]  ⚠ Document index init failed: {e}[/yellow]")
-        
-        # 2d. Generate device configs
-        console.print("[dim]Generating device configs...[/dim]")
-        try:
-            from olav.etl.generate_configs import main as generate_configs_main
-            generate_configs_main()
-            console.print("[green]  ✓ Device configs generated[/green]")
-        except Exception as e:
-            console.print(f"[yellow]  ⚠ Config generation failed: {e}[/yellow]")
-    
+
     console.print()
     console.print("[green]✅ Initialization complete[/green]")
+
+
+def _run_init_netbox() -> None:
+    """Run NetBox-specific initialization (connectivity check + inventory import)."""
+    import subprocess
+    from rich.panel import Panel
+
+    console.print()
+    console.print(Panel.fit(
+        "[bold cyan]OLAV NetBox Initialization[/bold cyan]",
+        border_style="blue",
+    ))
+    console.print()
+
+    # 1. Check NetBox connectivity
+    console.print("[dim]Checking NetBox connectivity...[/dim]")
+    try:
+        result = subprocess.run(
+            ["uv", "run", "python", "scripts/check_netbox.py", "--autocreate"],
+            capture_output=True,
+            text=True,
+            cwd=str(_get_project_root()),
+        )
+        if result.returncode != 0:
+            console.print("[red]❌ NetBox connectivity check failed[/red]")
+            console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
+            raise typer.Exit(code=1)
+        console.print("[green]  ✓ NetBox connectivity OK[/green]")
+    except FileNotFoundError:
+        console.print("[yellow]  ⚠ NetBox check script not found, skipping[/yellow]")
+
+    # 2. Import inventory to NetBox
+    console.print("[dim]Importing inventory to NetBox...[/dim]")
+    try:
+        result = subprocess.run(
+            ["uv", "run", "python", "scripts/netbox_ingest.py"],
+            capture_output=True,
+            text=True,
+            cwd=str(_get_project_root()),
+        )
+        if result.returncode == 0:
+            console.print("[green]  ✓ NetBox inventory imported[/green]")
+        elif result.returncode == 99:
+            console.print("[dim]  ✓ NetBox already has devices, skipped[/dim]")
+        else:
+            console.print("[red]❌ NetBox inventory import failed[/red]")
+            console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
+            raise typer.Exit(code=1)
+    except FileNotFoundError:
+        console.print("[yellow]  ⚠ NetBox ingest script not found, skipping[/yellow]")
+
+    # 3. Initialize document RAG index
+    console.print("[dim]Initializing document RAG index...[/dim]")
+    try:
+        from olav.etl.init_docs import main as init_docs_main
+        init_docs_main()
+        console.print("[green]  ✓ Document RAG index ready[/green]")
+    except Exception as e:
+        console.print(f"[yellow]  ⚠ Document index init failed: {e}[/yellow]")
+
+    # 4. Generate device configs
+    console.print("[dim]Generating device configs...[/dim]")
+    try:
+        from olav.etl.generate_configs import main as generate_configs_main
+        generate_configs_main()
+        console.print("[green]  ✓ Device configs generated[/green]")
+    except Exception as e:
+        console.print(f"[yellow]  ⚠ Config generation failed: {e}[/yellow]")
+
+    console.print()
+    console.print("[green]✅ NetBox initialization complete[/green]")
 
 
 def _get_project_root():
@@ -285,6 +383,100 @@ def _get_project_root():
         if (parent / "pyproject.toml").exists():
             return parent
     return Path.cwd()
+
+
+async def _run_dashboard(
+    server_url: str | None,
+    mode: str,
+    verbose: bool,
+) -> None:
+    """Run full-screen TUI dashboard.
+
+    Args:
+        server_url: Optional API server URL override
+        mode: "standard" or "expert"
+        verbose: Show verbose output
+    """
+    from olav.cli.display import Dashboard
+    from olav.cli.thin_client import OlavThinClient
+
+    config, auth_token = _get_config_from_env(server_url)
+
+    async with OlavThinClient(config, auth_token=auth_token) as client:
+        dash = Dashboard(client, console, mode=mode)
+        try:
+            await dash.run()
+        except KeyboardInterrupt:
+            dash.stop()
+            console.print("\n[yellow]Dashboard closed.[/yellow]")
+
+
+async def _show_status(server_url: str | None) -> None:
+    """Show system status information.
+
+    Args:
+        server_url: Optional API server URL override
+    """
+    from rich.panel import Panel
+
+    from olav.cli.thin_client import OlavThinClient
+
+    config, auth_token = _get_config_from_env(server_url)
+
+    console.print()
+    console.print(Panel.fit(
+        "[bold cyan]OLAV System Status[/bold cyan]",
+        border_style="cyan",
+    ))
+    console.print()
+
+    async with OlavThinClient(config, auth_token=auth_token) as client:
+        # Server health
+        console.print("[bold]📊 Server Status[/bold]")
+        try:
+            health = await client.health()
+            status_icon = "🟢" if health.status == "healthy" else "🔴"
+            console.print(f"  Status:       {status_icon} {health.status}")
+            console.print(f"  Version:      {health.version}")
+            console.print(f"  Environment:  {health.environment}")
+            orchestrator = "✅ Ready" if health.orchestrator_ready else "❌ Not ready"
+            console.print(f"  Orchestrator: {orchestrator}")
+        except Exception as e:
+            console.print(f"  [red]❌ Cannot connect to server: {e}[/red]")
+            return
+
+        console.print()
+
+        # Devices
+        console.print("[bold]📡 Devices[/bold]")
+        try:
+            devices = await client.get_device_names()
+            console.print(f"  Total: {len(devices)} devices")
+            if devices and len(devices) <= 10:
+                for device in devices:
+                    console.print(f"    • {device}")
+            elif devices:
+                for device in devices[:5]:
+                    console.print(f"    • {device}")
+                console.print(f"    ... and {len(devices) - 5} more")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Cannot fetch devices: {e}[/yellow]")
+
+        console.print()
+
+        # SuzieQ tables
+        console.print("[bold]📊 SuzieQ Tables[/bold]")
+        try:
+            tables = await client.get_suzieq_tables()
+            console.print(f"  Total: {len(tables)} tables")
+            if tables and len(tables) <= 10:
+                console.print(f"  Tables: {', '.join(tables)}")
+            elif tables:
+                console.print(f"  Tables: {', '.join(tables[:10])}, ...")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Cannot fetch tables: {e}[/yellow]")
+
+    console.print()
 
 
 async def _interactive_session(
@@ -300,15 +492,15 @@ async def _interactive_session(
         OlavThinClient,
         StreamEventType,
     )
-    
+
     # Setup
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     renderer = ResultRenderer(console)
     hitl_panel = HITLPanel(console)
-    
+
     # Show banner
     console.print()
     console.print("[bold blue]╔═══════════════════════════════════════════════════════════╗[/bold blue]")
@@ -317,9 +509,9 @@ async def _interactive_session(
     console.print()
     console.print(f"[dim]Server: {config.server_url}[/dim]")
     console.print(f"[dim]Mode: {mode}[/dim]")
-    console.print(f"[dim]Type /help for commands, Ctrl+R for history search[/dim]")
+    console.print("[dim]Type /help for commands, Ctrl+R for history search[/dim]")
     console.print()
-    
+
     async with OlavThinClient(config) as client:
         # Check server health
         try:
@@ -330,35 +522,35 @@ async def _interactive_session(
             console.print(f"[red]❌ Cannot connect to server: {e}[/red]")
             console.print("[dim]💡 Start server: docker-compose up -d olav-server[/dim]")
             return
-        
+
         # Create REPL session with prompt_toolkit
         async with REPLSession(client, console, mode) as repl:
             pending_hitl = None
-            
+
             while True:
                 try:
                     # Get input with prompt_toolkit
                     user_input = await repl.prompt(hitl_pending=bool(pending_hitl))
-                    
+
                     if user_input is None:
                         # Ctrl+C or Ctrl+D
                         console.print("\n[yellow]Goodbye! 👋[/yellow]")
                         break
-                    
+
                     if not user_input:
                         continue
-                    
+
                     # Handle slash commands
                     if user_input.startswith("/"):
                         should_exit = handle_slash_command(repl, user_input)
                         if should_exit:
                             break
                         continue
-                    
+
                     # Handle HITL response
                     if pending_hitl:
                         from olav.cli.thin_client import HITLRequest
-                        
+
                         # Parse user decision
                         if user_input.lower() in ("y", "yes", "approve"):
                             decision = "Y"
@@ -366,13 +558,13 @@ async def _interactive_session(
                             decision = "N"
                         else:
                             decision = user_input
-                        
+
                         result = await client.resume(
                             thread_id=repl.thread_id,
                             decision=decision,
                             workflow_type=pending_hitl["workflow_type"],
                         )
-                        
+
                         if result.interrupted:
                             # Still interrupted (plan modified, needs re-approval)
                             console.print("[yellow]⏸️ 计划已修改，需要重新审批[/yellow]")
@@ -398,53 +590,63 @@ async def _interactive_session(
                             pending_hitl = None
                             if result.content:
                                 renderer.render_message(result.content)
-                        
+
                         continue
-                    
+
                     # Normal query execution with streaming
                     console.print()
-                    
+
                     with ThinkingTree(console) as tree:
                         content_buffer = ""
-                        
+                        thinking_started = False
+
                         async for event in client.chat_stream(user_input, repl.thread_id, repl.mode):
                             event_type = event.type
                             data = event.data
-                            
+
                             if event_type == StreamEventType.THINKING:
                                 thinking = data.get("thinking", {})
                                 tree.add_thinking(thinking.get("content", ""))
-                            
+                                thinking_started = True
+
                             elif event_type == StreamEventType.TOOL_START:
+                                # Finalize thinking before tool calls
+                                if thinking_started:
+                                    tree.finalize_thinking()
+                                    thinking_started = False
                                 tool_info = data.get("tool", {})
                                 tree.add_tool_call(
                                     tool_info.get("display_name") or tool_info.get("name", "unknown"),
                                     tool_info.get("args", {}),
                                 )
-                            
+
                             elif event_type == StreamEventType.TOOL_END:
                                 tool_info = data.get("tool", {})
                                 tree.mark_tool_complete(
                                     tool_info.get("name", "unknown"),
                                     success=tool_info.get("success", True),
                                 )
-                            
+
                             elif event_type == StreamEventType.TOKEN:
+                                # Finalize thinking before tokens (response started)
+                                if thinking_started:
+                                    tree.finalize_thinking()
+                                    thinking_started = False
                                 content_buffer += data.get("content", "")
-                            
+
                             elif event_type == StreamEventType.MESSAGE:
                                 content_buffer = data.get("content", content_buffer)
-                            
+
                             elif event_type == StreamEventType.INTERRUPT:
                                 # HITL interrupt
                                 from olav.cli.thin_client import HITLRequest
-                                
+
                                 pending_hitl = {
                                     "workflow_type": data.get("workflow_type"),
                                     "execution_plan": data.get("execution_plan"),
                                     "todos": data.get("todos"),
                                 }
-                                
+
                                 hitl_panel.display(
                                     HITLRequest(
                                         plan_id=data.get("plan_id", ""),
@@ -461,18 +663,18 @@ async def _interactive_session(
                                 console.print()
                                 console.print("[yellow]⚠️ 需要您的批准 (Y/N/修改内容):[/yellow]")
                                 break
-                            
+
                             elif event_type == StreamEventType.ERROR:
                                 error_info = data.get("error", {})
                                 error_msg = error_info.get("message") if isinstance(error_info, dict) else str(error_info)
                                 renderer.render_error(error_msg or "Unknown error")
                                 break
-                    
+
                     # Display final response if not interrupted
                     if not pending_hitl and content_buffer:
                         renderer.render_message(content_buffer)
                         console.print()
-                
+
                 except KeyboardInterrupt:
                     console.print("\n[dim]Use /exit to quit or Ctrl+D[/dim]")
                     continue
@@ -504,35 +706,39 @@ async def _single_query(
 ) -> None:
     """Execute single query."""
     from olav.cli.display import ResultRenderer, ThinkingTree
-    from olav.cli.thin_client import ClientConfig, OlavThinClient, StreamEventType
-    
-    config = ClientConfig.from_file()
-    if server_url:
-        config.server_url = server_url
-    
+    from olav.cli.thin_client import OlavThinClient, StreamEventType
+
+    config, auth_token = _get_config_from_env(server_url)
+
     renderer = ResultRenderer(console)
     thread_id = f"cli-single-{int(time.time())}"
-    
-    async with OlavThinClient(config) as client:
+
+    async with OlavThinClient(config, auth_token=auth_token) as client:
         if not json_output:
             console.print(f"[bold green]You[/bold green]: {text}")
             console.print()
-        
+
         content_buffer = ""
         tool_calls = []
-        
+        thinking_started = False
+
         with ThinkingTree(console) as tree:
             async for event in client.chat_stream(text, thread_id, mode):
                 # Server sends event with type in data.type
                 event_type = event.type
                 data = event.data
-                
+
                 if event_type == StreamEventType.THINKING:
                     # Thinking event: {"type": "thinking", "thinking": {"step": "...", "content": "..."}}
                     thinking = data.get("thinking", {})
                     tree.add_thinking(thinking.get("content", ""))
-                
+                    thinking_started = True
+
                 elif event_type == StreamEventType.TOOL_START:
+                    # Finalize thinking before tool calls
+                    if thinking_started:
+                        tree.finalize_thinking()
+                        thinking_started = False
                     # Tool start: {"type": "tool_start", "tool": {"id": "...", "name": "...", "display_name": "...", "args": {...}}}
                     tool_info = data.get("tool", {})
                     tree.add_tool_call(
@@ -540,7 +746,7 @@ async def _single_query(
                         tool_info.get("args", {}),
                     )
                     tool_calls.append(tool_info)
-                
+
                 elif event_type == StreamEventType.TOOL_END:
                     # Tool end: {"type": "tool_end", "tool": {"id": "...", "name": "...", "duration_ms": 123, "success": true}}
                     tool_info = data.get("tool", {})
@@ -548,20 +754,24 @@ async def _single_query(
                         tool_info.get("name", "unknown"),
                         success=tool_info.get("success", True),
                     )
-                
+
                 elif event_type == StreamEventType.TOKEN:
+                    # Finalize thinking before tokens (response started)
+                    if thinking_started:
+                        tree.finalize_thinking()
+                        thinking_started = False
                     # Token: {"type": "token", "content": "..."}
                     content_buffer += data.get("content", "")
-                
+
                 elif event_type == StreamEventType.MESSAGE:
                     content_buffer = data.get("content", content_buffer)
-                
+
                 elif event_type == StreamEventType.INTERRUPT:
                     # HITL interrupt: {"type": "interrupt", "execution_plan": {...}}
                     # TODO: Handle HITL in a separate function
                     console.print("[yellow]⚠️ 需要人工审批...[/yellow]")
                     break
-                
+
                 elif event_type == StreamEventType.ERROR:
                     error_info = data.get("error", {})
                     error_msg = error_info.get("message") if isinstance(error_info, dict) else str(error_info)
@@ -571,7 +781,7 @@ async def _single_query(
                     else:
                         renderer.render_error(error_msg or "Unknown error")
                     raise typer.Exit(1)
-        
+
         if json_output:
             import json
             print(json.dumps({
@@ -601,15 +811,15 @@ def inspect_list(
 async def _inspect_list(server_url: str | None, json_output: bool) -> None:
     """List inspection profiles."""
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     async with OlavThinClient(config) as client:
         try:
             profiles = await client.list_inspection_profiles()
-            
+
             if json_output:
                 import json
                 print(json.dumps(profiles, indent=2))
@@ -622,7 +832,7 @@ async def _inspect_list(server_url: str | None, json_output: bool) -> None:
                     console.print(f"  [cyan]{name}[/cyan]")
                     if desc:
                         console.print(f"    {desc}")
-        
+
         except Exception as e:
             console.print(f"[red]Failed to list profiles: {e}[/red]")
             raise typer.Exit(1)
@@ -648,18 +858,18 @@ async def _inspect_run(
     """Run inspection."""
     from olav.cli.display import InspectionProgress
     from olav.cli.thin_client import ClientConfig, OlavThinClient, StreamEventType
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     console.print(f"[bold]Running Inspection: {profile}[/bold]")
     console.print(f"[dim]Scope: {scope}[/dim]")
     console.print()
-    
+
     async with OlavThinClient(config) as client:
         results = {"passed": 0, "failed": 0, "warnings": 0}
-        
+
         with InspectionProgress(console) as progress:
             async for event in client.run_inspection(profile, scope):
                 if event.type == StreamEventType.THINKING:
@@ -669,7 +879,7 @@ async def _inspect_run(
                         progress.add_overall(data["total"], "总进度")
                     if "device" in data:
                         progress.add_device(data["device"], data.get("checks", 1))
-                
+
                 elif event.type == StreamEventType.TOOL_RESULT:
                     # Check result
                     status = event.data.get("status", "unknown")
@@ -680,11 +890,11 @@ async def _inspect_run(
                     else:
                         results["warnings"] += 1
                     progress.update_overall()
-                
+
                 elif event.type == StreamEventType.MESSAGE:
                     # Device complete
                     progress.complete_device()
-        
+
         # Summary
         console.print()
         console.print("[bold]Inspection Complete[/bold]")
@@ -712,15 +922,15 @@ def doc_list(
 async def _doc_list(server_url: str | None, json_output: bool) -> None:
     """List documents."""
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     async with OlavThinClient(config) as client:
         try:
             docs = await client.list_documents()
-            
+
             if json_output:
                 import json
                 print(json.dumps(docs, indent=2))
@@ -731,7 +941,7 @@ async def _doc_list(server_url: str | None, json_output: bool) -> None:
                     name = d.get("name", "unknown")
                     size = d.get("size", 0)
                     console.print(f"  📄 {name} ({size} bytes)")
-        
+
         except Exception as e:
             console.print(f"[red]Failed to list documents: {e}[/red]")
             raise typer.Exit(1)
@@ -755,26 +965,23 @@ async def _doc_search(
     json_output: bool,
 ) -> None:
     """Search documents."""
-    from olav.cli.display import ResultRenderer
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
-    renderer = ResultRenderer(console)
-    
+
     async with OlavThinClient(config) as client:
         try:
             results = await client.search_documents(query, limit)
-            
+
             if json_output:
                 import json
                 print(json.dumps(results, indent=2))
             else:
                 console.print(f"[bold]Search Results for: {query}[/bold]")
                 console.print()
-                
+
                 if not results:
                     console.print("[dim]No results found[/dim]")
                 else:
@@ -782,11 +989,11 @@ async def _doc_search(
                         score = r.get("score", 0)
                         content = r.get("content", "")[:200]
                         source = r.get("source", "unknown")
-                        
+
                         console.print(f"[cyan]{i}. {source}[/cyan] (score: {score:.2f})")
                         console.print(f"   {content}...")
                         console.print()
-        
+
         except Exception as e:
             console.print(f"[red]Search failed: {e}[/red]")
             raise typer.Exit(1)
@@ -804,7 +1011,7 @@ def doc_upload(
 async def _doc_upload(file_path: str, server_url: str | None) -> None:
     """Upload document with progress bar."""
     from pathlib import Path
-    
+
     from rich.progress import (
         BarColumn,
         DownloadColumn,
@@ -815,20 +1022,20 @@ async def _doc_upload(file_path: str, server_url: str | None) -> None:
         TimeRemainingColumn,
         TransferSpeedColumn,
     )
-    
+
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     path = Path(file_path)
     if not path.exists():
         console.print(f"[red]File not found: {file_path}[/red]")
         raise typer.Exit(1)
-    
+
     file_size = path.stat().st_size
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     async with OlavThinClient(config) as client:
         try:
             # Use rich progress bar for file upload
@@ -846,24 +1053,24 @@ async def _doc_upload(file_path: str, server_url: str | None) -> None:
                     f"Uploading {path.name}",
                     total=file_size,
                 )
-                
+
                 # Progress callback
                 def on_progress(bytes_sent: int):
                     progress.update(upload_task, completed=bytes_sent)
-                
+
                 result = await client.upload_document(path, on_progress=on_progress)
-                
+
                 # Mark complete
                 progress.update(upload_task, completed=file_size)
-            
+
             console.print()
             console.print(f"[green]✅ Uploaded: {path.name}[/green]")
             console.print(f"[dim]Document ID: {result.get('id', 'unknown')}[/dim]")
-            
+
             # Show indexing status if available
             if result.get("indexed"):
                 console.print(f"[dim]Chunks indexed: {result.get('chunks', 'N/A')}[/dim]")
-        
+
         except Exception as e:
             console.print(f"[red]Upload failed: {e}[/red]")
             raise typer.Exit(1)
@@ -889,15 +1096,15 @@ def session_list(
 async def _session_list(limit: int, server_url: str | None, json_output: bool) -> None:
     """List sessions."""
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     config = ClientConfig.from_file()
     if server_url:
         config.server_url = server_url
-    
+
     async with OlavThinClient(config) as client:
         try:
             sessions = await client.list_sessions(limit)
-            
+
             if json_output:
                 import json
                 print(json.dumps(sessions, indent=2))
@@ -912,7 +1119,7 @@ async def _session_list(limit: int, server_url: str | None, json_output: bool) -
                     console.print(f"    {preview}...")
                     console.print(f"    [dim]{updated}[/dim]")
                     console.print()
-        
+
         except Exception as e:
             console.print(f"[red]Failed to list sessions: {e}[/red]")
             raise typer.Exit(1)
@@ -928,9 +1135,9 @@ def config(
 ) -> None:
     """Manage CLI configuration."""
     from pathlib import Path
-    
+
     config_path = Path.home() / ".olav" / "config.toml"
-    
+
     if show or (not set_server):
         # Show config
         if config_path.exists():
@@ -941,43 +1148,43 @@ def config(
         else:
             console.print("[dim]No config file found. Using defaults.[/dim]")
             console.print(f"[dim]Config path: {config_path}[/dim]")
-    
+
     if set_server:
         # Update server URL
         import tomllib
-        
+
         config_path.parent.mkdir(exist_ok=True)
-        
+
         # Load existing or create new
         if config_path.exists():
             with open(config_path, "rb") as f:
                 data = tomllib.load(f)
         else:
             data = {}
-        
+
         # Update
         if "server" not in data:
             data["server"] = {}
         data["server"]["url"] = set_server
-        
+
         # Write back (simple format since tomllib is read-only)
         with open(config_path, "w") as f:
             f.write("[server]\n")
             f.write(f'url = "{set_server}"\n')
             if "timeout" in data.get("server", {}):
                 f.write(f'timeout = {data["server"]["timeout"]}\n')
-        
+
         console.print(f"[green]✅ Server URL set to: {set_server}[/green]")
 
 
 # ============================================
-# Version Command  
+# Version Command
 # ============================================
 @app.command()
 def version() -> None:
     """Show version information."""
     from olav import __version__
-    
+
     console.print(f"[bold]OLAV v{__version__}[/bold]")
     console.print("Enterprise Network Operations ChatOps Platform")
 
@@ -988,20 +1195,20 @@ def version() -> None:
 @app.command()
 def dashboard() -> None:
     """Launch full-screen TUI dashboard.
-    
+
     Interactive dashboard with:
     - Real-time system status
     - Device overview
     - Activity log
     - Colorful OLAV branding
-    
+
     Press 'q' to exit, '/' to enter query mode.
     """
     import asyncio
-    
-    from olav.cli.display import Dashboard, show_welcome_banner
+
+    from olav.cli.display import Dashboard
     from olav.cli.thin_client import ClientConfig, OlavThinClient
-    
+
     async def run_dashboard():
         config = ClientConfig.from_file()
         async with OlavThinClient(config) as client:
@@ -1011,7 +1218,7 @@ def dashboard() -> None:
             except KeyboardInterrupt:
                 dash.stop()
                 console.print("\n[yellow]Dashboard closed.[/yellow]")
-    
+
     try:
         asyncio.run(run_dashboard())
     except KeyboardInterrupt:
@@ -1025,7 +1232,7 @@ def dashboard() -> None:
 def banner() -> None:
     """Show OLAV welcome banner with ASCII art."""
     from olav.cli.display import show_welcome_banner
-    
+
     show_welcome_banner(console)
 
 

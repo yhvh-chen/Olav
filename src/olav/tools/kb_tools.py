@@ -22,7 +22,7 @@ from langchain_core.tools import tool
 from opensearchpy import OpenSearch
 
 from olav.core.settings import settings
-from olav.models.diagnosis_report import DiagnosisReport, SimilarCase
+from olav.models.diagnosis_report import DiagnosisReport
 
 logger = logging.getLogger(__name__)
 
@@ -62,18 +62,18 @@ def kb_search(
     use_vector: bool = True,
 ) -> list[dict]:
     """Search knowledge base for similar diagnosis cases using hybrid search.
-    
+
     Uses both keyword matching and vector similarity for best results:
     - Keyword search: Exact term matching on fault_description, root_cause
     - Vector search: Semantic similarity via embeddings
-    
+
     Args:
         query: Natural language description of the fault
         size: Number of results to return (default: 5)
         filter_tags: Optional tags to filter by (e.g., ["bgp", "interface"])
         filter_layers: Optional layers to filter by (e.g., ["L2", "L3"])
         use_vector: Whether to use vector search (default: True)
-    
+
     Returns:
         List of similar cases with:
         - case_id: Report ID
@@ -82,7 +82,7 @@ def kb_search(
         - resolution: How it was fixed
         - similarity_score: How similar this case is (0-1)
         - tags: Related tags
-    
+
     Example:
         kb_search("BGP neighbor down between R1 and R2")
         -> [
@@ -99,27 +99,27 @@ def kb_search(
     """
     try:
         client = _get_opensearch_client()
-        
+
         # Check if index exists (OpenSearch-py 2.x API)
         if not client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
             logger.warning(f"Index {DIAGNOSIS_REPORTS_INDEX} does not exist. No historical cases available.")
             return []
-        
+
         # Build filter clauses
         filter_clauses = []
-        
+
         # Optional tag filter
         if filter_tags:
             filter_clauses.append({
                 "terms": {"tags": filter_tags}
             })
-        
+
         # Optional layer filter
         if filter_layers:
             filter_clauses.append({
                 "terms": {"affected_layers": filter_layers}
             })
-        
+
         # Generate query embedding for vector search
         query_embedding = None
         if use_vector:
@@ -131,7 +131,7 @@ def kb_search(
             except Exception as e:
                 logger.warning(f"Failed to generate embedding, falling back to keyword-only: {e}")
                 use_vector = False
-        
+
         # Build hybrid query (keyword + vector)
         if use_vector and query_embedding:
             # Hybrid: combine BM25 text search with KNN vector search
@@ -232,20 +232,20 @@ def kb_search(
                     {"timestamp": {"order": "desc"}},
                 ],
             }
-        
+
         result = client.search(
             index=DIAGNOSIS_REPORTS_INDEX,
             body=query_body,
         )
-        
+
         cases = []
         max_score = result["hits"]["max_score"] or 1.0
-        
+
         for hit in result["hits"]["hits"]:
             source = hit["_source"]
             # Normalize score to 0-1
             similarity = hit["_score"] / max_score if max_score > 0 else 0
-            
+
             cases.append({
                 "case_id": source.get("report_id", "unknown"),
                 "fault_description": source.get("fault_description", ""),
@@ -260,11 +260,11 @@ def kb_search(
                 "protocols": source.get("affected_protocols", []),
                 "layers": source.get("affected_layers", []),
             })
-        
+
         search_mode = "hybrid (keyword+vector)" if use_vector and query_embedding else "keyword-only"
         logger.info(f"kb_search ({search_mode}) found {len(cases)} cases for: {query[:50]}...")
         return cases
-        
+
     except Exception as e:
         logger.error(f"kb_search failed: {e}")
         return []
@@ -272,19 +272,19 @@ def kb_search(
 
 async def kb_index_report(report: DiagnosisReport) -> bool:
     """Index a diagnosis report to knowledge base with embeddings.
-    
+
     This function adds a completed diagnosis report to the knowledge base
     for future Agentic RAG queries. Generates embeddings for semantic search.
-    
+
     Args:
         report: DiagnosisReport to index
-    
+
     Returns:
         True if indexing succeeded, False otherwise
     """
     try:
         client = _get_opensearch_client()
-        
+
         # Ensure index exists (OpenSearch-py 2.x API)
         if not client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
             logger.warning(
@@ -292,10 +292,10 @@ async def kb_index_report(report: DiagnosisReport) -> bool:
                 f"Run init_diagnosis_kb.py to create it."
             )
             return False
-        
+
         # Convert report to OpenSearch document
         doc = report.to_opensearch_doc()
-        
+
         # Generate embeddings for semantic search
         try:
             embedding_model = _get_embedding_model()
@@ -310,7 +310,7 @@ async def kb_index_report(report: DiagnosisReport) -> bool:
         except Exception as e:
             logger.warning(f"Failed to generate embeddings, indexing without vectors: {e}")
             # Continue without embeddings - keyword search will still work
-        
+
         # Index document
         result = client.index(
             index=DIAGNOSIS_REPORTS_INDEX,
@@ -318,10 +318,10 @@ async def kb_index_report(report: DiagnosisReport) -> bool:
             body=doc,
             refresh=True,  # Make immediately searchable
         )
-        
+
         logger.info(f"Indexed diagnosis report {report.report_id} to knowledge base")
         return result.get("result") in ("created", "updated")
-        
+
     except Exception as e:
         logger.error(f"Failed to index report {report.report_id}: {e}")
         return False
@@ -329,28 +329,28 @@ async def kb_index_report(report: DiagnosisReport) -> bool:
 
 def kb_get_report(report_id: str) -> DiagnosisReport | None:
     """Retrieve a specific report from knowledge base.
-    
+
     Args:
         report_id: Report ID to retrieve
-    
+
     Returns:
         DiagnosisReport if found, None otherwise
     """
     try:
         client = _get_opensearch_client()
-        
+
         if not client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
             return None
-        
+
         result = client.get(
             index=DIAGNOSIS_REPORTS_INDEX,
             id=report_id,
         )
-        
+
         if result.get("found"):
             return DiagnosisReport(**result["_source"])
         return None
-        
+
     except Exception as e:
         logger.error(f"Failed to get report {report_id}: {e}")
         return None
@@ -358,27 +358,27 @@ def kb_get_report(report_id: str) -> DiagnosisReport | None:
 
 def kb_delete_report(report_id: str) -> bool:
     """Delete a report from knowledge base.
-    
+
     Args:
         report_id: Report ID to delete
-    
+
     Returns:
         True if deleted, False otherwise
     """
     try:
         client = _get_opensearch_client()
-        
+
         if not client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
             return False
-        
+
         result = client.delete(
             index=DIAGNOSIS_REPORTS_INDEX,
             id=report_id,
             refresh=True,
         )
-        
+
         return result.get("result") == "deleted"
-        
+
     except Exception as e:
         logger.error(f"Failed to delete report {report_id}: {e}")
         return False
@@ -386,30 +386,30 @@ def kb_delete_report(report_id: str) -> bool:
 
 def kb_stats() -> dict[str, Any]:
     """Get knowledge base statistics.
-    
+
     Returns:
         Dict with stats like total_reports, recent_reports, etc.
     """
     try:
         client = _get_opensearch_client()
-        
+
         if not client.indices.exists(index=DIAGNOSIS_REPORTS_INDEX):
             return {"status": "not_initialized", "total_reports": 0}
-        
+
         # Count total documents
         count_result = client.count(index=DIAGNOSIS_REPORTS_INDEX)
         total = count_result.get("count", 0)
-        
+
         # Get index stats
         stats = client.indices.stats(index=DIAGNOSIS_REPORTS_INDEX)
         index_stats = stats.get("indices", {}).get(DIAGNOSIS_REPORTS_INDEX, {})
-        
+
         return {
             "status": "ready",
             "total_reports": total,
             "index_size_bytes": index_stats.get("total", {}).get("store", {}).get("size_in_bytes", 0),
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get kb stats: {e}")
         return {"status": "error", "error": str(e)}

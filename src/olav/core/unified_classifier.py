@@ -111,7 +111,9 @@ class UnifiedClassifier:
     def llm(self) -> BaseChatModel:
         """Lazy-load LLM instance."""
         if self._llm is None:
-            self._llm = LLMFactory.get_chat_model(json_mode=True)
+            # Use json_mode for structured output, reasoning=False for concise responses
+            # This prevents qwen3/deepseek from generating verbose "thinking" content
+            self._llm = LLMFactory.get_chat_model(json_mode=True, reasoning=False)
         return self._llm
 
     @property
@@ -126,26 +128,34 @@ class UnifiedClassifier:
         """Lazy-load prompt template."""
         if self._prompt is None:
             try:
-                self._prompt = prompt_manager.load_prompt("core", "unified_classification")
-            except Exception as e:
-                logger.warning(f"Failed to load unified_classification prompt: {e}")
-                self._prompt = self._get_fallback_prompt()
+                # Try new prompt system first (overrides/ → _defaults/)
+                self._prompt = prompt_manager.load(
+                    "unified_classification",
+                    thinking=False,  # Classification doesn't need extended thinking
+                )
+            except FileNotFoundError:
+                # Fallback to legacy location
+                try:
+                    self._prompt = prompt_manager.load_prompt("core", "unified_classification")
+                except Exception as e:
+                    logger.warning(f"Failed to load unified_classification prompt: {e}")
+                    self._prompt = self._get_fallback_prompt()
         return self._prompt
 
     def _get_fallback_prompt(self) -> str:
         """Fallback prompt if template loading fails."""
-        return """你是网络运维意图分类和工具选择专家。
+        return """You are a network operations intent classification and tool selection expert.
 
-对用户查询进行分类并选择合适的工具：
+Classify user queries and select appropriate tools:
 
-## 意图类别
-- suzieq: 网络状态查询（BGP/OSPF/接口/路由状态）→ 使用 suzieq_query
-- netbox: CMDB 资产管理（设备清单、IP 分配）→ 使用 netbox_api_call
-- openconfig: YANG 模式查询 → 使用 openconfig_schema_search
-- cli: SSH 命令行执行 → 使用 cli_tool
-- netconf: NETCONF 配置操作 → 使用 netconf_tool
+## Intent Categories
+- suzieq: Network state query (BGP/OSPF/interface/route status) → use suzieq_query
+- netbox: CMDB asset management (device inventory, IP allocation) → use netbox_api_call
+- openconfig: YANG schema query → use openconfig_schema_search
+- cli: SSH command line execution → use cli_tool
+- netconf: NETCONF configuration operations → use netconf_tool
 
-## 工具和参数
+## Tools and Parameters
 1. suzieq_query: {table, hostname, namespace, method}
 2. suzieq_schema_search: {query}
 3. netbox_api_call: {endpoint, filters}
@@ -153,8 +163,8 @@ class UnifiedClassifier:
 5. netconf_tool: {device, xpath}
 6. openconfig_schema_search: {intent}
 
-## 输出格式
-返回 JSON:
+## Output Format
+Return JSON:
 {
   "intent_category": "suzieq|netbox|openconfig|cli|netconf",
   "tool": "tool_name",
@@ -164,11 +174,11 @@ class UnifiedClassifier:
   "fallback_tool": "..." (optional)
 }
 
-## 示例
-查询: "查询 R1 BGP 状态"
+## Examples
+Query: "Query R1 BGP status"
 → intent_category: "suzieq", tool: "suzieq_query", parameters: {"table": "bgp", "hostname": "R1"}
 
-查询: "在 NetBox 中查找设备 R1"
+Query: "Find device R1 in NetBox"
 → intent_category: "netbox", tool: "netbox_api_call", parameters: {"endpoint": "/dcim/devices/", "filters": {"name": "R1"}}
 """
 

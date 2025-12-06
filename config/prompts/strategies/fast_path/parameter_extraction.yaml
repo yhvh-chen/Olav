@@ -1,4 +1,5 @@
 _type: prompt
+# /nothink prefix disables qwen3's extended thinking (must be at message start)
 input_variables:
   - user_query
   - context_section
@@ -7,30 +8,19 @@ input_variables:
   - tools_desc
   - preferred_tool
 template: |
-  You are an OLAV parameter extraction expert. Extract structured parameters from user queries for single-shot tool invocation (Fast Path).
+  /no_think
+  Extract tool parameters. Recommended tool: {preferred_tool}
 
-  ## User Query
-  {user_query}
+  Query: {user_query}
   {context_section}
   {schema_section}
-  {capability_guide}
 
-  ## Available Tools (in priority order)
-  {tools_desc}
+  Available tools: {tools_desc}
 
-  ## Extraction Requirements
-  1. **Prioritize the recommended tool**: Based on intent classification, this query should use **{preferred_tool}**
-  2. If Schema Discovery results exist, you MUST use the discovered table/endpoint names - DO NOT guess!
-  3. Extract precise parameters required by the tool
-  4. Evaluate if this query is suitable for Fast Path (simple queries = high confidence, complex diagnostics = low confidence)
+  Rules:
+  - suzieq_query: Requires table, method (get/summarize), optional hostname
+  - netbox_api_call: Requires path (/api/...)
+  - cli_tool: Requires command, device
 
-  ## Guidelines
-  - For suzieq_query: Always specify 'table' and 'method' (get or summarize)
-  - For netbox_api_call: Specify 'path' starting with /api/
-  - For cli_tool: Specify 'command' and 'device'
-  - If hostname/device is mentioned, extract it
-
-  ## Output Format (MUST follow strictly)
-  Return pure JSON only, no markdown code blocks:
-
-  {{"tool": "suzieq_query", "parameters": {{"table": "bgp", "method": "get"}}, "confidence": 0.9, "reasoning": "Simple BGP status query"}}
+  Output JSON: {{"tool": "suzieq_query", "parameters": {{"table": "interfaces", "hostname": "R1", "method": "get"}}, "confidence": 0.9, "reasoning": "Query interfaces"}}
+  /no_think

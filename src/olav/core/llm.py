@@ -1,7 +1,12 @@
 """LLM Factory for creating chat and embedding models.
 
-Refactored to use LangChain 1.10's init_chat_model() for unified model initialization.
-Supports 15+ providers with a single function call.
+Uses LangChain's init_chat_model() for unified provider support including
+OpenAI, Azure, and Ollama.
+
+Note on Ollama Thinking Mode:
+- For qwen3/deepseek-r1 models, use `/no_think` suffix in prompts for concise output
+- The `think` API parameter is handled via prompt engineering in OLAV
+- See config/prompts/ for standard mode prompts with /no_think
 
 LangChain 1.10 Middleware Integration:
 - ModelRetryMiddleware: Automatic retry with exponential backoff
@@ -40,26 +45,26 @@ logger = logging.getLogger(__name__)
 # ============================================
 def configure_langsmith() -> bool:
     """Configure LangSmith tracing if enabled.
-    
+
     Sets environment variables required by LangChain to enable tracing.
     Call this once at startup before creating any LLM instances.
-    
+
     Returns:
         True if LangSmith was enabled, False otherwise
     """
     if not env_settings.langsmith_enabled:
         return False
-    
+
     if not env_settings.langsmith_api_key:
         logger.warning("LangSmith enabled but LANGSMITH_API_KEY not set")
         return False
-    
+
     # Set LangChain environment variables
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_API_KEY"] = env_settings.langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = env_settings.langsmith_project
     os.environ["LANGCHAIN_ENDPOINT"] = env_settings.langsmith_endpoint
-    
+
     logger.info(
         f"LangSmith tracing enabled: project={env_settings.langsmith_project}, "
         f"endpoint={env_settings.langsmith_endpoint}"
@@ -110,31 +115,41 @@ class LLMFactory:
     def get_chat_model(
         json_mode: bool = False,
         temperature: float | None = None,
+        reasoning: bool = False,
         **kwargs: Any,
     ) -> BaseChatModel:
-        """Create a chat model instance using init_chat_model().
+        """Create a chat model instance using LangChain init_chat_model.
 
         Args:
             json_mode: Whether to enable JSON output mode
             temperature: Override default temperature
+            reasoning: Enable extended thinking for complex tasks (default: False)
+                       Note: For Ollama models, use /no_think in prompts for concise output
             **kwargs: Additional model parameters
 
         Returns:
             Configured chat model instance
         """
         temp = temperature if temperature is not None else LLMConfig.TEMPERATURE
+        provider = env_settings.llm_provider
+        model_name = env_settings.llm_model_name or LLMConfig.MODEL_NAME
 
-        # Build configurable fields for init_chat_model
+        # Build configuration based on provider
         config: dict[str, Any] = {
             "temperature": temp,
             "max_tokens": LLMConfig.MAX_TOKENS,
         }
 
-        # Provider-specific configuration
-        provider = env_settings.llm_provider
-        model_name = env_settings.llm_model_name or LLMConfig.MODEL_NAME
-
-        if provider == "openai":
+        if provider == "ollama":
+            # Use LangChain ChatOllama
+            config["base_url"] = env_settings.llm_base_url or "http://localhost:11434"
+            if json_mode:
+                config["format"] = "json"
+            logger.debug(
+                f"Creating Ollama chat model: model={model_name}, "
+                f"base_url={config['base_url']}, json_mode={json_mode}"
+            )
+        elif provider == "openai":
             config["api_key"] = env_settings.llm_api_key
             if LLMConfig.BASE_URL:
                 config["base_url"] = LLMConfig.BASE_URL
@@ -142,9 +157,6 @@ class LLMFactory:
             config["model_kwargs"] = {"parallel_tool_calls": False}
             if json_mode:
                 config["model_kwargs"]["response_format"] = {"type": "json_object"}
-        elif provider == "ollama":
-            if json_mode:
-                config["format"] = "json"
         elif provider == "azure_openai":
             config["api_key"] = env_settings.llm_api_key
 
@@ -169,7 +181,7 @@ class LLMFactory:
         api_key = env_settings.embedding_api_key or env_settings.llm_api_key
         base_url = env_settings.embedding_base_url
         model = env_settings.embedding_model
-        
+
         if provider == "openai":
             if not api_key:
                 logger.warning("No EMBEDDING_API_KEY set. Embedding features may fail.")
@@ -190,7 +202,7 @@ class LLMFactory:
             ollama_url = base_url or "http://127.0.0.1:11434"
             logger.info(f"Using Ollama embedding model: {model_name} at {ollama_url}")
             return OllamaEmbeddings(model=model_name, base_url=ollama_url)
-        
+
         msg = f"Unsupported embedding provider: {provider}"
         raise ValueError(msg)
 
@@ -204,12 +216,12 @@ class LLMFactory:
             Configured vision model instance (ChatOpenAI with vision support)
         """
         from langchain_openai import ChatOpenAI
-        
+
         provider = env_settings.vision_provider
         api_key = env_settings.vision_api_key or env_settings.llm_api_key
         base_url = env_settings.vision_base_url
         model = env_settings.vision_model
-        
+
         if provider == "openai":
             return ChatOpenAI(
                 model=model,
@@ -225,7 +237,7 @@ class LLMFactory:
                 raise ImportError(msg) from e
 
             return ChatOllama(model="llava")  # LLaVA for local vision
-        
+
         msg = f"Unsupported vision provider: {provider}"
         raise ValueError(msg)
 
@@ -269,7 +281,7 @@ class LLMFactory:
             _initial_delay = initial_delay if initial_delay is not None else LLMRetryConfig.INITIAL_DELAY
             _max_delay = max_delay if max_delay is not None else LLMRetryConfig.MAX_DELAY
             _jitter = jitter if jitter is not None else LLMRetryConfig.JITTER
-            
+
             cls._retry_middleware = ModelRetryMiddleware(
                 max_retries=_max_retries,
                 retry_on=RETRYABLE_EXCEPTIONS,

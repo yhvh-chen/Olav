@@ -14,7 +14,6 @@ from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableSerializable
 from pydantic import BaseModel
 

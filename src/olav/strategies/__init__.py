@@ -6,7 +6,7 @@ This package implements different execution strategies for OLAV workflows:
 - FastPathStrategy: Single-shot function calling for simple queries (no agent loop)
 - DeepPathStrategy: Hypothesis-driven loop for complex diagnostics (iterative reasoning)
 - BatchPathStrategy: YAML-driven inspection with parallel execution (deterministic validation)
-- StrategySelector: Intelligent routing to optimal strategy
+- StrategySelector: Rule-based routing to optimal strategy
 - StrategyExecutor: Unified execution interface with fallback handling
 
 Each strategy optimizes for different query characteristics:
@@ -16,11 +16,12 @@ Each strategy optimizes for different query characteristics:
 
 Usage:
 ```python
-from olav.strategies import execute_with_strategy_selection
+from olav.strategies import execute_with_mode
 
-result = await execute_with_strategy_selection(
+result = await execute_with_mode(
     user_query="查询 R1 BGP 状态",
     llm=LLMFactory.get_chat_model(),
+    mode="standard",
 )
 ```
 """
@@ -31,7 +32,6 @@ from .executor import (
     ExecutionResult,
     StrategyExecutor,
     execute_with_mode,
-    execute_with_strategy_selection,
 )
 from .fast_path import FastPathStrategy
 from .selector import StrategyDecision, StrategySelector, create_strategy_selector
@@ -46,5 +46,4 @@ __all__ = [
     "StrategySelector",
     "create_strategy_selector",
     "execute_with_mode",
-    "execute_with_strategy_selection",
 ]

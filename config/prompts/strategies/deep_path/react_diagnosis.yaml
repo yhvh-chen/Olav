@@ -23,7 +23,7 @@ template: |
   
   **DO NOT** conclude "interface doesn't exist" based only on SuzieQ data!
   
-  ## Diagnostic Methodology: Funnel Debugging (漏斗式排错)
+  ## Diagnostic Methodology: Funnel Debugging
   
   ALWAYS follow this priority order - start from Layer 1, only descend when needed:
   

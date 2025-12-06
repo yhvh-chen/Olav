@@ -33,21 +33,21 @@ _token_from_env: bool = _access_token is not None
 
 def generate_access_token() -> str:
     """Generate or return the access token for this server session.
-    
+
     If OLAV_API_TOKEN is set in environment, returns that (for multi-worker mode).
     Otherwise generates a new token (for single-worker mode).
     """
     global _access_token, _token_created_at, _token_from_env
-    
+
     # If token already set from environment, return it
     if _token_from_env and _access_token:
         return _access_token
-    
+
     # Generate new token if not already generated
     if _access_token is None:
         _access_token = secrets.token_urlsafe(32)
         _token_created_at = datetime.now(UTC)
-    
+
     return _access_token
 
 
@@ -66,23 +66,23 @@ def get_token_age_minutes() -> int | None:
 
 def validate_token(token: str) -> tuple[bool, dict | None]:
     """Validate the provided token against the server token.
-    
+
     Returns:
         Tuple of (is_valid, user_data or None)
     """
     if not _access_token:
         return (False, None)
-    
+
     # Constant-time comparison to prevent timing attacks
     if not secrets.compare_digest(token, _access_token):
         return (False, None)
-    
+
     # Check token expiration
     if _token_created_at:
         max_age = timedelta(hours=getattr(settings, 'token_max_age_hours', 24))
         if datetime.now(UTC) - _token_created_at > max_age:
             return (False, None)
-    
+
     # All authenticated users are admin in single-token mode
     return (True, {"username": "admin", "role": "admin", "disabled": False})
 
@@ -97,7 +97,7 @@ def _is_auth_disabled() -> bool:
 
 class CustomHTTPBearer(HTTPBearer):
     """HTTPBearer that returns 401 (not 403) for missing credentials.
-    
+
     If AUTH_DISABLED=true, allows requests without credentials.
     """
 
@@ -112,7 +112,7 @@ class CustomHTTPBearer(HTTPBearer):
                     credentials=authorization[7:]
                 )
             return None
-        
+
         try:
             return await super().__call__(request)
         except HTTPException as exc:
@@ -152,13 +152,13 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
 ) -> User:
     """Validate token and return user.
-    
+
     If AUTH_DISABLED=true in environment, returns admin user without validation.
     """
     # Check if auth is disabled
     if _is_auth_disabled():
         return User(username="admin", role="admin", disabled=False)
-    
+
     # Require credentials if auth is enabled
     if credentials is None:
         raise HTTPException(
@@ -166,9 +166,9 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     token = credentials.credentials
-    
+
     is_valid, user_data = validate_token(token)
     if not is_valid or user_data is None:
         raise HTTPException(
@@ -176,7 +176,7 @@ async def get_current_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     return User(**user_data)
 
 

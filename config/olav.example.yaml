@@ -1,0 +1,157 @@
+# OLAV Configuration
+# Copy this file to config/olav.yaml and customize as needed.
+# Changes require restart to take effect.
+#
+# Documentation: docs/CONFIG_REFACTOR_PLAN.md
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+models:
+  # Quick switch between providers using presets:
+  #   - ollama-local: Local Ollama (qwen3:30b + nomic-embed-text)
+  #   - openrouter: OpenRouter API (grok + OpenAI embeddings)
+  #   - openai-direct: Direct OpenAI API
+  #   - azure: Azure OpenAI
+  preset: ollama-local
+  
+  # Or customize individual settings (overrides preset):
+  # llm:
+  #   provider: ollama          # openai | ollama | azure_openai
+  #   model: qwen3:30b
+  #   base_url: http://localhost:11434
+  #   temperature: 0.2
+  #   max_tokens: 16000
+  #
+  # embedding:
+  #   provider: ollama
+  #   model: nomic-embed-text:latest
+  #   base_url: http://localhost:11434
+  #   dimensions: 768
+
+# =============================================================================
+# Thinking Mode (Extended Reasoning)
+# =============================================================================
+# Controls extended thinking for models that support it (qwen3, deepseek-r1)
+# When disabled, responses are concise without verbose reasoning
+thinking:
+  # Global default (can be overridden per-strategy)
+  enabled: false
+  
+  # Per-strategy settings
+  strategies:
+    fast_path: false      # Simple queries - always concise, no thinking
+    deep_path: true       # Complex diagnosis - allow extended thinking
+    batch_path: false     # Batch operations - concise summaries
+
+# =============================================================================
+# Answer Style
+# =============================================================================
+answer:
+  # Response verbosity: concise | detailed | technical
+  style: concise
+  
+  # Response language: en | zh-CN
+  # Affects system prompts and expected response language
+  language: en
+  
+  # Output format: auto | table | prose | json
+  # auto: Let AI choose based on data structure
+  format: auto
+  
+  # Include raw JSON data in responses (for debugging)
+  include_raw_data: false
+
+# =============================================================================
+# Query Behavior
+# =============================================================================
+query:
+  # Default time range for SuzieQ queries
+  default_time_range: 24h
+  
+  # Maximum results to return
+  max_results: 100
+  
+  # Prefer summarize() over get() for overview queries
+  prefer_summary: true
+
+# =============================================================================
+# Diagnosis (Expert Mode / Deep Dive)
+# =============================================================================
+diagnosis:
+  # Maximum iterations for iterative diagnosis
+  max_iterations: 10
+  
+  # Confidence threshold to stop diagnosis
+  confidence_threshold: 0.8
+  
+  # Diagnosis methodology:
+  #   - funnel: Macro analysis (SuzieQ) → Micro diagnosis (NETCONF)
+  #   - parallel: Run all checks simultaneously
+  #   - layer-by-layer: L1 → L2 → L3 → L4 systematic check
+  methodology: funnel
+
+# =============================================================================
+# Safety & Human-in-the-Loop (HITL)
+# =============================================================================
+safety:
+  # Operations requiring explicit human approval
+  require_approval:
+    - config_change        # Any configuration modification
+    - device_restart       # Device reboot commands
+    - interface_shutdown   # Shutting down interfaces
+    - delete_operation     # Deleting resources
+    - write_memory         # Saving configuration
+  
+  # Operations auto-approved (no confirmation needed)
+  auto_approve:
+    - show_command         # show/display commands
+    - read_query           # Read-only queries
+    - status_check         # Health/status checks
+  
+  # HITL timeout (seconds) - auto-reject if no response
+  approval_timeout: 300
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+features:
+  # Agentic RAG: Learn from successful queries for optimization
+  agentic_rag: true
+  
+  # Dynamic Router: Semantic intent routing (vs keyword matching)
+  dynamic_router: true
+  
+  # Schema-Aware Tools: Discover SuzieQ/OpenConfig schemas dynamically
+  schema_aware_tools: true
+  
+  # Expert Mode: Enable Deep Dive workflow for complex diagnostics
+  expert_mode: false
+
+# =============================================================================
+# Paths (usually don't need to change)
+# =============================================================================
+paths:
+  # SuzieQ parquet data directory
+  suzieq_data: data/suzieq-parquet
+  
+  # Document storage for RAG
+  documents: data/documents
+  
+  # Generated configuration files
+  generated_configs: data/generated_configs
+
+# =============================================================================
+# Advanced: Prompt Overrides
+# =============================================================================
+# Override specific prompts by placing YAML files in config/prompts/overrides/
+# Or define inline overrides here:
+#
+# prompt_overrides:
+#   # Override answer formatting prompt
+#   fast_path/answer_formatting: |
+#     You are a network operations expert...
+#     
+#   # Override intent classification
+#   core/unified_classification: |
+#     Classify the user query...

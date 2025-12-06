@@ -5,7 +5,7 @@ Middleware 模式借鉴自 deepagents 架构，实现工具说明的自动注入
 
 Usage:
     from olav.middleware import tool_middleware
-    
+
     enriched_prompt = tool_middleware.enrich_prompt(
         base_prompt="你是网络诊断专家...",
         tools=[suzieq_query, netconf_tool]

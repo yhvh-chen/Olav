@@ -346,72 +346,6 @@ class StrategyExecutor:
         )
 
 
-async def execute_with_strategy_selection(
-    user_query: str,
-    llm: BaseChatModel,
-    context: dict[str, Any] | None = None,
-    batch_config_path: str | None = None,
-    use_llm_fallback: bool = True,
-) -> ExecutionResult:
-    """
-    Convenience function: Select strategy and execute in one call.
-
-    This is the primary entry point for integrating strategy-based execution
-    into workflows.
-
-    Args:
-        user_query: User's natural language query
-        llm: Language model for selection and execution
-        context: Optional execution context
-        batch_config_path: Path to batch config (for batch queries)
-        use_llm_fallback: Use LLM for ambiguous strategy selection
-
-    Returns:
-        ExecutionResult with strategy output
-
-    Example:
-        ```python
-        from olav.strategies.executor import execute_with_strategy_selection
-
-        result = await execute_with_strategy_selection(
-            user_query="查询 R1 BGP 状态",
-            llm=LLMFactory.get_chat_model(),
-        )
-
-        if result.success:
-            print(f"Answer: {result.answer}")
-            print(f"Strategy used: {result.strategy_used}")
-        ```
-    """
-    # Step 1: Strategy selection
-    selector = StrategySelector(llm=llm, use_llm_fallback=use_llm_fallback)
-    decision = await selector.select(user_query)
-
-    logger.info(
-        f"Strategy selected: {decision.strategy} "
-        f"(confidence: {decision.confidence:.2f}, reasoning: {decision.reasoning})"
-    )
-
-    # Step 2: Execute with selected strategy
-    executor = StrategyExecutor(llm=llm, auto_fallback=True)
-    result = await executor.execute(
-        user_query=user_query,
-        decision=decision,
-        context=context,
-        batch_config_path=batch_config_path,
-    )
-
-    # Add selection info to metadata
-    result.metadata["selection"] = {
-        "strategy": decision.strategy,
-        "confidence": decision.confidence,
-        "reasoning": decision.reasoning,
-        "fallback": decision.fallback,
-    }
-
-    return result
-
-
 async def execute_with_mode(
     user_query: str,
     llm: BaseChatModel,
@@ -453,7 +387,7 @@ async def execute_with_mode(
             llm=LLMFactory.get_chat_model(),
             mode="standard",
         )
-        
+
         # NOTE: Expert mode now uses SupervisorDrivenWorkflow directly
         # via root_agent_orchestrator._execute_expert_mode(), not this function.
         # This function is only used for standard mode fast_path.
@@ -482,7 +416,12 @@ async def execute_with_mode(
 
     # Execute with selected strategy - disable auto_fallback
     # User explicitly chose mode via CLI, don't override their decision
-    executor = StrategyExecutor(llm=llm, auto_fallback=False)
+    # Lower confidence_threshold to 0.5 to allow more queries to use fast_path (and its Redis cache)
+    executor = StrategyExecutor(
+        llm=llm,
+        auto_fallback=False,
+        fast_path_config={"confidence_threshold": 0.5},
+    )
     result = await executor.execute(
         user_query=user_query,
         decision=decision,
@@ -505,6 +444,5 @@ async def execute_with_mode(
 __all__ = [
     "ExecutionResult",
     "StrategyExecutor",
-    "execute_with_strategy_selection",
     "execute_with_mode",
 ]

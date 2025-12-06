@@ -2,12 +2,12 @@
 
 Provides unified cache abstraction with Redis backend for:
 - SchemaLoader schema caching (replace in-memory dict)
-- Tool result caching (replace FilesystemMiddleware cache)
 - Session state caching
+- Episodic memory caching
 
 Features:
 - TTL support with automatic expiration
-- JSON serialization for complex objects
+- JSON serialization for complex objects (including numpy types)
 - Async operations using redis-py asyncio
 - Graceful fallback to no-op cache if Redis unavailable
 - Key namespacing to prevent collisions
@@ -20,11 +20,44 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
+
 # Lazy import to avoid circular imports and allow mocking in tests
 if TYPE_CHECKING:
     from olav.core.settings import EnvSettings
 
 logger = logging.getLogger(__name__)
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer, np.int64)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float64)):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
+
+
+def safe_json_dumps(obj: Any, **kwargs: Any) -> str:
+    """JSON serialize with numpy type support.
+
+    Convenience function for serializing objects that may contain numpy types.
+    Commonly used for tool output serialization before LLM formatting.
+
+    Args:
+        obj: Object to serialize
+        **kwargs: Additional kwargs passed to json.dumps (e.g., indent, sort_keys)
+
+    Returns:
+        JSON string
+    """
+    return json.dumps(obj, cls=NumpyEncoder, **kwargs)
 
 
 def _get_settings() -> EnvSettings:
@@ -126,7 +159,6 @@ class RedisCache(CacheBackend):
     Key namespacing:
     - "schema:suzieq" -> SuzieQ schema cache
     - "schema:openconfig" -> OpenConfig schema cache
-    - "tool:abc123" -> Tool result cache
     - "session:xyz789" -> Session state cache
 
     Example:
@@ -202,13 +234,15 @@ class RedisCache(CacheBackend):
     def _serialize(self, value: Any) -> str:
         """Serialize value to JSON string.
 
+        Handles numpy types (ndarray, int64, float64, bool_) via NumpyEncoder.
+
         Args:
             value: Value to serialize
 
         Returns:
             JSON string
         """
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, cls=NumpyEncoder)
 
     def _deserialize(self, data: str | None) -> Any | None:
         """Deserialize JSON string to value.
@@ -432,7 +466,7 @@ class NoOpCache(CacheBackend):
 
 
 # Cache namespaces (for type safety and documentation)
-CacheNamespace = Literal["schema:", "tool:", "session:", "memory:"]
+CacheNamespace = Literal["schema:", "session:", "memory:"]
 
 
 class CacheManager:
@@ -442,7 +476,6 @@ class CacheManager:
 
     Namespaces:
     - schema: Schema caching (SuzieQ, OpenConfig)
-    - tool: Tool result caching
     - session: Session state caching
     - memory: Episodic memory caching
 
@@ -466,7 +499,6 @@ class CacheManager:
         self.backend = backend
         self._default_ttls: dict[CacheNamespace, int] = {
             "schema:": 3600,  # 1 hour for schemas
-            "tool:": 300,  # 5 minutes for tool results
             "session:": 1800,  # 30 minutes for sessions
             "memory:": 7200,  # 2 hours for episodic memory
         }
@@ -530,39 +562,6 @@ class CacheManager:
         key = self._make_namespaced_key("schema:", schema_type)
         return await self.backend.delete(key)
 
-    # Tool result caching methods
-    async def get_tool_result(self, cache_key: str) -> dict[str, Any] | None:
-        """Get cached tool result.
-
-        Args:
-            cache_key: Tool result cache key (usually hash of tool_name + params)
-
-        Returns:
-            Cached result or None
-        """
-        key = self._make_namespaced_key("tool:", cache_key)
-        return await self.backend.get(key)
-
-    async def set_tool_result(
-        self,
-        cache_key: str,
-        result: dict[str, Any],
-        ttl: int | None = None,
-    ) -> bool:
-        """Cache tool result.
-
-        Args:
-            cache_key: Tool result cache key
-            result: Tool execution result
-            ttl: TTL in seconds (None = use default)
-
-        Returns:
-            True if cached successfully
-        """
-        key = self._make_namespaced_key("tool:", cache_key)
-        ttl = ttl or self._default_ttls["tool:"]
-        return await self.backend.set(key, result, ttl)
-
     # Session state caching methods
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get cached session state.
@@ -604,14 +603,6 @@ class CacheManager:
             Number of schemas cleared
         """
         return await self.backend.clear_namespace("schema:")
-
-    async def clear_all_tool_results(self) -> int:
-        """Clear all cached tool results.
-
-        Returns:
-            Number of results cleared
-        """
-        return await self.backend.clear_namespace("tool:")
 
     async def health_check(self) -> bool:
         """Check cache backend health.

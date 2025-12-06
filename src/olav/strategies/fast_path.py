@@ -10,7 +10,7 @@ that can be answered with a single tool invocation. Optimizes for:
 Execution Flow:
 1. Parameter Extraction: LLM extracts structured params from query
 2. Tool Selection: Priority queue (SuzieQ > NetBox > CLI)
-3. Single Invocation: Call tool once, no loops (with optional caching)
+3. Single Invocation: Call tool once, no loops
 4. Strict Formatting: Force LLM to use tool output only (no speculation)
 
 Example Queries (these are illustrative, actual table names discovered via Schema):
@@ -22,12 +22,6 @@ Key Difference from Agent Loop:
 - Agent: Query → Think → Tool → Think → Tool → Think → Answer (slow, may drift)
 - Fast Path: Query → Extract Params → Tool → Format Answer (fast, deterministic)
 
-Caching (Phase B.2):
-- Tool results cached using FilesystemMiddleware
-- Cache key: SHA256 hash of (tool_name + parameters)
-- Reduces duplicate LLM calls by 10-20%
-- Cache TTL: 300 seconds (configurable)
-
 Resilience (LangChain 1.10):
 - ToolRetryMiddleware: Automatic retry for transient network errors
 - Exponential backoff with jitter to prevent thundering herd
@@ -36,45 +30,23 @@ Refactored: Uses LangChain with_structured_output() - no fallback parsing needed
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import time
 from typing import Any, Literal
 
-import numpy as np
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+from olav.core.cache import safe_json_dumps
+from olav.core.config_loader import get_config
 from olav.core.json_utils import robust_structured_output
 from olav.core.prompt_manager import prompt_manager
 from olav.core.memory_writer import MemoryWriter
-from olav.core.middleware import FilesystemMiddleware
 from olav.core.unified_classifier import unified_classify, UnifiedClassificationResult
 from olav.tools.base import ToolOutput, ToolRegistry
 from olav.tools.opensearch_tool import EpisodicMemoryTool
 
 logger = logging.getLogger(__name__)
-
-
-class NumpyEncoder(json.JSONEncoder):
-    """Custom JSON encoder that handles numpy types."""
-
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, (np.integer, np.int64)):
-            return int(obj)
-        if isinstance(obj, (np.floating, np.float64)):
-            return float(obj)
-        if isinstance(obj, np.bool_):
-            return bool(obj)
-        return super().default(obj)
-
-
-def safe_json_dumps(obj: Any, **kwargs: Any) -> str:
-    """JSON dumps with numpy support."""
-    return json.dumps(obj, cls=NumpyEncoder, **kwargs)
 
 
 class ParameterExtraction(BaseModel):
@@ -235,7 +207,7 @@ async def unified_classify_full(query: str) -> UnifiedClassificationResult | Non
     - Intent classification
     - Tool selection
     - Parameter extraction
-    
+
     Into a single LLM call, reducing latency by ~50%.
 
     Args:
@@ -252,25 +224,13 @@ async def unified_classify_full(query: str) -> UnifiedClassificationResult | Non
         return None
 
 
-class FormattedAnswer(BaseModel):
-    """
-    Structured answer based strictly on tool output.
-
-    LLM formats tool data into human-readable response without speculation.
-    """
-
-    answer: str = Field(description="Human-readable answer derived from tool data")
-    data_used: list[str] = Field(description="List of fields from tool output used in answer")
-    confidence: float = Field(description="Confidence in answer accuracy (0.0-1.0)", ge=0.0, le=1.0)
-
-
 class FastPathStrategy:
     """
     Fast Path execution strategy for simple, single-tool queries.
 
     Implements a three-step process:
     1. Extract parameters from natural language
-    2. Execute single tool call (priority: SuzieQ > NetBox > CLI) with caching
+    2. Execute single tool call (priority: SuzieQ > NetBox > CLI)
     3. Format answer in strict mode (no hallucination beyond tool data)
 
     Attributes:
@@ -278,9 +238,6 @@ class FastPathStrategy:
         tool_registry: Registry of available tools
         priority_order: Default tool selection priority
         confidence_threshold: Minimum confidence to use Fast Path (default: 0.7)
-        filesystem: FilesystemMiddleware for tool result caching (optional)
-        cache_ttl: Cache time-to-live in seconds (default: 300)
-        enable_cache: Whether to enable tool result caching (default: True)
     """
 
     def __init__(
@@ -291,9 +248,6 @@ class FastPathStrategy:
         memory_writer: MemoryWriter | None = None,
         enable_memory_rag: bool = True,
         episodic_memory_tool: EpisodicMemoryTool | None = None,
-        filesystem: FilesystemMiddleware | None = None,
-        enable_cache: bool = True,
-        cache_ttl: int = 300,
     ) -> None:
         """
         Initialize Fast Path strategy.
@@ -305,9 +259,6 @@ class FastPathStrategy:
             memory_writer: MemoryWriter for capturing successes (optional)
             enable_memory_rag: Enable episodic memory RAG optimization (default: True)
             episodic_memory_tool: Tool for searching historical patterns (optional)
-            filesystem: FilesystemMiddleware for caching (optional, auto-created if None)
-            enable_cache: Enable tool result caching (default: True)
-            cache_ttl: Cache time-to-live in seconds (default: 300)
         """
         self.llm = llm
         self.tool_registry = tool_registry
@@ -316,11 +267,6 @@ class FastPathStrategy:
         self.enable_memory_rag = enable_memory_rag
         self.episodic_memory_tool = episodic_memory_tool or EpisodicMemoryTool()
         self.priority_order = ["suzieq_query", "netbox_api_call", "cli_tool", "netconf_tool"]
-
-        # Caching configuration (Phase B.2)
-        self.enable_cache = enable_cache
-        self.cache_ttl = cache_ttl
-        self.filesystem = filesystem  # Will be created on-demand if None
 
         # Load tool capability guides (cached at init)
         self._tool_guides = self._load_tool_capability_guides()
@@ -332,8 +278,7 @@ class FastPathStrategy:
 
         logger.info(
             f"FastPathStrategy initialized with confidence threshold: {confidence_threshold}, "
-            f"available tools: {len(self.tool_registry.list_tools())}, "
-            f"caching: {enable_cache} (TTL: {cache_ttl}s)"
+            f"available tools: {len(self.tool_registry.list_tools())}"
         )
 
     def _load_tool_capability_guides(self) -> dict[str, str]:
@@ -459,7 +404,7 @@ class FastPathStrategy:
             # - _extract_parameters() (1 LLM call)
             # With a single unified call
             unified_result = await unified_classify_full(user_query)
-            
+
             if unified_result:
                 intent_category = unified_result.intent_category
                 intent_confidence = unified_result.confidence
@@ -496,7 +441,7 @@ class FastPathStrategy:
             fallback_reason = None
             schema_search_tools = {"suzieq_schema_search", "openconfig_schema_search"}
             selected_tool = unified_extraction.tool if unified_extraction else None
-            
+
             if intent_category in ("suzieq", "openconfig") and selected_tool not in schema_search_tools:
                 is_relevant, fallback_reason = self._check_schema_relevance(
                     user_query, schema_context, intent_category
@@ -561,26 +506,17 @@ class FastPathStrategy:
                     }
 
                 # Format answer for fallback result
-                fallback_extraction = ParameterExtraction(
-                    tool=fallback_tool,
-                    parameters=fallback_params,
-                    confidence=0.7,  # Lower confidence for fallback
-                    reasoning=f"Fallback from {intent_category}: {fallback_reason}",
-                )
-                formatted = await self._format_answer(user_query, tool_output, fallback_extraction)
+                answer = await self._format_answer(user_query, tool_output)
 
                 return {
                     "success": True,
-                    "answer": formatted.answer,
+                    "answer": answer,
                     "tool_output": tool_output,
                     "metadata": {
                         "strategy": "fast_path_fallback",
                         "original_category": intent_category,
                         "fallback_tool": fallback_tool,
                         "fallback_reason": fallback_reason,
-                        "confidence": 0.7,
-                        "data_fields_used": formatted.data_used,
-                        "answer_confidence": formatted.confidence,
                     },
                 }
 
@@ -652,10 +588,10 @@ class FastPathStrategy:
                 "openconfig_schema_search",
             }
             effective_threshold = (
-                0.5 if extraction.tool in schema_search_tools 
+                0.5 if extraction.tool in schema_search_tools
                 else self.confidence_threshold
             )
-            
+
             if extraction.confidence < effective_threshold:
                 logger.info(
                     f"Fast Path confidence {extraction.confidence:.2f} below threshold "
@@ -726,8 +662,8 @@ class FastPathStrategy:
                     "tool_output": tool_output,
                 }
 
-            # Step 3: Format answer (strict mode)
-            formatted = await self._format_answer(user_query, tool_output, extraction)
+            # Step 3: Format answer (plain text - no structured output overhead)
+            answer = await self._format_answer(user_query, tool_output)
 
             # Step 4: Capture success to episodic memory
             execution_time_ms = tool_output.metadata.get("elapsed_ms", 0)
@@ -742,14 +678,12 @@ class FastPathStrategy:
 
             return {
                 "success": True,
-                "answer": formatted.answer,
+                "answer": answer,
                 "tool_output": tool_output,
                 "metadata": {
                     "strategy": "fast_path",
                     "tool": extraction.tool,
                     "confidence": extraction.confidence,
-                    "data_fields_used": formatted.data_used,
-                    "answer_confidence": formatted.confidence,
                 },
             }
 
@@ -1088,25 +1022,25 @@ class FastPathStrategy:
                     ]
                 )
                 schema_section = f"""
-## 🎯 SuzieQ Schema Discovery 结果
-意图分类：**网络状态查询**（优先使用 suzieq_query）
-以下是根据你的查询从 Schema 中发现的相关表：
+## 🎯 SuzieQ Schema Discovery Result
+Intent classification: **Network state query** (prefer suzieq_query)
+The following tables were discovered from Schema based on your query:
 {schema_tables}
 
-⚠️ 重要：使用上述发现的表名，不要猜测！
+⚠️ Important: Use the discovered table names above, do not guess!
 """
         else:
             # No schema - guide based on intent
             intent_hints = {
-                "netbox": "意图是 NetBox 查询，使用 netbox_api_call。常用端点：/dcim/devices/, /ipam/ip-addresses/, /dcim/sites/",
-                "openconfig": "意图是 OpenConfig 路径查询，使用 openconfig_schema_search 或 netconf_tool",
-                "cli": "意图是 CLI 命令执行，使用 cli_tool。需要 device 和 command 参数",
-                "netconf": "意图是 NETCONF 配置，使用 netconf_tool。需要 device 和 xpath 参数",
-                "suzieq": "意图是网络状态查询，使用 suzieq_query。先用 suzieq_schema_search 查找正确表名",
+                "netbox": "Intent is NetBox query, use netbox_api_call. Common endpoints: /dcim/devices/, /ipam/ip-addresses/, /dcim/sites/",
+                "openconfig": "Intent is OpenConfig path query, use openconfig_schema_search or netconf_tool",
+                "cli": "Intent is CLI command execution, use cli_tool. Requires device and command parameters",
+                "netconf": "Intent is NETCONF configuration, use netconf_tool. Requires device and xpath parameters",
+                "suzieq": "Intent is network state query, use suzieq_query. First use suzieq_schema_search to find correct table name",
             }
             hint = intent_hints.get(intent_category or "suzieq", "")
             schema_section = f"""
-## ⚠️ 意图分类结果
+## ⚠️ Intent Classification Result
 {hint}
 """
 
@@ -1153,9 +1087,10 @@ class FastPathStrategy:
             context_section = f"\n\n## Available Context\n{context}"
 
         try:
-            prompt = prompt_manager.load_prompt(
-                "strategies/fast_path",
+            # Try new prompt system first (overrides/ → _defaults/)
+            prompt = prompt_manager.load(
                 "parameter_extraction",
+                thinking=False,  # FastPath parameter extraction doesn't need thinking
                 user_query=user_query,
                 context_section=context_section,
                 schema_section=schema_section,
@@ -1163,9 +1098,22 @@ class FastPathStrategy:
                 tools_desc=tools_desc,
                 preferred_tool=preferred_tool,
             )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Failed to load parameter_extraction prompt: {e}, using fallback")
-            prompt = f"Extract parameters for query: {user_query}"
+        except FileNotFoundError:
+            # Fallback to legacy location
+            try:
+                prompt = prompt_manager.load_prompt(
+                    "strategies/fast_path",
+                    "parameter_extraction",
+                    user_query=user_query,
+                    context_section=context_section,
+                    schema_section=schema_section,
+                    capability_guide=capability_guide,
+                    tools_desc=tools_desc,
+                    preferred_tool=preferred_tool,
+                )
+            except (FileNotFoundError, ValueError) as e:
+                logger.warning(f"Failed to load parameter_extraction prompt: {e}, using fallback")
+                prompt = f"Extract parameters for query: {user_query}"
 
         try:
             # Use robust_structured_output for reliable JSON parsing
@@ -1260,15 +1208,7 @@ class FastPathStrategy:
                     parameters["params"] = {}
                 parameters["params"].update(parameters.pop("filters"))
 
-        # Step 1: Check cache (if enabled)
-        if self.enable_cache:
-            cache_result = await self._check_cache(tool_name, parameters)
-            if cache_result:
-                logger.info(f"Cache HIT for {tool_name} (params: {parameters})")
-                return cache_result
-            logger.debug(f"Cache MISS for {tool_name} (params: {parameters})")
-
-        # Step 2: Validate tool registry
+        # Step 1: Validate tool registry
         if not self.tool_registry:
             logger.error("ToolRegistry not configured in FastPathStrategy")
             return ToolOutput(
@@ -1278,7 +1218,7 @@ class FastPathStrategy:
                 error="ToolRegistry not configured - cannot execute tools",
             )
 
-        # Step 3: Get tool from registry
+        # Step 2: Get tool from registry
         tool = self.tool_registry.get_tool(tool_name)
         if not tool:
             logger.error(f"Tool '{tool_name}' not found in ToolRegistry")
@@ -1293,7 +1233,7 @@ class FastPathStrategy:
         # Remove internal parameters before executing tool
         parameters.pop("user_query", None)  # Used for fallback, not passed to tool
 
-        # Step 4: Execute tool with retry logic (LangChain 1.10 pattern)
+        # Step 3: Execute tool with retry logic (LangChain 1.10 pattern)
         logger.debug(f"Executing tool '{tool_name}' with parameters: {parameters}")
         start_time = time.time()
 
@@ -1305,10 +1245,6 @@ class FastPathStrategy:
         if tool_output.metadata is None:
             tool_output.metadata = {}
         tool_output.metadata["elapsed_ms"] = elapsed_ms
-
-        # Step 5: Cache result (if enabled and successful)
-        if self.enable_cache and not tool_output.error:
-            await self._write_cache(tool_name, parameters, tool_output)
 
         return tool_output
 
@@ -1400,206 +1336,57 @@ class FastPathStrategy:
             error=f"Tool '{tool_name}' failed after {max_retries} retries: {last_error}",
         )
 
-    def _get_cache_key(self, tool_name: str, parameters: dict[str, Any]) -> str:
-        """
-        Generate cache key from tool name and parameters.
-
-        Uses SHA256 hash of canonical JSON representation for consistency.
-
-        Args:
-            tool_name: Tool identifier
-            parameters: Tool parameters (will be sorted for consistency)
-
-        Returns:
-            Cache key (e.g., "tool_results/suzieq_query_abc123def456.json")
-
-        Examples:
-            >>> strategy._get_cache_key("suzieq_query", {"table": "bgp", "hostname": "R1"})
-            "tool_results/suzieq_query_3f2a1b9c8d7e6f5a.json"
-        """
-        # Create canonical JSON (sorted keys)
-        canonical = safe_json_dumps(
-            {"tool": tool_name, "params": parameters}, sort_keys=True, ensure_ascii=False
-        )
-
-        # Hash to get cache key
-        hash_obj = hashlib.sha256(canonical.encode("utf-8"))
-        cache_hash = hash_obj.hexdigest()[:16]  # First 16 chars
-
-        return f"tool_results/{tool_name}_{cache_hash}.json"
-
-    async def _check_cache(self, tool_name: str, parameters: dict[str, Any]) -> ToolOutput | None:
-        """
-        Check cache for existing tool result.
-
-        Args:
-            tool_name: Tool identifier
-            parameters: Tool parameters
-
-        Returns:
-            Cached ToolOutput if exists and not expired, None otherwise
-        """
-        try:
-            # Lazy-initialize filesystem if needed
-            if self.filesystem is None:
-                from langgraph.checkpoint.memory import MemorySaver
-
-                checkpointer = MemorySaver()
-                self.filesystem = FilesystemMiddleware(
-                    checkpointer=checkpointer,
-                    workspace_root="./data/cache",
-                    audit_enabled=False,
-                    hitl_enabled=False,
-                )
-
-            cache_key = self._get_cache_key(tool_name, parameters)
-
-            # Read from cache
-            cached_content = await self.filesystem.read_file(cache_key)
-            if (
-                not cached_content
-                or cached_content == "System reminder: File exists but has empty contents"
-            ):
-                return None
-
-            # Deserialize cached result
-            cached_data = json.loads(cached_content)
-
-            # Check cache expiration (TTL)
-            cache_time = cached_data.get("cached_at", 0)
-            age_seconds = time.time() - cache_time
-
-            if age_seconds > self.cache_ttl:
-                logger.debug(
-                    f"Cache expired for {tool_name} (age: {age_seconds:.1f}s > TTL: {self.cache_ttl}s)"
-                )
-                # Clean up expired cache
-                await self.filesystem.delete_file(cache_key)
-                return None
-
-            # Deserialize ToolOutput
-            tool_output_data = cached_data.get("tool_output", {})
-            tool_output = ToolOutput(
-                source=tool_output_data.get("source", tool_name),
-                device=tool_output_data.get("device", "unknown"),
-                data=tool_output_data.get("data", []),
-                error=tool_output_data.get("error"),
-                metadata=tool_output_data.get("metadata", {}),
-            )
-
-            # Add cache metadata
-            tool_output.metadata["cache_hit"] = True
-            tool_output.metadata["cache_age_seconds"] = age_seconds
-
-            return tool_output
-
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            logger.warning(f"Cache read error for {tool_name}: {e}")
-            return None
-
-    async def _write_cache(
-        self, tool_name: str, parameters: dict[str, Any], tool_output: ToolOutput
-    ) -> None:
-        """
-        Write tool result to cache.
-
-        Args:
-            tool_name: Tool identifier
-            parameters: Tool parameters
-            tool_output: Tool execution result
-        """
-        try:
-            # Lazy-initialize filesystem if needed
-            if self.filesystem is None:
-                from langgraph.checkpoint.memory import MemorySaver
-
-                checkpointer = MemorySaver()
-                self.filesystem = FilesystemMiddleware(
-                    checkpointer=checkpointer,
-                    workspace_root="./data/cache",
-                    audit_enabled=False,
-                    hitl_enabled=False,
-                )
-
-            cache_key = self._get_cache_key(tool_name, parameters)
-
-            # Serialize ToolOutput
-            cache_data = {
-                "tool": tool_name,
-                "parameters": parameters,
-                "cached_at": time.time(),
-                "cache_ttl": self.cache_ttl,
-                "tool_output": {
-                    "source": tool_output.source,
-                    "device": tool_output.device,
-                    "data": tool_output.data,
-                    "error": tool_output.error,
-                    "metadata": tool_output.metadata,
-                },
-            }
-
-            # Write to cache
-            await self.filesystem.write_file(
-                cache_key, safe_json_dumps(cache_data, ensure_ascii=False, indent=2)
-            )
-
-            logger.debug(
-                f"Cached result for {tool_name} (key: {cache_key}, TTL: {self.cache_ttl}s)"
-            )
-
-        except Exception as e:
-            logger.warning(f"Cache write error for {tool_name}: {e}")
-
     async def _format_answer(
-        self, user_query: str, tool_output: ToolOutput, extraction: ParameterExtraction
-    ) -> FormattedAnswer:
+        self, user_query: str, tool_output: ToolOutput
+    ) -> str:
         """
-        Format tool output into human-readable answer (strict mode).
+        Format tool output into human-readable answer (plain text).
 
-        LLM is forced to only use data from tool_output, no speculation.
+        LLM generates natural language directly - no structured output overhead.
+        Uses reasoning=False to disable thinking mode for faster, concise output.
 
         Args:
             user_query: Original user query
             tool_output: Tool execution result
-            extraction: Parameter extraction context
 
         Returns:
-            FormattedAnswer with human-readable text
+            Plain text answer string
         """
+        from langchain_core.messages import HumanMessage
+        from olav.core.llm import LLMFactory
+
         # Serialize tool data for LLM (use safe encoder for numpy types)
         data_json = safe_json_dumps(tool_output.data, ensure_ascii=False, indent=2)
 
+        # Load prompt using new two-layer resolution (checks overrides/ first)
+        # thinking=False for fast, concise output
+        config = get_config()
         try:
-            prompt = prompt_manager.load_prompt(
-                "strategies/fast_path",
+            prompt = prompt_manager.load(
                 "answer_formatting",
+                thinking=False,  # FastPath always disables thinking
                 user_query=user_query,
-                tool_source=tool_output.source,
-                tool_device=tool_output.device,
                 data_json=data_json,
-                tool_metadata=str(tool_output.metadata),
             )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Failed to load answer_formatting prompt: {e}, using fallback")
-            prompt = f"Format answer for: {user_query}\nData: {data_json}"
+        except FileNotFoundError:
+            # Fallback to legacy location if new prompt not found
+            template = prompt_manager.load_raw_template(
+                "strategies/fast_path", "answer_formatting"
+            )
+            prompt = template.format(user_query=user_query, data_json=data_json)
 
         try:
-            # Use robust_structured_output for reliable JSON parsing
-            formatted = await robust_structured_output(
-                llm=self.llm,
-                output_class=FormattedAnswer,
-                prompt=prompt,
-            )
+            # Use LLM without reasoning for concise formatting output
+            # Check config for thinking mode (FastPath default: disabled)
+            reasoning_enabled = config.is_thinking_enabled("fast_path")
+            format_llm = LLMFactory.get_chat_model(temperature=0.3, reasoning=reasoning_enabled)
+            response = await format_llm.ainvoke([HumanMessage(content=prompt)])
+            return response.content.strip()
         except Exception as e:
-            logger.error(f"Failed to parse formatted answer: {e}")
-            # Fallback formatting
-            formatted = FormattedAnswer(
-                answer=f"Tool returned {len(tool_output.data)} records.", data_used=[], confidence=0.5
-            )
-
-        return formatted
+            logger.error(f"Failed to format answer: {e}")
+            # Fallback: summarize data count
+            record_count = len(tool_output.data) if isinstance(tool_output.data, list) else 1
+            return f"查询返回 {record_count} 条记录。"
 
     def is_suitable(self, user_query: str) -> bool:
         """

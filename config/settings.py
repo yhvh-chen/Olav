@@ -54,9 +54,11 @@ class LLMConfig:
     Adjusted to match legacy test expectations (MODEL_NAME == "gpt-4-turbo").
     New code should prefer dynamic model selection via `olav.core.settings`.
     """
-    PROVIDER: Literal["openai", "ollama", "azure"] = "openai"
-    BASE_URL: str = "https://openrouter.ai/api/v1"
-    MODEL_NAME = "x-ai/grok-4.1-fast"
+    PROVIDER: Literal["openai", "ollama", "azure"] = "ollama"
+   # BASE_URL: str = "https://openrouter.ai/api/v1"
+    BASE_URL: str = "http://127.0.0.1:11434"  # Ollama local
+   # MODEL_NAME = "x-ai/grok-4.1-fast"
+    MODEL_NAME = "qwen3:30b"
     TEMPERATURE = 0.2
     MAX_TOKENS = 16000
     

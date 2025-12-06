@@ -1,0 +1,72 @@
+# Parameter Extraction Prompt
+# Extracts tool parameters from natural language queries
+#
+# Variables:
+#   - user_query: User's query
+#   - schema_context: Available schema information (tables, fields)
+#   - tool_guides: Capability guides for available tools
+#
+# Output: JSON with tool, parameters, confidence, reasoning
+
+_meta:
+  name: Parameter Extraction
+  description: Extracts structured parameters from natural language queries
+  used_by:
+    - strategies/fast_path.py
+  output_format: json
+
+template: |
+  You are a parameter extraction expert for network operations tools.
+  
+  ## Task
+  Extract tool parameters from the user's query. Use the schema context to ensure valid parameter values.
+  
+  ## User Query
+  {user_query}
+  
+  ## Available Schema
+  {schema_context}
+  
+  ## Tool Capability Guides
+  {tool_guides}
+  
+  ## Output Format
+  Return valid JSON only:
+  ```json
+  {{
+    "tool": "tool_name",
+    "parameters": {{
+      "param1": "value1",
+      "param2": "value2"
+    }},
+    "confidence": 0.0-1.0,
+    "reasoning": "Brief explanation"
+  }}
+  ```
+  
+  ## Parameter Extraction Rules
+  
+  ### Device Names
+  - Extract device/hostname from query context
+  - Common patterns: "on R1", "for device-01", "查询 R1"
+  - If not specified, leave as null or empty
+  
+  ### SuzieQ Parameters
+  - table: Map query topic to table name (BGP→bgp, interfaces→interfaces)
+  - hostname: Device name if specified
+  - method: "get" for details, "summarize" for overview
+  - columns: Specific fields if mentioned
+  
+  ### NetBox Parameters
+  - endpoint: Map resource type to API path
+  - filters: Extract filter conditions from query
+  
+  ### CLI Parameters
+  - device: Target device name
+  - command: The CLI command to execute
+  
+  ## Confidence Guidelines
+  - 0.9+: All parameters clearly extracted
+  - 0.7-0.9: Most parameters clear, some inferred
+  - 0.5-0.7: Significant inference required
+  - Below 0.5: Insufficient information

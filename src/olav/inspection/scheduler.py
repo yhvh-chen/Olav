@@ -80,16 +80,16 @@ class InspectionScheduler:
         # 1. Load individual profile schedules
         from config.settings import Paths
         import yaml
-        
+
         scheduled_tasks = []
-        
+
         if Paths.INSPECTIONS_DIR.exists():
             for yaml_file in Paths.INSPECTIONS_DIR.glob("*.yaml"):
                 try:
                     content = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                     schedule = content.get("schedule")
                     profile_name = yaml_file.stem
-                    
+
                     if schedule:
                         logger.info(f"Scheduling profile '{profile_name}' with schedule: {schedule}")
                         task = asyncio.create_task(
@@ -108,7 +108,7 @@ class InspectionScheduler:
 
         # 2. Fallback to global config if no individual schedules found
         logger.info("No individual profile schedules found, falling back to global config")
-        
+
         # Determine schedule type
         if InspectionConfig.SCHEDULE_INTERVAL_MINUTES:
             # Interval-based (for testing)
@@ -133,7 +133,7 @@ class InspectionScheduler:
             schedule = "0 9 * * *"  # Default to 9 AM
         elif schedule.lower() == "hourly":
             schedule = "0 * * * *"
-            
+
         try:
             from croniter import croniter
         except ImportError:

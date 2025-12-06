@@ -133,9 +133,9 @@ class NetBoxManagementWorkflow(BaseWorkflow):
             "virtual-machine",
         ]
         if any(entity in query_lower for entity in entity_types):
-            return True, "包含 NetBox 实体类型"
+            return True, "Contains NetBox entity type"
 
-        return False, "非 NetBox 管理请求"
+        return False, "Not a NetBox management request"
 
     def build_graph(self, checkpointer: BaseCheckpointSaver) -> StateGraph:
         """Build NetBox management workflow graph."""
@@ -228,7 +228,7 @@ class NetBoxManagementWorkflow(BaseWorkflow):
                     "action": "approval_required",
                     "api_endpoint": api_endpoint,
                     "operation_plan": operation_plan,
-                    "message": f"请审批 NetBox 操作:\n端点: {api_endpoint}\n计划: {operation_plan}\n\n输入 Y 确认, N 取消:",
+                    "message": f"Please approve NetBox operation:\nEndpoint: {api_endpoint}\nPlan: {operation_plan}\n\nEnter Y to confirm, N to cancel:",
                 }
             )
 
@@ -319,18 +319,18 @@ class NetBoxManagementWorkflow(BaseWorkflow):
             """Generate final answer with operation summary."""
             llm = LLMFactory.get_chat_model()
 
-            final_prompt = f"""综合操作结果，给出最终答案。
+            final_prompt = f"""Synthesize operation results and provide final answer.
 
-用户请求: {state["messages"][0].content}
-API 端点: {state.get("api_endpoint")}
-操作计划: {state.get("operation_plan")}
-审批状态: {state.get("approval_status")}
-执行结果: {state.get("execution_result")}
-验证结果: {state.get("verification_result")}
+User request: {state["messages"][0].content}
+API endpoint: {state.get("api_endpoint")}
+Operation plan: {state.get("operation_plan")}
+Approval status: {state.get("approval_status")}
+Execution result: {state.get("execution_result")}
+Verification result: {state.get("verification_result")}
 
-要求：
-- 如果被拒绝，说明原因
-- 如果已执行，汇总操作对象、API 响应、验证状态
+Requirements:
+- If rejected, explain reason
+- If executed, summarize target objects, API response, verification status
 """
 
             response = await llm.ainvoke([SystemMessage(content=final_prompt)])
