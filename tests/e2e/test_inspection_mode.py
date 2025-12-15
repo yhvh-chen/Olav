@@ -330,7 +330,7 @@ class TestCheckExecution:
         result = await controller.execute_check("router-01", check)
 
         assert result.success is False
-        assert "Unknown tool" in result.error
+        assert "Unknown source" in result.error
 
     @pytest.mark.asyncio
     async def test_execute_check_with_exception(self, check_config):

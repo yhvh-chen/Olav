@@ -77,7 +77,7 @@ class QueryPlan(BaseModel):
     )
 
     # Data source control (for multi-source fallback)
-    source: Literal["suzieq", "openconfig", "cli"] = Field(
+    source: Literal["suzieq", "openconfig", "cli", "unknown"] = Field(
         default="suzieq", description="Data source for execution"
     )
     fallback_tool: str | None = Field(

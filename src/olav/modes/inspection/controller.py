@@ -609,15 +609,26 @@ class InspectionModeController:
 
         # Explicit mode: use provided tool/parameters directly
         if check.is_explicit_mode:
+            # Determine source based on tool name
+            tool = check.tool or "suzieq_query"
+            if tool == "suzieq_query":
+                source = "suzieq"
+            elif tool == "cli_show":
+                source = "cli"
+            elif tool == "netconf_get":
+                source = "openconfig"
+            else:
+                source = "unknown"
+
             # Create a synthetic QueryPlan for explicit mode
             plan = QueryPlan(
                 table=check.parameters.get("table", "device"),
                 method=check.parameters.get("method", "get"),
                 filters={k: v for k, v in check.parameters.items() if k not in ("table", "method")},
-                source="suzieq",
+                source=source,
                 read_only=True,
             )
-            return check.tool or "suzieq_query", check.parameters, check.threshold, plan
+            return tool, check.parameters, check.threshold, plan
 
         # Intent mode: use IntentCompiler
         if check.is_intent_mode and check.intent:
