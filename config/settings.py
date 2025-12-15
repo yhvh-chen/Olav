@@ -50,13 +50,13 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     # LLM Configuration
     # =========================================================================
-    llm_provider: Literal["openai", "ollama", "azure"] = "ollama"
+    llm_provider: Literal["openai", "ollama", "azure"] = "openai"
     llm_api_key: str = ""
-    llm_base_url: str = "http://host.docker.internal:11434"
-    llm_model_name: str = "ministral-3:14b-instruct-2512-q8_0"
-    llm_fast_model: str = "ministral-3:14b-instruct-2512-q8_0"
+    llm_base_url: str = ""
+    llm_model_name: str = "gpt-4-turbo"
+    llm_fast_model: str = "gpt-3.5-turbo"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 16384
+    llm_max_tokens: int = 4096
 
     # =========================================================================
     # Embedding Configuration
