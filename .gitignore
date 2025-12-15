@@ -78,3 +78,28 @@ uv.lock
 # Archive (code only, keep docs/archive)
 archive/
 !docs/archive/
+
+# -----------------------------------------------------------------------------
+# Local Development & Test Files (Added for GitHub cleanup)
+# -----------------------------------------------------------------------------
+
+# Root level debug/test scripts
+/debug_*.py
+/test_*.py
+
+# Dev/Test Infrastructure
+docker-compose.dev.yml
+Dockerfile.tests
+ssh_config
+
+# Dev Scripts
+scripts/debug_*.py
+scripts/create_test_parquet.py
+scripts/generate_dev_token.py
+
+# Local Data & Reports
+data/inspection-reports/
+data/netbox-media/
+data/netbox-reports/
+data/netbox-scripts/
+data/bootstrap/
