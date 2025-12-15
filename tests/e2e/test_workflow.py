@@ -11,7 +11,7 @@ class TestInfrastructureConnectivity:
         """Test that settings are properly loaded."""
         assert settings.postgres_uri
         assert settings.opensearch_url
-        assert settings.redis_url
+        # Note: redis_url is optional - Redis is not required for core functionality
 
     @pytest.mark.asyncio
     async def test_postgres_connection(self):
@@ -44,6 +44,9 @@ class TestInfrastructureConnectivity:
     @pytest.mark.asyncio
     async def test_redis_connection(self):
         """Test Redis connection."""
+        if not settings.redis_url:
+            pytest.skip("Redis URL not configured (Redis is optional)")
+
         from redis.asyncio import Redis
 
         try:
@@ -90,12 +93,8 @@ class TestCoreComponents:
 
     def test_settings_import(self):
         """Test settings can be imported."""
-        from config.settings import LLMConfig, Paths
-
         from config.settings import EnvSettings
         assert EnvSettings is not None
-        assert LLMConfig is not None
-        assert Paths is not None
 
     def test_memory_import(self):
         """Test memory module can be imported."""

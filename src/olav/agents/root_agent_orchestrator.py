@@ -30,7 +30,7 @@ if sys.platform == "win32":
 
 import logging
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 # Import tools package to ensure ToolRegistry is populated with all tools
@@ -205,6 +205,55 @@ class WorkflowOrchestrator:
         """
         query_lower = user_query.lower()
 
+        config_verbs = (
+            "configure",
+            "config",
+            "modify",
+            "change",
+            "add",
+            "create",
+            "delete",
+            "remove",
+            "shutdown",
+            "no shutdown",
+            "enable",
+            "disable",
+            "set",
+        )
+
+        # Network configuration objects (signals user wants to change device config)
+        device_config_objects = (
+            "loopback",
+            "interface",
+            "vlan",
+            "bgp",
+            "ospf",
+            "route",
+            "static route",
+            "neighbor",
+            "prefix-list",
+            "route-map",
+            "access-list",
+        )
+
+        # Strong NetBox / IPAM signals
+        netbox_markers = (
+            "netbox",
+            "inventory",
+            "cmdb",
+            "ipam",
+            "dcim",
+            "site",
+            "rack",
+            "prefix",
+            "available ip",
+            "allocate",
+            "allocation",
+            "/dcim/",
+            "/ipam/",
+            "ip-addresses",
+        )
+
         # Priority 1: Deep Dive (expert mode only)
         if self.expert_mode and any(
             kw in query_lower for kw in ["audit", "batch", "why"]
@@ -216,19 +265,239 @@ class WorkflowOrchestrator:
         if any(kw in query_lower for kw in ["inspect", "sync", "diff", "compare"]):
             return WorkflowType.INSPECTION
 
-        # Priority 3: NetBox management
-        if any(
-            kw in query_lower
-            for kw in ["inventory", "netbox", "ip allocation", "ip address", "site", "rack"]
+        # Priority 3: Device execution (config changes)
+        # IMPORTANT: Prefer device_execution for config verbs + network config objects,
+        # even if the query mentions "ip address" (common in interface config requests).
+        if any(v in query_lower for v in config_verbs) and any(
+            obj in query_lower for obj in device_config_objects
         ):
+            return WorkflowType.DEVICE_EXECUTION
+
+        # Priority 4: NetBox management (CMDB/IPAM)
+        if any(marker in query_lower for marker in netbox_markers):
             return WorkflowType.NETBOX_MANAGEMENT
 
-        # Priority 4: Device execution (config changes)
-        if any(kw in query_lower for kw in ["configure", "modify", "add", "delete", "shutdown"]):
+        # Priority 5: Device execution (generic config verbs)
+        if any(v in query_lower for v in config_verbs):
             return WorkflowType.DEVICE_EXECUTION
 
         # Default: Query diagnostic
         return WorkflowType.QUERY_DIAGNOSTIC
+
+    async def _load_conversation_history(
+        self,
+        thread_id: str,
+        max_messages: int = 50,
+        max_tokens: int = 16000,
+        enable_summary: bool = True,
+    ) -> list[BaseMessage]:
+        """Load conversation history from checkpointer with optional summarization.
+
+        This enables LLM to use prior context (e.g., interface lists from previous queries)
+        to resolve abbreviations like 'lo16' -> 'Loopback16'.
+
+        When history exceeds max_tokens, older messages are summarized to save tokens
+        while preserving important context.
+
+        Args:
+            thread_id: Unique conversation thread ID
+            max_messages: Maximum number of historical messages to load (default: 50)
+            max_tokens: Maximum tokens for history (default: 16000)
+            enable_summary: Enable LLM summarization for long histories (default: True)
+
+        Returns:
+            List of BaseMessage objects (HumanMessage/AIMessage), potentially with
+            a SystemMessage summary of older context prepended
+        """
+        if not self.checkpointer:
+            logger.debug("No checkpointer configured, skipping history load")
+            return []
+
+        try:
+            # Use aget_tuple to retrieve the latest checkpoint state
+            config = {"configurable": {"thread_id": thread_id}}
+            checkpoint_tuple = await self.checkpointer.aget_tuple(config)
+
+            if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
+                logger.debug(f"No checkpoint found for thread_id={thread_id}")
+                return []
+
+            # Extract messages from checkpoint channel_values
+            channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+            messages = channel_values.get("messages", [])
+
+            if not messages:
+                logger.debug(f"No messages in checkpoint for thread_id={thread_id}")
+                return []
+
+            # Convert to BaseMessage objects if needed and apply limit
+            history: list[BaseMessage] = []
+            for msg in messages[-max_messages:]:
+                if isinstance(msg, BaseMessage):
+                    history.append(msg)
+                elif isinstance(msg, dict):
+                    role = msg.get("role", msg.get("type", ""))
+                    content = msg.get("content", "")
+                    if role in ("human", "user"):
+                        history.append(HumanMessage(content=content))
+                    elif role in ("ai", "assistant"):
+                        history.append(AIMessage(content=content))
+
+            # Estimate token count (rough: 4 chars ≈ 1 token)
+            total_chars = sum(len(m.content) for m in history if hasattr(m, "content"))
+            estimated_tokens = total_chars // 4
+
+            # If within token limit, return as-is
+            if estimated_tokens <= max_tokens or not enable_summary:
+                logger.info(
+                    f"Loaded {len(history)} messages (~{estimated_tokens} tokens) "
+                    f"for thread_id={thread_id}"
+                )
+                return history
+
+            # Summarize older messages to fit within token limit
+            logger.info(
+                f"History exceeds {max_tokens} tokens (~{estimated_tokens}), "
+                f"summarizing older messages"
+            )
+            return await self._summarize_history(history, max_tokens)
+
+        except Exception as e:
+            logger.warning(f"Failed to load conversation history: {e}")
+            return []
+
+    async def _summarize_history(
+        self,
+        messages: list[BaseMessage],
+        max_tokens: int,
+        recent_count: int = 10,
+    ) -> list[BaseMessage]:
+        """Summarize older messages while keeping recent ones intact.
+
+        Uses ConversationSummaryBufferMemory pattern:
+        - Keep last `recent_count` messages as-is (for detailed context)
+        - Summarize older messages into a single SystemMessage
+
+        Args:
+            messages: Full message history
+            max_tokens: Token budget for history
+            recent_count: Number of recent messages to preserve verbatim
+
+        Returns:
+            [SystemMessage(summary)] + recent_messages
+        """
+        if len(messages) <= recent_count:
+            return messages
+
+        # Split into old (to summarize) and recent (to keep)
+        old_messages = messages[:-recent_count]
+        recent_messages = messages[-recent_count:]
+
+        try:
+            # Build summary prompt
+            old_content = "\n".join(
+                f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: {m.content[:500]}"
+                for m in old_messages
+                if hasattr(m, "content")
+            )
+
+            summary_prompt = f"""Summarize the following conversation history concisely.
+Focus on:
+1. Devices and interfaces mentioned
+2. Configuration changes discussed
+3. Key diagnostic findings
+4. Any unresolved issues
+
+Conversation:
+{old_content}
+
+Provide a concise summary (max 500 words):"""
+
+            # Use a lightweight LLM call for summarization
+            llm = LLMFactory.get_chat_model(json_mode=False, reasoning=False)
+            response = await llm.ainvoke([HumanMessage(content=summary_prompt)])
+
+            summary_text = f"[Previous conversation summary]\n{response.content}"
+            summary_message = SystemMessage(content=summary_text)
+
+            logger.info(
+                f"Summarized {len(old_messages)} old messages, "
+                f"keeping {len(recent_messages)} recent messages"
+            )
+
+            return [summary_message] + recent_messages
+
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}, using truncation fallback")
+            # Fallback: just return recent messages without summary
+            return recent_messages
+
+    async def _save_messages_to_checkpointer(
+        self,
+        thread_id: str,
+        user_query: str,
+        assistant_response: str,
+    ) -> None:
+        """Save conversation messages to checkpointer for context continuity.
+
+        This ensures Standard Mode queries (like "check interfaces on R1")
+        are available as context for subsequent requests (like "delete lo11").
+
+        Args:
+            thread_id: Conversation thread ID
+            user_query: User's query
+            assistant_response: Assistant's response
+        """
+        if not self.checkpointer:
+            return
+
+        try:
+            config = {"configurable": {"thread_id": thread_id}}
+
+            # Load existing messages or start fresh
+            existing_messages: list[BaseMessage] = []
+            try:
+                checkpoint_tuple = await self.checkpointer.aget_tuple(config)
+                if checkpoint_tuple and checkpoint_tuple.checkpoint:
+                    channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+                    existing_messages = channel_values.get("messages", [])
+            except Exception:
+                pass  # Start fresh if no existing checkpoint
+
+            # Append new messages
+            new_messages = existing_messages + [
+                HumanMessage(content=user_query),
+                AIMessage(content=assistant_response),
+            ]
+
+            # Save updated checkpoint
+            checkpoint = {
+                "v": 1,
+                "id": f"checkpoint-{thread_id}",
+                "ts": None,
+                "channel_values": {
+                    "messages": new_messages,
+                },
+                "channel_versions": {},
+                "versions_seen": {},
+                "pending_sends": [],
+            }
+
+            await self.checkpointer.aput(
+                config=config,
+                checkpoint=checkpoint,
+                metadata={"source": "standard_mode", "step": len(new_messages) // 2},
+                new_versions={},
+            )
+
+            print(f"[Orchestrator] ✅ Saved {len(new_messages)} messages to checkpointer for thread_id={thread_id}")
+            logger.debug(
+                f"Saved {len(new_messages)} messages to checkpointer for thread_id={thread_id}"
+            )
+
+        except Exception as e:
+            print(f"[Orchestrator] ❌ Failed to save messages: {e}")
+            logger.warning(f"Failed to save messages to checkpointer: {e}")
 
     async def route(self, user_query: str, thread_id: str, mode: str = "standard") -> dict:
         """Route query to appropriate workflow and execute.
@@ -301,6 +570,14 @@ class WorkflowOrchestrator:
                     # Check for success
                     if strategy_result.get("success"):
                         print("[Orchestrator] fast_path succeeded")
+                        # Save query and response to checkpointer for conversation continuity
+                        # This enables subsequent requests (like "delete lo11") to access
+                        # prior context (interface list from "check interfaces on R1")
+                        await self._save_messages_to_checkpointer(
+                            thread_id=thread_id,
+                            user_query=user_query,
+                            assistant_response=strategy_result.get("answer", ""),
+                        )
                         return {
                             "workflow_type": workflow_type.name,
                             "result": strategy_result,
@@ -331,8 +608,27 @@ class WorkflowOrchestrator:
             "recursion_limit": 100,
         }
 
+        # Load conversation history for context-aware processing
+        # This enables LLM to resolve interface abbreviations (lo16 -> Loopback16)
+        # by referencing previously queried interface lists
+        history_messages = await self._load_conversation_history(thread_id)
+        
+        # Debug: Print history status
+        if history_messages:
+            print(f"[Orchestrator] Loaded {len(history_messages)} history messages for context")
+            # Show brief preview of last message content (truncated)
+            last_msg = history_messages[-1] if history_messages else None
+            if last_msg and hasattr(last_msg, 'content'):
+                preview = last_msg.content[:200].replace('\n', ' ')
+                print(f"[Orchestrator] Last history message preview: {preview}...")
+        else:
+            print(f"[Orchestrator] WARNING: No history messages found for thread_id={thread_id}")
+        
+        # Combine history with current query
+        all_messages = history_messages + [HumanMessage(content=user_query)]
+
         initial_state = {
-            "messages": [HumanMessage(content=user_query)],
+            "messages": all_messages,
             "workflow_type": workflow_type,
             "iteration_count": 0,
         }
@@ -351,12 +647,16 @@ class WorkflowOrchestrator:
         try:
             state_snapshot = await graph.aget_state(config)
             if state_snapshot.next:
+                # Extract execution plan from result (device_execution uses config_plan)
+                execution_plan = result.get("execution_plan") or result.get("config_plan")
+                
                 return {
                     "workflow_type": workflow_type.name,
                     "result": result,
                     "interrupted": True,
                     "next_node": state_snapshot.next[0] if state_snapshot.next else None,
-                    "execution_plan": result.get("execution_plan"),
+                    "execution_plan": execution_plan,
+                    "config_plan": result.get("config_plan"),  # Include config_plan for device_execution
                     "todos": result.get("todos", []),
                     "final_message": result["messages"][-1].content
                     if result.get("messages")

@@ -36,39 +36,63 @@ except Exception:  # pragma: no cover
             self.url = url
 
 try:  # pragma: no cover - defensive import
-    from config.settings import EnvSettings  # type: ignore
+    from config.settings import EnvSettings, settings  # type: ignore
 except Exception:  # pragma: no cover
     class EnvSettings:  # type: ignore
         def __init__(self, **kwargs) -> None:
             for k, v in kwargs.items():
                 setattr(self, k, v)
+    settings = None  # Will use defaults
 
 
 @pytest.fixture
 def test_settings() -> EnvSettings:
-    """Test settings with safe defaults (stub-compatible)."""
+    """Test settings loaded from environment (via config.settings).
+
+    Uses the real EnvSettings which reads from .env file, ensuring
+    tests use the same configuration as the running services.
+    """
+    if settings is not None:
+        return settings
+    # Fallback for minimal test contexts
     return EnvSettings(
         llm_provider="openai",
         llm_api_key="test-key",
-        postgres_uri="postgresql://olav:OlavPG123!@localhost:55432/olav",
-        opensearch_url="http://localhost:9200",
-        redis_url="redis://localhost:6379",
+        postgres_uri=os.getenv("POSTGRES_URI", "postgresql://olav:OlavPG123!@localhost:55432/olav"),
+        opensearch_url=os.getenv("OPENSEARCH_URL", "http://localhost:19200"),
+        redis_url=os.getenv("REDIS_URL", ""),
     )
 
 
 @pytest.fixture
-async def checkpointer() -> PostgresSaver:
-    """Shared PostgreSQL checkpointer for tests."""
-    conn_string = "postgresql://olav:OlavPG123!@localhost:55432/olav"
-    with PostgresSaver.from_conn_string(conn_string) as saver:
-        saver.setup()
-        yield saver
+async def checkpointer():
+    """Shared PostgreSQL checkpointer for tests.
+
+    Uses postgres_uri from EnvSettings to ensure consistency with
+    the running PostgreSQL container.
+    """
+    # Get connection string from settings or environment
+    if settings is not None:
+        conn_string = settings.postgres_uri
+    else:
+        conn_string = os.getenv("POSTGRES_URI", "postgresql://olav:OlavPG123!@localhost:55432/olav")
+
+    try:
+        async with PostgresSaver.from_conn_string(conn_string) as saver:
+            await saver.setup()
+            yield saver
+    except Exception as e:
+        pytest.skip(f"PostgreSQL not available: {e}")
 
 
 @pytest.fixture
 def opensearch_memory() -> OpenSearchMemory:
-    """Mock OpenSearch memory instance (stub if import failed)."""
-    return OpenSearchMemory(url="http://localhost:9200")
+    """OpenSearch memory instance using settings from environment."""
+    if settings is not None:
+        url = settings.opensearch_url
+    else:
+        url = os.getenv("OPENSEARCH_URL", "http://localhost:19200")
+    return OpenSearchMemory(url=url)
 
 
 @pytest.fixture
@@ -115,6 +139,43 @@ def reset_tool_registry():
     if not registered_tools:
         print("WARNING: ToolRegistry is empty after imports!")
 
+
+# ============================================
+# Authenticated HTTP Client Fixtures (for E2E tests)
+# ============================================
+
+@pytest.fixture(scope="module")
+def api_base_url() -> str:
+    """API server base URL from environment or default."""
+    if settings is not None:
+        host = getattr(settings, 'server_host', '127.0.0.1')
+        port = getattr(settings, 'server_port', 8000)
+        return f"http://{host}:{port}"
+    return os.getenv("OLAV_SERVER_URL", "http://127.0.0.1:8000")
+
+
+@pytest.fixture(scope="module")
+def api_token() -> str:
+    """API token for authenticated requests.
+
+    In QuickTest mode (AUTH_DISABLED=true), returns empty string.
+    In Production mode, reads from OLAV_API_TOKEN environment variable.
+    """
+    auth_disabled = os.getenv("AUTH_DISABLED", "false").lower() in ("true", "1", "yes")
+    if auth_disabled:
+        return ""
+    return os.getenv("OLAV_API_TOKEN", "")
+
+
+@pytest.fixture
+def auth_headers(api_token: str) -> dict:
+    """Authorization headers for API requests.
+
+    Returns empty dict if auth is disabled (QuickTest mode).
+    """
+    if not api_token:
+        return {}
+    return {"Authorization": f"Bearer {api_token}"}
 
 
 def pytest_configure(config):

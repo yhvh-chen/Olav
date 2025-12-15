@@ -7,7 +7,9 @@ Uses the same orchestrator as the CLI but in stateless mode.
 import operator
 import sys
 import time
-from typing import Annotated, TypedDict
+from typing import Annotated
+
+from typing_extensions import TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph

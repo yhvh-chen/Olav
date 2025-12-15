@@ -27,6 +27,7 @@ Environment Variables:
 import argparse
 import logging
 import os
+import subprocess
 import sys
 
 from opensearchpy import OpenSearch
@@ -247,6 +248,69 @@ def init_syslog_index(force: bool = False) -> bool:
         return False
 
 
+def init_netbox_devices(csv_path: str = "config/inventory.csv", force: bool = False) -> bool:
+    """Import device inventory from CSV into NetBox.
+
+    Args:
+        csv_path: Path to CSV file (relative to project root)
+        force: Force reimport even if devices exist
+
+    Returns:
+        True if successful
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("🖧 Initializing NetBox Device Inventory")
+    logger.info("=" * 60)
+
+    try:
+        # Get project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        csv_full_path = os.path.join(project_root, csv_path)
+
+        # Check if CSV exists
+        if not os.path.exists(csv_full_path):
+            logger.warning(f"  ⚠ Device CSV not found at {csv_full_path}, skipping device import")
+            return True
+
+        # Prepare environment
+        env = os.environ.copy()
+        if force:
+            env["NETBOX_INGEST_FORCE"] = "true"
+
+        # Run device import script
+        cmd = ["uv", "run", "python", "scripts/netbox_ingest.py"]
+
+        logger.info(f"  Running: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            cwd=project_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+
+        # Parse result
+        if result.returncode == 0:
+            logger.info("  ✓ Device inventory imported successfully")
+            return True
+        elif result.returncode == 99:
+            logger.info("  ✓ NetBox already contains devices (skipped import)")
+            return True
+        else:
+            logger.error(f"  ✗ Device import failed with exit code {result.returncode}")
+            logger.debug(f"  stderr: {result.stderr}")
+            logger.debug(f"  stdout: {result.stdout}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        logger.error("  ✗ Device import timed out after 5 minutes")
+        return False
+    except Exception as e:
+        logger.error(f"  ✗ Device inventory initialization failed: {e}")
+        return False
+
+
 def show_index_status() -> None:
     """Show status of all OLAV indexes."""
     logger.info("\n" + "=" * 60)
@@ -384,6 +448,10 @@ Examples:
     if init_all or args.netbox:
         force_netbox = _get_force_flag("NETBOX", global_force)
         results["NetBox Schema"] = init_netbox_schema(force_netbox)
+
+    if init_all or args.netbox:
+        force_netbox = _get_force_flag("NETBOX", global_force)
+        results["NetBox Devices"] = init_netbox_devices(force=force_netbox)
 
     if init_all or args.episodic:
         force_episodic = _get_force_flag("EPISODIC", global_force)

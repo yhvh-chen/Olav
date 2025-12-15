@@ -16,7 +16,7 @@ template: |
 
   ## Tools
   - suzieq_query: Network state {table, hostname} tables: bgp,interface,routes,ospf,vlan,mac,lldp
-  - netbox_api_call: CMDB query {endpoint} endpoints: /dcim/devices/, /ipam/ip-addresses/
+  - netbox_api_call: CMDB query {path} endpoints: /dcim/devices/, /ipam/ip-addresses/
   - cli_tool: CLI command {device, command}
   - netconf_tool: NETCONF {device, xpath}
 
@@ -25,5 +25,5 @@ template: |
 
   ## Examples
   "query R1 BGP"→{"intent_category":"suzieq","tool":"suzieq_query","parameters":{"table":"bgp","hostname":"R1"},"confidence":0.95}
-  "list devices"→{"intent_category":"netbox","tool":"netbox_api_call","parameters":{"endpoint":"/dcim/devices/"},"confidence":0.9}
+  "list devices"→{"intent_category":"netbox","tool":"netbox_api_call","parameters":{"path":"/dcim/devices/"},"confidence":0.9}
   "show ip route on R1"→{"intent_category":"cli","tool":"cli_tool","parameters":{"device":"R1","command":"show ip route"},"confidence":0.95}

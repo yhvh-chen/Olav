@@ -112,7 +112,7 @@ To support this CLI, the Server must expose:
 
 ## 6. Migration Guide
 -   Users of the old `olav.py` (local execution) will be encouraged to use the new client connecting to the Docker container.
--   The old `webgui` is archived to `archive/webgui_v1`.
+-   The old web UI is archived (deprecated).
 
 ---
 *Drafted by GitHub Copilot on 2025-12-02*

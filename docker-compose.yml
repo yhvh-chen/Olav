@@ -6,9 +6,9 @@ services:
     image: fluent/fluent-bit:latest
     container_name: olav-fluent-bit
     ports:
-      - "514:514/udp"
-      - "514:514/tcp"
-      - "2020:2020"  # HTTP monitoring endpoint
+      - "${FLUENT_SYSLOG_PORT:-1514}:514/udp"   # Syslog UDP (changed from 514 to avoid permission issues)
+      - "${FLUENT_SYSLOG_PORT:-1514}:514/tcp"   # Syslog TCP
+      - "${FLUENT_HTTP_PORT:-12020}:2020"       # HTTP monitoring endpoint (changed from 2020)
     volumes:
       - ./config/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./config/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
@@ -29,12 +29,13 @@ services:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      # Security Configuration
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-OlavOS123!}
-      - plugins.security.disabled=false
+      # Security Configuration (set OPENSEARCH_SECURITY_DISABLED=true for Quick Test mode)
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-OlavOS-2025!A7r9xQ}
+      - plugins.security.disabled=${OPENSEARCH_SECURITY_DISABLED:-false}
       # SSL/TLS disabled for development (use nginx/traefik for production TLS)
       - plugins.security.ssl.http.enabled=false
-      - plugins.security.ssl.transport.enabled=false
+      - plugins.security.ssl.transport.enabled=true
+      - plugins.security.ssl.transport.enforce_hostname_verification=false
       # Allow all hosts for development
       - plugins.security.allow_default_init_securityindex=true
       - plugins.security.audit.type=internal_opensearch
@@ -48,13 +49,14 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "19200:9200"  # Changed to 19200 to avoid Windows reserved port range
-      - "19600:9600"  # Changed to 19600 to avoid Windows reserved port range
+      - "${OPENSEARCH_PORT:-19200}:9200"  # Changed to 19200 to avoid Windows reserved port range
+      - "${OPENSEARCH_METRICS_PORT:-19600}:9600"  # Changed to 19600 to avoid Windows reserved port range
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -u admin:${OPENSEARCH_PASSWORD:-OlavOS123!} http://localhost:9200/_cluster/health || exit 1"]
+      # Use auth when security enabled, skip auth when OPENSEARCH_SECURITY_DISABLED=true
+      test: ["CMD-SHELL", "if [ \"${OPENSEARCH_SECURITY_DISABLED:-false}\" = \"true\" ]; then curl -sf http://localhost:9200/_cluster/health; else curl -sf -u admin:${OPENSEARCH_PASSWORD:-OlavOS-2025!A7r9xQ} http://localhost:9200/_cluster/health; fi || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -69,7 +71,7 @@ services:
     env_file:
       - .env
     ports:
-      - "55432:5432"
+      - "${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -81,19 +83,24 @@ services:
     networks:
       - olav-network
 
-  # Redis - Session & Cache (OPTIONAL)
+  # Redis (Valkey) - Session & Cache (OPTIONAL)
   # Enable with: docker-compose --profile cache up -d
   # Without Redis, OLAV uses in-memory cache (sufficient for single-instance)
-  redis:
-    image: redis:7-alpine
+  # Using Valkey - Redis-compatible fork with better performance
+  olav-redis:
+    image: docker.io/valkey/valkey:8.1-alpine
     container_name: olav-redis
+    command:
+      - sh
+      - -c
+      - valkey-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - olav_redis_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -111,7 +118,7 @@ services:
       - .env
     user: "0:0"  # Run as root to avoid Windows bind-mount permission issues
     ports:
-      - "8501:8501"  # GUI
+      - "${SUZIEQ_GUI_PORT:-8501}:8501"  # GUI
     volumes:
       - ./data/suzieq-parquet:/suzieq/parquet
       - ./data/generated_configs:/suzieq/config:ro
@@ -128,7 +135,7 @@ services:
       - olav-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8501/healthz || exit 1"]
+      test: ["CMD-SHELL", "python3.9 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8501/healthz', timeout=5).read()\" >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 60s
@@ -139,18 +146,31 @@ services:
     container_name: olav-suzieq-poller
     env_file:
       - .env
+    environment:
+      # Avoid SuzieQ NetBox inventory treating a string tag as an iterable (s/u/z/...) and failing tag validation.
+      # Tag filtering should come from inventory.yml where we write a proper YAML list.
+      SUZIEQ_TAG_NAME: ""
     user: "0:0"  # Run as root to avoid Windows bind-mount permission issues
     volumes:
       - ./data/suzieq-parquet:/suzieq/parquet
       - ./data/generated_configs:/suzieq/config:ro
-    entrypoint: ["/usr/local/bin/python3.9"]
-    # Reverted monkey patch that broke pydantic; original startup restored.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "-c"
-      - "from suzieq.poller.sq_poller import controller_main; import sys; sys.argv = ['sq-poller', '--config', '/suzieq/config/suzieq_config.yml']; controller_main()"
+      - "mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo 'Host *' > /root/.ssh/config && echo '    StrictHostKeyChecking no' >> /root/.ssh/config && echo '    UserKnownHostsFile /dev/null' >> /root/.ssh/config && echo '    KexAlgorithms +diffie-hellman-group14-sha1' >> /root/.ssh/config && echo '    HostKeyAlgorithms +ssh-rsa' >> /root/.ssh/config && echo '    PubkeyAcceptedKeyTypes +ssh-rsa' >> /root/.ssh/config && chmod 600 /root/.ssh/config && while true; do /usr/local/bin/python3.9 -c \"from suzieq.poller.sq_poller import controller_main; import sys; sys.argv = ['sq-poller', '--config', '/suzieq/config/suzieq_config.yml', '-I', '/suzieq/config/inventory.yml', '--ssh-config-file', '/root/.ssh/config']; controller_main()\"; rc=$$?; echo \"sq-poller exited rc=$$rc; retrying in 30s\"; sleep 30; done"
+    # entrypoint: ["/usr/local/bin/python3.9"]
+    # Reverted monkey patch that broke pydantic; original startup restored.
+    # command:
+    #   - "-c"
+    #   - "from suzieq.poller.sq_poller import controller_main; import sys; sys.argv = ['sq-poller', '--config', '/suzieq/config/suzieq_config.yml', '-I', '/suzieq/config/inventory.yml']; controller_main()"
+    # entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+    # entrypoint: ["/usr/local/bin/python3.9"]
+    # Reverted monkey patch that broke pydantic; original startup restored.
+    # command:
+    #   - "-c"
+    #   - "from suzieq.poller.sq_poller import controller_main; import sys; sys.argv = ['sq-poller', '--config', '/suzieq/config/suzieq_config.yml', '-I', '/suzieq/config/inventory.yml']; controller_main()"
     depends_on:
       netbox:
-        condition: service_started
+        condition: service_healthy
     networks:
       - olav-network
     restart: unless-stopped
@@ -179,15 +199,40 @@ services:
     profiles:
       - netbox
 
+  # NetBox Redis (Valkey) - Primary
   netbox-redis:
-    image: redis:7-alpine
+    image: docker.io/valkey/valkey:8.1-alpine
     container_name: olav-netbox-redis
-    command: redis-server --appendonly yes
+    command:
+      - sh
+      - -c
+      - valkey-server --appendonly yes
     volumes:
       - netbox_redis_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - olav-network
+    profiles:
+      - netbox
+
+  # NetBox Redis (Valkey) - Cache
+  netbox-redis-cache:
+    image: docker.io/valkey/valkey:8.1-alpine
+    container_name: olav-netbox-redis-cache
+    command:
+      - sh
+      - -c
+      - valkey-server
+    volumes:
+      - netbox_redis_cache_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -204,24 +249,34 @@ services:
         condition: service_healthy
       netbox-redis:
         condition: service_healthy
+      netbox-redis-cache:
+        condition: service_healthy
     environment:
+      # Database
       DB_NAME: netbox
       DB_USER: netbox
       DB_PASSWORD: netbox
       DB_HOST: netbox-postgres
       DB_PORT: 5432
+      # Redis (primary)
       REDIS_HOST: netbox-redis
       REDIS_PORT: 6379
+      # Redis (cache)
+      REDIS_CACHE_HOST: netbox-redis-cache
+      REDIS_CACHE_PORT: 6379
+      # Security
       ALLOWED_HOSTS: '*'  # Development convenience
+      SECRET_KEY: ${NETBOX_SECRET_KEY}
+      # Superuser auto-creation
       SUPERUSER_NAME: ${NETBOX_SUPERUSER_NAME}
       SUPERUSER_EMAIL: ${NETBOX_SUPERUSER_EMAIL}
       SUPERUSER_PASSWORD: ${NETBOX_SUPERUSER_PASSWORD}
-      SUPERUSER_API_TOKEN: ${NETBOX_TOKEN}  # Replace with real token after first login
+      SUPERUSER_API_TOKEN: ${NETBOX_TOKEN}
+      # Startup
       DB_WAIT_TIMEOUT: 90
       DB_WAIT_DEBUG: 1
-      SECRET_KEY: ${NETBOX_SECRET_KEY}
     ports:
-      - "8080:8080"
+      - "${NETBOX_PORT:-8080}:8080"
     networks:
       - olav-network
     profiles:
@@ -234,6 +289,7 @@ services:
     restart: unless-stopped
     healthcheck:
       # Accept 200 or 403 (auth required) as healthy - server is responding
+      # Healthcheck runs inside the container; always use container port 8080 (not host-mapped NETBOX_PORT).
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/ | grep -E '^(200|403)$' || exit 1"]
       interval: 30s
       timeout: 10s
@@ -255,14 +311,17 @@ services:
       - .env
     environment:
       # Override for Docker network (containers use service name, not localhost)
-      POSTGRES_URI: postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
-      OPENSEARCH_URL: http://opensearch:9200
-      REDIS_URL: ${REDIS_URL:-}  # Optional: redis://redis:6379 if using --profile cache
-      NETBOX_URL: http://netbox:8080
+      POSTGRES_URI: ${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      REDIS_URL: ${REDIS_URL:-}  # Optional: redis://olav-redis:6379 if using --profile cache
+      NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
+      # LLM Configuration for container (use host.docker.internal to reach host Ollama)
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434}
       # Disable auth for testing (set to false in production!)
       AUTH_DISABLED: ${AUTH_DISABLED:-true}
     ports:
-      - "8000:8000"
+      - "${OLAV_APP_PORT:-18000}:8000"
     volumes:
       - ./config:/app/config  # Writable for prompt debugging
       - ./data:/app/data
@@ -278,13 +337,13 @@ services:
       - olav-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf --max-time 8 http://localhost:8000/health | python -c \"import sys, json; j=json.load(sys.stdin); sys.exit(0 if j.get('orchestrator_ready') else 1)\" || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 60s
       retries: 3
 
-  # OLAV API Server - LangServe API Platform + Gradio WebGUI
+  # OLAV API Server - LangServe API Platform
   olav-server:
     build:
       context: .
@@ -293,8 +352,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8001:8000"  # API Server (host 8001 -> container 8000)
-      - "3100:3100"  # Gradio WebGUI (mounted at /ui)
+      - "${OLAV_SERVER_PORT:-18001}:8000"  # API Server (host -> container 8000)
     volumes:
       - ./config:/app/config
       - ./data/suzieq-parquet:/app/data/suzieq-parquet:ro  # SuzieQ Parquet data (read-only)
@@ -307,15 +365,19 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - OLAV_USE_DYNAMIC_ROUTER=true
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:3100
+      - CORS_ORIGINS=http://localhost:3000
       # Override for Docker network (containers use service name, not localhost)
-      - POSTGRES_URI=postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
-      - OPENSEARCH_URL=http://opensearch:9200
-      - REDIS_URL=${REDIS_URL:-}  # Optional: redis://redis:6379 if using --profile cache
-      - NETBOX_URL=http://netbox:8080
+      - POSTGRES_URI=${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav}
+      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+      - REDIS_URL=${REDIS_URL:-}  # Optional: redis://olav-redis:6379 if using --profile cache
+      - NETBOX_URL=${NETBOX_URL:-http://netbox:8080}
+      # Auth defaults:
+      # - QuickTest should default to AUTH_DISABLED=true
+      # - Production setups (setup.ps1/setup.sh) override this to false at runtime
+      - AUTH_DISABLED=${AUTH_DISABLED:-true}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf --max-time 8 http://localhost:8000/health | python -c \"import sys, json; j=json.load(sys.stdin); sys.exit(0 if j.get('orchestrator_ready') else 1)\" || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 40s
@@ -337,8 +399,8 @@ services:
     container_name: olav-tests
     environment:
       OLAV_SERVER_URL: http://olav-server:8000
-      POSTGRES_URI: postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
-      OPENSEARCH_URL: http://opensearch:9200
+      POSTGRES_URI: ${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
     depends_on:
       olav-server:
         condition: service_healthy
@@ -351,9 +413,10 @@ services:
 volumes:
   opensearch_data:
   postgres_data:
-  redis_data:
+  olav_redis_data:
   netbox_postgres_data:
   netbox_redis_data:
+  netbox_redis_cache_data:
 
 networks:
   olav-network:

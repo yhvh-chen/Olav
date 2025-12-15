@@ -241,6 +241,19 @@ class StandardModeWorkflow:
         if isinstance(raw_data, list) and len(raw_data) == 0:
             return "No matching data found."
 
+        # Deterministic formatting for SuzieQ interfaces to avoid LLM hallucination/truncation.
+        # This also ensures we return ALL interfaces when the tool returns multiple rows.
+        try:
+            if getattr(output, "source", None) == "suzieq":
+                table = (getattr(output, "metadata", {}) or {}).get("table")
+                if table in {"interfaces", "interface"} and isinstance(raw_data, list):
+                    return self._format_suzieq_interfaces(
+                        output.device, raw_data, (getattr(output, "metadata", {}) or {})
+                    )
+        except Exception:
+            # If deterministic formatting fails for any reason, fall back to LLM formatting.
+            pass
+
         # Use LLM to format the output
         try:
             import json
@@ -279,6 +292,184 @@ class StandardModeWorkflow:
         except Exception as e:
             logger.warning(f"LLM formatting failed, falling back to simple format: {e}")
             return self._simple_format(raw_data)
+
+    def _format_suzieq_interfaces(
+        self,
+        device: str,
+        rows: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        metadata = metadata or {}
+
+        # If tool returned a sentinel/error payload, render it directly.
+        sentinel_rows = [
+            r
+            for r in rows
+            if isinstance(r, dict) and "status" in r and "message" in r
+        ]
+        if sentinel_rows:
+            s = sentinel_rows[0]
+            title_device = device if device and device != "multi" else "(multiple devices)"
+            lines: list[str] = []
+            lines.append(f"## Interface Status - {title_device}")
+            lines.append("")
+            lines.append(f"**Status**: {s.get('status')}")
+            lines.append("")
+            lines.append(str(s.get("message") or "No interface data available."))
+
+            # Age diagnostics if present
+            age = s.get("data_age_hours")
+            coalesced_age = s.get("coalesced_age_hours")
+            raw_age = s.get("raw_age_hours")
+            if age is not None or coalesced_age is not None or raw_age is not None:
+                parts: list[str] = []
+                if age is not None:
+                    parts.append(f"latest≈{age}h")
+                if coalesced_age is not None:
+                    parts.append(f"coalesced≈{coalesced_age}h")
+                if raw_age is not None:
+                    parts.append(f"raw≈{raw_age}h")
+                if parts:
+                    lines.append("")
+                    lines.append(f"**Data age**: {'; '.join(parts)}")
+
+            hint = s.get("hint")
+            if hint:
+                lines.append("")
+                lines.append(f"**Hint**: {hint}")
+
+            # Diagnostics (best-effort)
+            window_s = metadata.get("max_age_seconds_used") or metadata.get("max_age_seconds")
+            dataset_used = metadata.get("dataset_used")
+            if window_s or dataset_used:
+                lines.append("")
+                diag = []
+                if window_s:
+                    diag.append(f"window={window_s}s")
+                if dataset_used:
+                    diag.append(f"dataset={dataset_used}")
+                lines.append(f"**Diagnostics**: {'; '.join(diag)}")
+
+            return "\n".join(lines)
+
+        # Normal data rows
+        filtered_rows = rows
+        if not filtered_rows:
+            return "No matching interface data found."
+
+        def normalize_state(value: Any) -> str:
+            if value is None:
+                return "-"
+            s = str(value).strip().lower()
+            if s in {"up", "adminup", "enabled", "true"}:
+                return "Up"
+            if s in {"down", "admindown", "disabled", "false"}:
+                return "Down"
+            return str(value)
+
+        def fmt_speed(value: Any) -> str:
+            if value is None:
+                return "-"
+            try:
+                speed = float(value)
+                if speed <= 0:
+                    return "-"
+                # SuzieQ often reports speed in Mbps
+                if speed >= 1000 and speed % 1000 == 0:
+                    return f"{int(speed / 1000)}G"
+                if speed >= 1000:
+                    return f"{speed / 1000:.1f}G"
+                return f"{int(speed)}M"
+            except Exception:
+                return str(value)
+
+        def fmt_ips(value: Any) -> str:
+            if value is None:
+                return "-"
+            if isinstance(value, list):
+                ips = [str(v) for v in value if v is not None and str(v).strip()]
+                return ", ".join(ips) if ips else "-"
+            # Sometimes parquet decoding yields stringified lists (e.g., "['1.1.1.1/32']").
+            s = str(value).strip()
+            if s.startswith("[") and s.endswith("]"):
+                try:
+                    import ast
+
+                    parsed = ast.literal_eval(s)
+                    if isinstance(parsed, list):
+                        ips = [str(v) for v in parsed if v is not None and str(v).strip()]
+                        return ", ".join(ips) if ips else "-"
+                except Exception:
+                    pass
+            return s if s else "-"
+
+        # Sort by ifname for stable output
+        filtered_rows.sort(key=lambda r: str(r.get("ifname", "")))
+
+        # Compute summary counts
+        state_values = [normalize_state(r.get("state")) for r in filtered_rows]
+        up_count = sum(1 for s in state_values if s == "Up")
+        down_count = sum(1 for s in state_values if s == "Down")
+
+        # Data freshness + dataset selection (best-effort)
+        freshness_line = ""
+        source_line = ""
+        try:
+            import time
+
+            now_ms = int(time.time() * 1000)
+            timestamps = [
+                int(r.get("timestamp"))
+                for r in filtered_rows
+                if r.get("timestamp") is not None and str(r.get("timestamp")).isdigit()
+            ]
+            if timestamps:
+                newest_age_h = (now_ms - max(timestamps)) / 1000 / 3600
+                freshness_line = f"**Data freshness**: newest record is ~{newest_age_h:.2f}h old"
+        except Exception:
+            freshness_line = ""
+
+        try:
+            dataset_used = metadata.get("dataset_used")
+            window_s = metadata.get("max_age_seconds_used") or metadata.get("max_age_seconds")
+            if dataset_used or window_s:
+                parts: list[str] = []
+                if dataset_used:
+                    parts.append(f"dataset={dataset_used}")
+                if window_s:
+                    parts.append(f"window={window_s}s")
+                source_line = f"**Query window**: {'; '.join(parts)}"
+        except Exception:
+            source_line = ""
+
+        title_device = device if device and device != "multi" else "(multiple devices)"
+
+        lines: list[str] = []
+        lines.append(f"## Interface Status - {title_device}")
+        lines.append("")
+        lines.append(
+            f"**Summary**: {len(filtered_rows)} interfaces ({up_count} Up, {down_count} Down)"
+        )
+        if source_line:
+            lines.append("")
+            lines.append(source_line)
+        if freshness_line:
+            lines.append("")
+            lines.append(freshness_line)
+        lines.append("")
+        lines.append("| Interface | State | Admin | IP Addresses | Speed |")
+        lines.append("|---|---|---|---|---|")
+
+        for r in filtered_rows:
+            ifname = r.get("ifname")
+            ifname_str = str(ifname) if ifname is not None else "-"
+            state = normalize_state(r.get("state"))
+            admin = normalize_state(r.get("adminState"))
+            ips = fmt_ips(r.get("ipAddressList") or r.get("ipAddress") or r.get("ipAddresses"))
+            speed = fmt_speed(r.get("speed") or r.get("speedMbps"))
+            lines.append(f"| {ifname_str} | {state} | {admin} | {ips} | {speed} |")
+
+        return "\n".join(lines)
 
     def _simple_format(self, data: Any) -> str:
         """Fallback simple formatting when LLM is unavailable."""

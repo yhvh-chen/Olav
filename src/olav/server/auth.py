@@ -19,7 +19,6 @@ Roles:
 """
 
 import logging
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -31,6 +30,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from config.settings import settings
+from olav.server.models.auth import (
+    RegisterRequest,
+    RegisterResponse,
+    SessionToken,
+    Token,
+    User,
+    UserRole,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,25 +45,20 @@ logger = logging.getLogger(__name__)
 # ============================================
 # User Roles
 # ============================================
-class UserRole(str, Enum):
-    """User permission roles.
-
-    - ADMIN: Full access, can skip HITL approval
-    - OPERATOR: Read-write with HITL confirmation for write operations
-    - VIEWER: Read-only, cannot trigger write workflows (DeviceExecution, NetBoxManagement, DeepDive)
-    """
-    ADMIN = "admin"
-    OPERATOR = "operator"
-    VIEWER = "viewer"
-
+# Moved to olav.server.models.auth
 
 # ============================================
 # Single Access Token (Master Token)
 # ============================================
-# Token can be set via environment (multi-worker) or auto-generated (single-worker)
-_access_token: str | None = os.environ.get("OLAV_API_TOKEN")
-_token_created_at: datetime | None = datetime.now(UTC) if _access_token else None
+# Token can be set via environment (recommended for production/multi-worker)
+# or auto-generated (convenient for local single-worker dev).
+_access_token: str | None = settings.olav_api_token.strip() or None
+
+# IMPORTANT:
+# - If token is provided via environment, treat it as a long-lived master token.
+# - If token is auto-generated, it is ephemeral and can be subject to expiration.
 _token_from_env: bool = _access_token is not None
+_token_created_at: datetime | None = None if _token_from_env else (datetime.now(UTC) if _access_token else None)
 
 
 # ============================================
@@ -75,7 +77,7 @@ def generate_access_token() -> str:
     """
     global _access_token, _token_created_at
 
-    # If token already set from environment, return it
+    # If token already set from environment, return it (production / multi-worker)
     if _token_from_env and _access_token:
         return _access_token
 
@@ -113,8 +115,9 @@ def validate_token(token: str) -> tuple[bool, dict | None]:
     if not secrets.compare_digest(token, _access_token):
         return (False, None)
 
-    # Check token expiration
-    if _token_created_at:
+    # Check token expiration only for auto-generated (ephemeral) tokens.
+    # Environment-provided master tokens are long-lived and are expected to be rotated explicitly.
+    if (not _token_from_env) and _token_created_at:
         max_age = timedelta(hours=getattr(settings, "token_max_age_hours", 24))
         if datetime.now(UTC) - _token_created_at > max_age:
             return (False, None)
@@ -161,6 +164,11 @@ def create_session(
     logger.info(f"Created session for client '{client_name}' (id: {session.client_id})")
 
     return session
+
+
+def is_master_token_from_env() -> bool:
+    """Return True if the server master token comes from OLAV_API_TOKEN env var."""
+    return _token_from_env
 
 
 def validate_session(token: str) -> tuple[bool, "SessionToken | None"]:
@@ -218,8 +226,8 @@ def revoke_session(token: str) -> bool:
 # FastAPI Security
 # ============================================
 def _is_auth_disabled() -> bool:
-    """Check if authentication is disabled via environment variable."""
-    return os.environ.get("AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+    """Check if authentication is disabled via settings."""
+    return bool(settings.auth_disabled)
 
 
 class CustomHTTPBearer(HTTPBearer):
@@ -258,60 +266,7 @@ security = CustomHTTPBearer(auto_error=not _is_auth_disabled())
 # ============================================
 # Data Models
 # ============================================
-class User(BaseModel):
-    """User model."""
-    username: str
-    role: str
-    disabled: bool = False
-    client_id: str | None = None  # Session client ID if using session auth
-
-
-class Token(BaseModel):
-    """Token response model."""
-    access_token: str
-    token_type: str = "bearer"
-
-
-class SessionToken(BaseModel):
-    """Session token for multi-client tracking.
-
-    Each client registers with a unique client_name and receives
-    a session token for subsequent API calls.
-    """
-    token: str = Field(description="Unique session token")
-    client_id: str = Field(description="Auto-generated unique client identifier")
-    client_name: str = Field(description="Human-readable client name (e.g., 'alice-laptop')")
-    role: UserRole = Field(default=UserRole.OPERATOR, description="User role (admin, operator, viewer)")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    expires_at: datetime = Field(description="Token expiration time")
-
-    @property
-    def is_expired(self) -> bool:
-        """Check if this session token has expired."""
-        return datetime.now(UTC) > self.expires_at
-
-
-class RegisterRequest(BaseModel):
-    """Request model for client registration."""
-    client_name: str = Field(
-        min_length=1,
-        max_length=64,
-        description="Human-readable client name (e.g., 'alice-laptop', 'ci-runner-1')"
-    )
-    master_token: str = Field(description="Master token for authentication")
-    role: UserRole = Field(
-        default=UserRole.OPERATOR,
-        description="User role: admin (full access), operator (read-write with HITL), viewer (read-only)"
-    )
-
-
-class RegisterResponse(BaseModel):
-    """Response model for client registration."""
-    session_token: str = Field(description="Session token to use for API calls")
-    client_id: str = Field(description="Unique client identifier")
-    client_name: str = Field(description="Client name as registered")
-    role: UserRole = Field(description="Assigned user role")
-    expires_at: datetime = Field(description="Token expiration time")
+# Moved to olav.server.models.auth
 
 
 # ============================================

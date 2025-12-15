@@ -135,7 +135,7 @@ class LLMFactory:
 
         if provider == "ollama":
             # Use LangChain ChatOllama
-            config["base_url"] = settings.llm_base_url or "http://localhost:11434"
+            config["base_url"] = settings.llm_base_url or "http://host.docker.internal:11434"
             if json_mode:
                 config["format"] = "json"
             logger.debug(
@@ -193,7 +193,7 @@ class LLMFactory:
 
             # Use model from settings, strip :latest suffix if present for cleaner logging
             model_name = model.replace(":latest", "") if model else "nomic-embed-text"
-            ollama_url = base_url or "http://127.0.0.1:11434"
+            ollama_url = base_url or "http://host.docker.internal:11434"
             logger.info(f"Using Ollama embedding model: {model_name} at {ollama_url}")
             return OllamaEmbeddings(model=model_name, base_url=ollama_url)
 

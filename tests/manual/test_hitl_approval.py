@@ -27,7 +27,8 @@ async def test_approval_workflow():
     print("=" * 80)
 
     # 初始化orchestrator
-    orchestrator, _graph, checkpointer_ctx = await create_workflow_orchestrator(expert_mode=True)
+    # create_workflow_orchestrator returns: (orchestrator, stateful_graph, stateless_graph, checkpointer_manager)
+    orchestrator, _stateful_graph, _stateless_graph, checkpointer_ctx = await create_workflow_orchestrator(expert_mode=True)
 
     try:
         # 测试查询

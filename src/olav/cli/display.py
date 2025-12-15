@@ -328,7 +328,27 @@ class HITLPanel:
         """Display HITL request details."""
         risk_color = self.RISK_COLORS.get(request.risk_level, "yellow")
 
-        # Build info table
+        # Check if we have a config_plan with text content (from device_execution workflow)
+        plan_text = None
+        if request.execution_plan:
+            if isinstance(request.execution_plan, dict):
+                plan_text = request.execution_plan.get("plan")
+            elif isinstance(request.execution_plan, str):
+                plan_text = request.execution_plan
+
+        # If we have plan text, display it directly
+        if plan_text:
+            panel = Panel(
+                Markdown(plan_text) if plan_text.startswith("#") or "**" in plan_text else plan_text,
+                title="[bold red]⚠️ HITL Approval Request[/bold red]",
+                border_style="yellow",
+                subtitle=f"[dim]Workflow: {request.workflow_type or 'device_execution'}[/dim]",
+            )
+            self.console.print()
+            self.console.print(panel)
+            return
+
+        # Fallback: Build structured info table
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column("Label", style="bold")
         table.add_column("Value")
@@ -770,11 +790,13 @@ class Dashboard:
         client: OlavThinClient,
         console: Console | None = None,
         mode: str = "standard",
+        show_banner: bool = True,
     ) -> None:
         import uuid
         self.client = client
         self.console = console or Console()
         self.mode = mode
+        self.show_banner = show_banner
         self.running = False
         self._chat_history: list[tuple[str, str, str]] = []  # (role, content, timestamp)
         self._activity_log: list[tuple[str, str]] = []  # (timestamp, message) for test compat
@@ -859,7 +881,8 @@ class Dashboard:
     def _refresh_display(self) -> None:
         """Clear screen and redraw header + history."""
         self.console.clear()
-        self._print_header()
+        if self.show_banner:
+            self._print_header()
         self._print_chat_history()
 
     async def run(self) -> None:
@@ -1169,7 +1192,7 @@ class Dashboard:
         responses: list[str] = []
         all_debug_info: list[dict] = []
 
-        if not json_output:
+        if not json_output and self.show_banner:
             self._print_header()
 
         for i, query in enumerate(queries, 1):
@@ -1494,18 +1517,14 @@ class Dashboard:
 
         Args:
             data: HITL event data containing tool_name, hitl_operation, etc.
+                  OR config_plan from Device Execution Workflow
             session: PromptSession for user input
 
         Returns:
             True if approved, False if rejected
         """
         from rich.panel import Panel
-
-        # Extract HITL information
-        tool_name = data.get("tool_name", "unknown")
-        operation = data.get("hitl_operation", "configuration change")
-        parameters = data.get("hitl_parameters", {})
-        data.get("message", "")
+        from rich.markdown import Markdown
 
         # Display HITL prompt
         self.console.print()
@@ -1515,22 +1534,114 @@ class Dashboard:
             border_style="yellow",
         ))
 
-        # Show operation details
-        self.console.print(f"\n[bold]Tool:[/bold] [cyan]{tool_name}[/cyan]")
-        self.console.print(f"[bold]Operation:[/bold] {operation}")
+        # Track impact to avoid misleading messaging.
+        impact_message = "[bold]This operation will modify device configuration.[/bold]"
 
-        # Show device and command if available
-        device = parameters.get("device") or parameters.get("hostname", "unknown")
-        command = parameters.get("command", "")
+        # Check for Device Execution Workflow format (config_plan)
+        config_plan = data.get("config_plan")
+        execution_plan = data.get("execution_plan")
+        workflow_type = data.get("workflow_type")
+        
+        if config_plan or execution_plan:
+            # Device Execution Workflow format
+            plan = config_plan or execution_plan
+            
+            self.console.print(f"\n[bold]Workflow:[/bold] [cyan]{workflow_type or 'device_execution'}[/cyan]")
+            
+            # Extract plan details
+            if isinstance(plan, dict):
+                # Show target device
+                target = plan.get("target_device") or plan.get("device") or "unknown"
+                self.console.print(f"[bold]Target Device:[/bold] [green]{target}[/green]")
+                
+                # Show operation type
+                op_type = plan.get("operation_type") or plan.get("action") or "configuration change"
+                self.console.print(f"[bold]Operation:[/bold] {op_type}")
+                
+                # Show interfaces if present
+                interfaces = plan.get("interfaces") or plan.get("target_interfaces")
+                if interfaces:
+                    self.console.print(f"[bold]Interfaces:[/bold] {interfaces}")
+                
+                # Show complete plan as formatted content
+                plan_md = plan.get("plan_markdown") or plan.get("plan") or plan.get("full_plan")
+                if plan_md:
+                    self.console.print("\n[bold]Configuration Plan:[/bold]")
+                    self.console.print(Panel(Markdown(str(plan_md)), border_style="dim"))
+                else:
+                    # Show raw plan dict
+                    import json
+                    plan_str = json.dumps(plan, indent=2, ensure_ascii=False, default=str)
+                    self.console.print("\n[bold]Configuration Plan:[/bold]")
+                    self.console.print(Panel(plan_str, border_style="dim"))
+            else:
+                # Plan is just a string
+                self.console.print("\n[bold]Configuration Plan:[/bold]")
+                self.console.print(Panel(str(plan), border_style="dim"))
+            
+            # Show message if present
+            message = data.get("message")
+            if message:
+                self.console.print(f"\n[dim]{message}[/dim]")
 
-        self.console.print(f"[bold]Device:[/bold] [green]{device}[/green]")
+            impact_message = "[bold]This operation will modify device configuration.[/bold]"
+        elif data.get("action") == "approval_required" and (
+            data.get("api_endpoint") or data.get("operation_plan")
+        ):
+            # NetBox Management Workflow format
+            api_endpoint = data.get("api_endpoint") or "unknown"
+            operation_plan = data.get("operation_plan")
 
-        if command:
-            self.console.print("\n[bold]Command to execute:[/bold]")
-            self.console.print(Panel(command, border_style="dim"))
+            self.console.print("\n[bold]Tool:[/bold] [cyan]NetBox API[/cyan]")
+            self.console.print(f"[bold]Endpoint:[/bold] {api_endpoint}")
+
+            method = None
+            if isinstance(operation_plan, dict):
+                method = operation_plan.get("method")
+            if isinstance(method, str) and method.strip():
+                method_u = method.strip().upper()
+                self.console.print(f"[bold]Method:[/bold] {method_u}")
+            else:
+                method_u = None
+
+            if operation_plan:
+                import json
+
+                plan_str = json.dumps(operation_plan, indent=2, ensure_ascii=False, default=str)
+                self.console.print("\n[bold]Operation Plan:[/bold]")
+                self.console.print(Panel(plan_str, border_style="dim"))
+
+            # Defensive: if somehow a read-only NetBox op reached HITL, auto-continue.
+            if method_u in ("GET", "HEAD", "OPTIONS"):
+                self.console.print()
+                self.console.print("[green]Read-only NetBox query detected; no approval required. Continuing...[/green]")
+                return True
+
+            impact_message = "[bold]This operation will modify NetBox data.[/bold]"
+        else:
+            # Standard Mode format (tool_name, hitl_operation, etc.)
+            tool_name = data.get("tool_name", "unknown")
+            operation = data.get("hitl_operation", "configuration change")
+            parameters = data.get("hitl_parameters", {})
+
+            # Show operation details
+            self.console.print(f"\n[bold]Tool:[/bold] [cyan]{tool_name}[/cyan]")
+            self.console.print(f"[bold]Operation:[/bold] {operation}")
+
+            # Show device and command if available
+            device = parameters.get("device") or parameters.get("hostname", "unknown") if parameters else "unknown"
+            command = parameters.get("command", "") if parameters else ""
+
+            self.console.print(f"[bold]Device:[/bold] [green]{device}[/green]")
+
+            if command:
+                self.console.print("\n[bold]Command to execute:[/bold]")
+                self.console.print(Panel(command, border_style="dim"))
+
+            impact_message = "[bold]This operation will modify device configuration.[/bold]"
 
         self.console.print()
-        self.console.print("[bold]This operation will modify device configuration.[/bold]")
+        self.console.print(impact_message)
         self.console.print()
 
         # Prompt for approval using prompt_toolkit

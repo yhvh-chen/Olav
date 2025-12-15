@@ -30,7 +30,7 @@ template: |
   - Use the schema's required fields
   - Fill in values from user request
   - Query related resources if IDs are needed:
-    - `netbox_api_call(method="GET", endpoint="/dcim/sites/", params={{"name": "Beijing"}})`
+    - `netbox_api_call(method="GET", path="/dcim/sites/", params={{"name": "Beijing"}})`
     - Extract the ID from the response
 
   ### Step 4: Historical Memory (Optional)
@@ -41,7 +41,7 @@ template: |
   ```json
   {{
     "method": "POST",
-    "endpoint": "/dcim/devices/",
+    "path": "/dcim/devices/",
     "payload": {{
       "name": "router-new-01",
       "device_type": 1,
@@ -64,14 +64,14 @@ template: |
 
   **Lookups:**
   ```
-  netbox_api_call(method="GET", endpoint="/dcim/sites/", params={{"name": "Beijing"}})
+  netbox_api_call(method="GET", path="/dcim/sites/", params={{"name": "Beijing"}})
   → site_id = 2
   
-  netbox_api_call(method="GET", endpoint="/dcim/device-types/", params={{"model": "ISR4451"}})
+  netbox_api_call(method="GET", path="/dcim/device-types/", params={{"model": "ISR4451"}})
   → device_type_id = 1
   ```
 
   **Operation Plan:**
   - method: POST
-  - endpoint: /dcim/devices/
+  - path: /dcim/devices/
   - payload: {{"name": "router-new-01", "device_type": 1, "site": 2, "device_role": 3, "status": "active"}}

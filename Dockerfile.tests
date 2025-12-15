@@ -1,36 +1,39 @@
-FROM python:3.12-slim
+# ============================================
+# OLAV E2E Tests Dockerfile
+# ============================================
+# Build: docker build -f Dockerfile.tests -t olav-tests:latest .
+# Run:   docker run --env-file .env olav-tests:latest
+
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    curl \
     gcc \
     libpq-dev \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install --no-cache-dir uv
+# Install uv for fast dependency installation
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy dependency files
-COPY pyproject.toml README.md ./
+# Copy dependency files first (better layer caching)
+COPY pyproject.toml uv.lock README.md ./
 
-# Copy source code (required for editable install)
+# Copy source code and tests
 COPY src ./src
 COPY config ./config
-
-# Install dependencies including test dependencies
-RUN uv pip install --system --no-cache -e ".[dev]"
-
-# Copy test code and scripts
 COPY tests ./tests
 COPY scripts ./scripts
 
+# Install dependencies including dev dependencies
+RUN uv sync --frozen
+
 # Create non-root user
-RUN useradd -m -u 1000 olav && \
-    chown -R olav:olav /app
+RUN useradd -m -u 1000 olav && chown -R olav:olav /app
 
 USER olav
 
 # Default command runs E2E tests
-CMD ["python", "-m", "pytest", "tests/e2e/", "-v", "--tb=short"]
+CMD ["uv", "run", "pytest", "tests/e2e/", "-v", "--tb=short"]

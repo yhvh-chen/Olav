@@ -13,9 +13,11 @@ from urllib.parse import urljoin
 
 import requests
 from langchain_core.tools import tool
+
 from opensearchpy import OpenSearch
 
 from config.settings import settings
+from olav.core.memory import create_opensearch_client
 from olav.tools.adapters import NetBoxAdapter
 from olav.tools.base import ToolOutput, ToolRegistry
 
@@ -24,12 +26,7 @@ logger = logging.getLogger(__name__)
 
 def get_opensearch_client() -> OpenSearch:
     """Get OpenSearch client for schema search."""
-    return OpenSearch(
-        hosts=[settings.opensearch_url],
-        http_auth=None,
-        use_ssl=False,
-        verify_certs=False,
-    )
+    return create_opensearch_client(settings.opensearch_url)
 
 
 class NetBoxAPITool:

@@ -7,52 +7,57 @@ template: |
   ## Configuration Plan
   {config_plan}
 
-  ## Chain of Thought - Execution Process
+  ## Execution Process
 
   Think step by step:
 
   ### Step 1: Parse the Plan
   - How many devices need configuration?
-  - What commands need to be executed on each device?
-  - Is this CLI or NETCONF based?
+  - What is the operation type (merge/delete/replace)?
+  - What are the configuration commands?
 
-  ### Step 2: Determine Execution Method
-  - Simple configs (logging, NTP, SNMP): Use `cli_tool`
-  - Complex configs (BGP, OSPF, VRF): Use `netconf_tool` with edit-config
-  - Mixed: Choose appropriate tool per device
-
-  ### Step 3: Execute for EACH Device
+  ### Step 2: Execute for EACH Device
   **CRITICAL: You MUST call the tool for every device. Do NOT just describe what should be done.**
 
-  For each device in the plan:
-  1. Call `cli_tool(device="DEVICE_NAME", config_commands=["cmd1", "cmd2", ...])`
-  2. Wait for the result
-  3. Record success or failure
-  4. Move to the next device
+  Use `device_config` tool for each device:
+  - For delete operations: `device_config(device="X", config_commands=["no interface Y"], interface="Y", operation="delete")`
+  - For add/modify: `device_config(device="X", config_commands=["cmd1", "cmd2"], operation="merge")`
 
-  ### Step 4: Summarize Results
+  The tool automatically handles transport (NETCONF or CLI) based on device configuration.
+
+  ### Step 3: Summarize Results
   - Count successful/failed devices
   - Note any errors encountered
+  - Report which transport was used (from tool output)
 
-  ## Example
+  ## Example 1: Delete Interface
 
-  Plan: Configure logging host 192.168.100.10 on R1, R2, R3
+  Plan: Delete Loopback11 on R1
 
-  **Thinking:**
-  1. 3 devices need configuration: R1, R2, R3
-  2. Simple syslog config → use cli_tool
-  3. Execute for each device sequentially
+  **Execution (must call tool):**
+  `
+  device_config(
+      device="R1",
+      config_commands=["no interface Loopback11"],
+      interface="Loopback11",
+      operation="delete"
+  )
+  `
 
-  **Execution (must call tools):**
-  ```
-  cli_tool(device="R1", config_commands=["configure terminal", "logging host 192.168.100.10", "end"])
-  cli_tool(device="R2", config_commands=["configure terminal", "logging host 192.168.100.10", "end"])
-  cli_tool(device="R3", config_commands=["configure terminal", "logging host 192.168.100.10", "end"])
-  ```
+  ## Example 2: Configure Multiple Devices
+
+  Plan: Configure logging on R1, R2, R3
+
+  **Execution (call for each device):**
+  `
+  device_config(device="R1", config_commands=["logging host 192.168.1.10"], operation="merge")
+  device_config(device="R2", config_commands=["logging host 192.168.1.10"], operation="merge")
+  device_config(device="R3", config_commands=["logging host 192.168.1.10"], operation="merge")
+  `
 
   ## Rules
 
   - **DO NOT** just generate text descriptions - you MUST call actual tools
-  - **DO NOT** stop after one device if the plan mentions multiple devices or "all devices"
-  - **DO** call the tool once per device, even if commands are identical
+  - **DO NOT** stop after one device if the plan mentions multiple devices
+  - **DO** use `device_config` for all configuration changes (it handles transport automatically)
   - **DO** wait for all devices to complete before finishing

@@ -371,7 +371,22 @@ class SchemaLoader:
         # Check cache first
         cached = await self._get_from_cache(cache_key)
         if cached:
-            return cached.get("fields", ["hostname"])
+            cached_fields = cached.get("fields", ["hostname"])
+            fallback = self._get_fallback_key_fields(table)
+            # Safety: prefer table-specific fallback if cached fields are known to be insufficient.
+            # This prevents collapsing multi-entity tables (e.g., interfaces) into too few rows.
+            validated = self._validate_key_fields(table, cached_fields)
+            if validated != cached_fields:
+                await self._set_to_cache(cache_key, {"fields": validated})
+                return validated
+
+            # Extra safety: if cache only contains hostname but we have a better table-specific fallback,
+            # prefer the fallback.
+            if cached_fields == ["hostname"] and fallback != ["hostname"]:
+                await self._set_to_cache(cache_key, {"fields": fallback})
+                return fallback
+
+            return cached_fields
 
         try:
             # Query OpenSearch for key fields
@@ -384,8 +399,11 @@ class SchemaLoader:
             key_fields = [doc.get("field") for doc in results if doc.get("field")]
 
             if not key_fields:
-                # Fall back to hostname if no key fields found
-                key_fields = ["hostname"]
+                # If schema index doesn't define keys for this table, use table-specific defaults.
+                key_fields = self._get_fallback_key_fields(table)
+
+            # Validate and harden key fields for tables where an incomplete keyset would collapse rows.
+            key_fields = self._validate_key_fields(table, key_fields)
 
             # Cache the result
             await self._set_to_cache(cache_key, {"fields": key_fields})
@@ -396,6 +414,20 @@ class SchemaLoader:
         except Exception as e:
             logger.warning(f"Failed to get key fields for {table}: {e}, using fallback")
             return self._get_fallback_key_fields(table)
+
+    def _validate_key_fields(self, table: str, key_fields: list[str]) -> list[str]:
+        """Validate/repair key fields for deduplication.
+
+        Some schema sources can return a technically-valid but practically-insufficient keyset
+        (e.g., missing 'ifname' for interfaces), which collapses multi-entity tables.
+        """
+        fallback = self._get_fallback_key_fields(table)
+
+        # Interfaces must include ifname; otherwise dedup collapses to a handful of rows (e.g., by type).
+        if table == "interfaces" and "ifname" not in key_fields:
+            return fallback
+
+        return key_fields
 
     def _get_fallback_key_fields(self, table: str) -> list[str]:
         """Return fallback key fields when OpenSearch is unavailable.

@@ -20,6 +20,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
+# Ensure project root is in sys.path for config module import
+# This allows importing 'config.settings' from src/olav/core/llm.py
+project_root = Path(__file__).resolve().parents[3]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import typer
 from rich.console import Console
 
@@ -95,9 +101,16 @@ def _get_config_from_env(server_url: str | None = None) -> tuple[ClientConfig, s
     env_vars = _load_env_file()
     credentials = _load_credentials_file()
 
-    # Get server URL: CLI arg > env var > .env file > default
+    # Get server URL: CLI arg > env var > .env file > derived from port > default
     if not server_url:
         server_url = os.getenv("OLAV_SERVER_URL") or env_vars.get("OLAV_SERVER_URL")
+
+    # If OLAV_SERVER_URL isn't set, but the project provides OLAV_SERVER_PORT (common in Docker setups),
+    # derive the base URL so `uv run olav` works out of the box.
+    if not server_url:
+        server_port = os.getenv("OLAV_SERVER_PORT") or env_vars.get("OLAV_SERVER_PORT")
+        if server_port and str(server_port).strip():
+            server_url = f"http://127.0.0.1:{str(server_port).strip()}"
 
     config = ClientConfig.from_file()
     if server_url:
@@ -116,6 +129,35 @@ def _get_config_from_env(server_url: str | None = None) -> tuple[ClientConfig, s
     return config, auth_token
 
 
+def _persist_server_url_to_config(server_url: str) -> None:
+    """Persist the server URL to ~/.olav/config.toml.
+
+    This enables running subsequent commands without passing --server,
+    as ClientConfig.from_file() will pick it up.
+    """
+    config_path = Path.home() / ".olav" / "config.toml"
+    config_path.parent.mkdir(exist_ok=True)
+
+    timeout_value: int | None = None
+    if config_path.exists():
+        try:
+            import tomllib
+
+            with open(config_path, "rb") as f:
+                data = tomllib.load(f)
+            server = data.get("server", {})
+            timeout_value = server.get("timeout")
+        except Exception:
+            # If the file is unreadable, overwrite with a minimal config.
+            timeout_value = None
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write("[server]\n")
+        f.write(f'url = "{server_url}"\n')
+        if timeout_value is not None:
+            f.write(f"timeout = {timeout_value}\n")
+
+
 # ============================================
 # Shared Options
 # ============================================
@@ -123,7 +165,7 @@ ServerOption = Annotated[
     str | None,
     typer.Option(
         "--server",
-        help="API server URL (default: http://localhost:8000)",
+        help="API server URL (defaults to OLAV_SERVER_URL or ~/.olav/config.toml; fallback: http://localhost:8000)",
         envvar="OLAV_SERVER_URL",
     ),
 ]
@@ -348,7 +390,8 @@ async def _run_single_query_via_dashboard(
     config, auth_token = _get_config_from_env(server_url)
 
     async with OlavThinClient(config, auth_token=auth_token) as client:
-        dash = Dashboard(client, console, mode=mode)
+        # Single-shot mode should be clean and script-friendly: no big banner.
+        dash = Dashboard(client, console, mode=mode, show_banner=False)
 
         # Show query in non-JSON mode
         if not json_output:
@@ -760,6 +803,12 @@ async def _register_client(
             console.print(f"   Expires: {expires_at}")
             console.print()
 
+            # Persist server URL so subsequent commands can omit --server.
+            # Do this only when a server URL was explicitly provided/resolved for registration.
+            if server_url:
+                _persist_server_url_to_config(config.server_url)
+                console.print(f"[dim]Server URL saved to {Path.home() / '.olav' / 'config.toml'}[/dim]")
+
             if save_credentials:
                 # Save to ~/.olav/credentials
                 credentials_dir = Path.home() / ".olav"
@@ -803,9 +852,39 @@ async def _register_client(
 
 
 # ============================================
-# Doctor Command - System Health Check (includes status)
+# Status Command - System Health Check
 # ============================================
 @app.command()
+def status(
+    server: ServerOption = None,
+    verbose: VerboseOption = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", "-j", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """Check system health and infrastructure status.
+
+    Queries the server's /health/detailed API endpoint to get comprehensive
+    status of all infrastructure components:
+    
+    - Server connectivity and authentication
+    - PostgreSQL (LangGraph checkpointer)
+    - OpenSearch (vector search, schema index)
+    - Redis (optional, session cache)
+    - NetBox (optional, SSOT)
+    - LLM provider connectivity
+    - SuzieQ parquet data availability
+
+    Example:
+        olav status
+        olav status -v          # verbose output
+        olav status --json      # JSON output for scripting
+    """
+    asyncio.run(_run_doctor(server, verbose, json_output))
+
+
+@app.command(hidden=True)
 def doctor(
     server: ServerOption = None,
     verbose: VerboseOption = False,
@@ -814,21 +893,12 @@ def doctor(
         typer.Option("--json", "-j", help="Output as JSON"),
     ] = False,
 ) -> None:
-    """Check system health and dependencies.
-
-    Verifies all required services are running and properly configured:
-    - Server connectivity and authentication status
-    - PostgreSQL (LangGraph checkpointer)
-    - OpenSearch (vector search, schema index)
-    - Redis (optional, session cache)
-    - NetBox (optional, SSOT)
-    - LLM provider connectivity
-
-    Example:
-        olav doctor
-        olav doctor -v          # verbose output
-        olav doctor --json      # JSON output for scripting
+    """[Deprecated] Use 'olav status' instead.
+    
+    This command is deprecated and will be removed in a future version.
+    Please use 'olav status' for system health checks.
     """
+    console.print("[yellow]⚠️  Warning: 'doctor' command is deprecated. Use 'olav status' instead.[/yellow]")
     asyncio.run(_run_doctor(server, verbose, json_output))
 
 
@@ -837,16 +907,15 @@ async def _run_doctor(
     verbose: bool,
     json_output: bool = False,
 ) -> None:
-    """Run comprehensive system health check (merged status + doctor)."""
+    """Run comprehensive system health check via Server API."""
     import json as json_lib
+
+    import httpx
 
     from rich.panel import Panel
     from rich.table import Table
 
     from olav.cli.thin_client import OlavThinClient
-
-    results: list[tuple[str, str, str]] = []  # (name, status, details)
-    json_data: dict = {"components": {}, "server": None, "auth": None}
 
     if not json_output:
         console.print()
@@ -856,256 +925,255 @@ async def _run_doctor(
         ))
         console.print()
 
-    # 0. Check Server connectivity (if configured)
-    if not json_output:
-        console.print("[dim]Checking OLAV Server...[/dim]")
     try:
         config, auth_token = _get_config_from_env(server_url)
         credentials = _load_credentials_file()
 
-        async with OlavThinClient(config, auth_token=auth_token) as client:
-            health = await client.health()
+        if not json_output:
+            console.print(f"[dim]Server URL: {config.server_url}[/dim]")
 
-            # Get user info (if authenticated)
+        async with OlavThinClient(config, auth_token=auth_token) as client:
+            # Get comprehensive health status from Server API
+            try:
+                if not json_output:
+                    console.print("[dim]Requesting /health/detailed endpoint...[/dim]")
+                response = await client._client.get("/health/detailed")
+                if response.status_code == 200:
+                    health_data = response.json()
+                else:
+                    console.print(f"[red]Server returned error: HTTP {response.status_code}[/red]")
+                    if verbose:
+                        console.print(f"[dim]Response: {response.text}[/dim]")
+                    raise typer.Exit(1)
+            except httpx.HTTPError as he:
+                console.print(f"[red]Cannot connect to server: {he}[/red]")
+                console.print("[yellow]💡 Tip: Make sure the server is running:[/yellow]")
+                console.print("   docker-compose up -d olav-server")
+                raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                if verbose:
+                    import traceback
+                    console.print(traceback.format_exc())
+                raise typer.Exit(1)
+
+            # Get auth status
             user_info = None
+            auth_status_code = None
             if auth_token:
                 try:
-                    response = await client._client.get("/me")
-                    if response.status_code == 200:
-                        user_info = response.json()
+                    auth_response = await client._client.get("/me")
+                    auth_status_code = auth_response.status_code
+                    if auth_response.status_code == 200:
+                        user_info = auth_response.json()
                 except Exception:
                     pass
 
-            server_status = "✅ Connected" if health.status == "healthy" else "⚠️ Unhealthy"
-            orchestrator_status = "ready" if health.orchestrator_ready else "not ready"
-            results.append(("OLAV Server", server_status, f"v{health.version} ({orchestrator_status})"))
+            # JSON output mode
+            if json_output:
+                output_data = {
+                    "server": {
+                        "url": config.server_url,
+                        "status": health_data.get("status"),
+                        "version": health_data.get("version"),
+                    },
+                    "auth": {
+                        "authenticated": user_info is not None,
+                        "user": user_info,
+                        "client_id": credentials.get("OLAV_CLIENT_ID"),
+                    },
+                    "components": health_data.get("components", {}),
+                }
+                console.print(json_lib.dumps(output_data, indent=2))
+                return
+
+            # Build results table from server response
+            results: list[tuple[str, str, str]] = []
+            components = health_data.get("components", {})
+
+            # Server status
+            server_comp = components.get("server", {})
+            server_status = "✅ Connected" if health_data.get("status") == "healthy" else "⚠️ Degraded"
+            orch_ready = "ready" if server_comp.get("orchestrator_ready") else "not ready"
+            results.append(("OLAV Server", server_status, f"v{health_data.get('version')} ({orch_ready})"))
 
             # Auth status
             if user_info:
                 auth_detail = f"{user_info.get('username', 'unknown')} ({user_info.get('role', '?')})"
                 results.append(("Authentication", "✅ Authenticated", auth_detail))
             elif auth_token:
-                results.append(("Authentication", "⚠️ Token Invalid", "Token provided but not valid"))
+                if auth_status_code in (401, 404, 405):
+                    results.append(("Authentication", "ℹ️ Auth Disabled", f"Server response: {auth_status_code}"))
+                else:
+                    results.append(("Authentication", "⚠️ Token Invalid", f"Token provided but not valid (HTTP {auth_status_code})"))
             else:
                 results.append(("Authentication", "⏭️ Not Configured", "Run 'olav register'"))
 
-            json_data["server"] = {
-                "url": config.server_url,
-                "status": health.status,
-                "version": health.version,
-                "orchestrator_ready": health.orchestrator_ready,
-            }
-            json_data["auth"] = {
-                "authenticated": user_info is not None,
-                "user": user_info,
-                "client_id": credentials.get("OLAV_CLIENT_ID"),
-            }
-    except Exception as e:
-        results.append(("OLAV Server", "⏭️ Not Running", str(e)[:50]))
-        results.append(("Authentication", "⏭️ Skipped", "Server not available"))
-
-    # 1. Check PostgreSQL
-    if not json_output:
-        console.print("[dim]Checking PostgreSQL...[/dim]")
-    try:
-        import asyncpg
-        from config.settings import settings
-
-        postgres_uri = settings.postgres_uri
-        if not postgres_uri:
-            postgres_uri = f"postgresql://{settings.postgres_user}:{settings.postgres_password}@localhost:55432/{settings.postgres_db}"
-
-        conn = await asyncpg.connect(postgres_uri, timeout=5)
-        version = await conn.fetchval("SELECT version()")
-        await conn.close()
-        results.append(("PostgreSQL", "✅ Connected", version[:50] + "..." if len(version) > 50 else version))
-        json_data["components"]["postgresql"] = {"status": "connected", "version": version[:50]}
-    except Exception as e:
-        results.append(("PostgreSQL", "❌ Failed", str(e)[:60]))
-        json_data["components"]["postgresql"] = {"status": "failed", "error": str(e)[:60]}
-
-    # 2. Check OpenSearch (with basic auth support)
-    if not json_output:
-        console.print("[dim]Checking OpenSearch...[/dim]")
-    try:
-        import httpx
-        from config.settings import settings
-
-        opensearch_url = settings.opensearch_url or "http://localhost:19200"
-
-        # Build request kwargs with optional basic auth
-        request_kwargs: dict = {"timeout": 5}
-        if settings.opensearch_username and settings.opensearch_password:
-            request_kwargs["auth"] = (settings.opensearch_username, settings.opensearch_password)
-
-        async with httpx.AsyncClient(verify=settings.opensearch_verify_certs, **request_kwargs) as client:
-            resp = await client.get(f"{opensearch_url}/_cluster/health")
-            if resp.status_code == 200:
-                health_data = resp.json()
-                status_str = health_data.get("status", "unknown")
-                num_nodes = health_data.get("number_of_nodes", 0)
-                results.append(("OpenSearch", f"✅ {status_str.upper()}", f"{num_nodes} node(s)"))
-                json_data["components"]["opensearch"] = {"status": status_str, "nodes": num_nodes}
-            elif resp.status_code == 401:
-                results.append(("OpenSearch", "❌ Auth Failed", "Check OPENSEARCH_USERNAME/PASSWORD"))
-                json_data["components"]["opensearch"] = {"status": "auth_failed"}
+            # PostgreSQL
+            pg_comp = components.get("postgresql", {})
+            pg_status = pg_comp.get("status", "unknown")
+            if pg_status == "connected":
+                pg_version = pg_comp.get("version", "")[:50]
+                results.append(("PostgreSQL", "✅ Connected", pg_version))
+            elif pg_status == "not_initialized":
+                results.append(("PostgreSQL", "⚠️ Not Initialized", "Run 'olav init postgres'"))
             else:
-                results.append(("OpenSearch", "⚠️ Unhealthy", f"HTTP {resp.status_code}"))
-                json_data["components"]["opensearch"] = {"status": "unhealthy", "http_code": resp.status_code}
-    except Exception as e:
-        results.append(("OpenSearch", "❌ Failed", str(e)[:60]))
-        json_data["components"]["opensearch"] = {"status": "failed", "error": str(e)[:60]}
+                results.append(("PostgreSQL", "❌ Failed", pg_comp.get("error", "Unknown error")[:60]))
 
-    # 3. Check Redis (optional - marked as such)
-    if not json_output:
-        console.print("[dim]Checking Redis (optional)...[/dim]")
-    try:
-        import redis.asyncio as aioredis
-        from config.settings import settings
+            # OpenSearch
+            os_comp = components.get("opensearch", {})
+            os_status = os_comp.get("status", "unknown")
+            if os_status in ("green", "yellow"):
+                nodes = os_comp.get("nodes", 0)
+                results.append(("OpenSearch", f"✅ {os_status.upper()}", f"{nodes} node(s)"))
+            elif os_status == "red":
+                results.append(("OpenSearch", "⚠️ RED", "Cluster unhealthy"))
+            elif os_status == "auth_failed":
+                results.append(("OpenSearch", "❌ Auth Failed", "Check credentials"))
+            else:
+                results.append(("OpenSearch", "❌ Failed", os_comp.get("error", "Unknown")[:60]))
 
-        redis_url = settings.redis_url or "redis://localhost:6379"
-        r = aioredis.from_url(redis_url, socket_timeout=3)
-        pong = await r.ping()
-        await r.close()
-        results.append(("Redis (optional)", "✅ Connected", "Distributed cache enabled"))
-        json_data["components"]["redis"] = {"status": "connected"}
-    except Exception:
-        # Redis is optional - don't show as error
-        results.append(("Redis (optional)", "⏭️ Not Available", "Using in-memory cache"))
-        json_data["components"]["redis"] = {"status": "not_available", "fallback": "memory"}
+            # Redis (optional)
+            redis_comp = components.get("redis", {})
+            redis_status = redis_comp.get("status", "unknown")
+            if redis_status == "connected":
+                results.append(("Redis (optional)", "✅ Connected", "Distributed cache enabled"))
+            elif redis_status == "not_configured":
+                results.append(("Redis (optional)", "⏭️ Not Configured", redis_comp.get("note", "Using in-memory cache")))
+            else:
+                results.append(("Redis (optional)", "⏭️ Not Available", redis_comp.get("fallback", "Using memory cache")))
 
-    # 4. Check NetBox (optional)
-    if not json_output:
-        console.print("[dim]Checking NetBox...[/dim]")
-    try:
-        import httpx
-        from config.settings import settings
+            # NetBox (optional)
+            nb_comp = components.get("netbox", {})
+            nb_status = nb_comp.get("status", "unknown")
+            if nb_status == "connected":
+                results.append(("NetBox", "✅ Connected", nb_comp.get("url", "")))
+            elif nb_status == "not_configured":
+                results.append(("NetBox", "⏭️ Not Configured", "Set NETBOX_URL and NETBOX_TOKEN"))
+            elif nb_status == "auth_failed":
+                results.append(("NetBox", "⚠️ Auth Failed", f"HTTP {nb_comp.get('http_code', '?')}"))
+            else:
+                results.append(("NetBox", "❌ Failed", nb_comp.get("error", "Unknown")[:60]))
 
-        if settings.netbox_url and settings.netbox_token:
-            async with httpx.AsyncClient(timeout=5, verify=False) as client:
-                resp = await client.get(
-                    f"{settings.netbox_url}/api/",
-                    headers={"Authorization": f"Token {settings.netbox_token}"}
-                )
-                if resp.status_code in (200, 403):
-                    results.append(("NetBox", "✅ Connected", settings.netbox_url))
-                    json_data["components"]["netbox"] = {"status": "connected", "url": settings.netbox_url}
+            # LLM Provider
+            llm_comp = components.get("llm", {})
+            llm_status = llm_comp.get("status", "unknown")
+            provider = llm_comp.get("provider", "unknown")
+            if llm_status == "connected":
+                if provider == "ollama":
+                    models = llm_comp.get("models", [])
+                    results.append(("LLM (Ollama)", "✅ Connected", f"Models: {', '.join(models)}"))
                 else:
-                    results.append(("NetBox", "⚠️ Auth Failed", f"HTTP {resp.status_code}"))
-                    json_data["components"]["netbox"] = {"status": "auth_failed"}
-        else:
-            results.append(("NetBox", "⏭️ Not Configured", "Set NETBOX_URL and NETBOX_TOKEN"))
-            json_data["components"]["netbox"] = {"status": "not_configured"}
-    except Exception as e:
-        results.append(("NetBox", "❌ Failed", str(e)[:60]))
-        json_data["components"]["netbox"] = {"status": "failed", "error": str(e)[:60]}
+                    model = llm_comp.get("model", "")
+                    results.append((f"LLM ({provider.title()})", "✅ Connected", f"Model: {model}"))
+            elif llm_status == "configured":
+                model = llm_comp.get("model", "")
+                results.append((f"LLM ({provider.title()})", "✅ Configured", f"Model: {model}"))
+            elif llm_status == "no_key":
+                results.append((f"LLM ({provider.title()})", "⚠️ No API Key", "Set LLM_API_KEY"))
+            else:
+                results.append(("LLM", "❌ Failed", llm_comp.get("error", "Unknown")[:60]))
 
-    # 5. Check LLM Provider (with actual API test for OpenAI)
-    if not json_output:
-        console.print("[dim]Checking LLM provider...[/dim]")
-    try:
-        import httpx
-        from config.settings import settings
+            # SuzieQ Data
+            sq_comp = components.get("suzieq", {})
+            sq_status = sq_comp.get("status", "unknown")
 
-        if settings.llm_provider == "ollama":
-            base_url = settings.llm_base_url or "http://localhost:11434"
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{base_url}/api/tags")
-                if resp.status_code == 200:
-                    models = resp.json().get("models", [])
-                    model_names = [m.get("name", "?") for m in models[:3]]
-                    results.append(("LLM (Ollama)", "✅ Connected", f"Models: {', '.join(model_names)}"))
-                    json_data["components"]["llm"] = {"status": "connected", "provider": "ollama", "models": model_names}
+            # Newer server schema: {status: healthy|degraded|failed, gui: {...}, data: {...}}
+            if sq_status in ("healthy", "available"):
+                data = sq_comp.get("data", {}) if isinstance(sq_comp, dict) else {}
+                data_status = data.get("status", "unknown")
+                age_seconds = data.get("age_seconds")
+                details = f"data={data_status}"
+                if age_seconds is not None:
+                    details += f" age={age_seconds}s"
+                results.append(("SuzieQ Data", "✅ Healthy", details))
+            elif sq_status == "degraded":
+                gui = sq_comp.get("gui", {}) if isinstance(sq_comp, dict) else {}
+                data = sq_comp.get("data", {}) if isinstance(sq_comp, dict) else {}
+                gui_status = gui.get("status", "unknown")
+                data_status = data.get("status", "unknown")
+                age_seconds = data.get("age_seconds")
+                details = f"gui={gui_status} data={data_status}"
+                if age_seconds is not None:
+                    details += f" age={age_seconds}s"
+                results.append(("SuzieQ Data", "⚠️ Degraded", details))
+            elif sq_status == "failed":
+                results.append(("SuzieQ Data", "❌ Error", sq_comp.get("error", "Unknown")[:60]))
+            else:
+                # Backward compatible fallback
+                results.append(("SuzieQ Data", "❌ Error", sq_comp.get("error", "Unknown")[:60]))
+
+            # Display results table
+            console.print()
+            table = Table(title="System Components", show_header=True, header_style="bold")
+            table.add_column("Component", style="cyan")
+            table.add_column("Status")
+            table.add_column("Details", style="dim")
+
+            all_ok = True
+            for name, status, details in results:
+                if "❌" in status:
+                    all_ok = False
+                    status_style = "red"
+                elif "⚠️" in status:
+                    status_style = "yellow"
+                elif "⏭️" in status:
+                    status_style = "dim"
                 else:
-                    results.append(("LLM (Ollama)", "⚠️ Error", f"HTTP {resp.status_code}"))
-                    json_data["components"]["llm"] = {"status": "error", "provider": "ollama"}
-        elif settings.llm_provider == "openai":
-            if settings.llm_api_key:
-                # Test actual connectivity
-                base_url = settings.llm_base_url or "https://api.openai.com/v1"
-                async with httpx.AsyncClient(timeout=10) as client:
-                    try:
-                        resp = await client.get(
-                            f"{base_url}/models",
-                            headers={"Authorization": f"Bearer {settings.llm_api_key}"}
-                        )
-                        if resp.status_code == 200:
-                            results.append(("LLM (OpenAI)", "✅ Connected", f"Model: {settings.llm_model_name}"))
-                            json_data["components"]["llm"] = {"status": "connected", "provider": "openai", "model": settings.llm_model_name}
-                        else:
-                            results.append(("LLM (OpenAI)", "✅ Configured", f"Model: {settings.llm_model_name} (API test skipped)"))
-                            json_data["components"]["llm"] = {"status": "configured", "provider": "openai"}
-                    except Exception:
-                        results.append(("LLM (OpenAI)", "✅ Configured", f"Model: {settings.llm_model_name}"))
-                        json_data["components"]["llm"] = {"status": "configured", "provider": "openai"}
+                    status_style = "green"
+
+                if verbose or "❌" in status or "⚠️" in status:
+                    table.add_row(name, f"[{status_style}]{status}[/{status_style}]", details)
+                else:
+                    table.add_row(name, f"[{status_style}]{status}[/{status_style}]", "")
+
+            console.print(table)
+            console.print()
+
+            # Verbose SuzieQ details (what data was detected)
+            if verbose:
+                sq_comp = components.get("suzieq", {})
+                if isinstance(sq_comp, dict):
+                    gui = sq_comp.get("gui", {}) if isinstance(sq_comp.get("gui"), dict) else {}
+                    data = sq_comp.get("data", {}) if isinstance(sq_comp.get("data"), dict) else {}
+
+                    def _fmt_list(values: list[str] | None) -> str:
+                        if not values:
+                            return "(none)"
+                        return ", ".join(values)
+
+                    details_lines = [
+                        f"status: {sq_comp.get('status', 'unknown')}",
+                        f"gui: {gui.get('status', 'unknown')} ({gui.get('url', '')})",
+                        f"parquet_dir: {data.get('parquet_dir', '')}",
+                        f"data: {data.get('status', 'unknown')} age={data.get('age_seconds', 'n/a')}s max={data.get('max_age_seconds', 'n/a')}s",
+                        f"host_dirs: {data.get('host_dirs', data.get('parquet_files', 0))}",
+                        f"namespaces_sample: {_fmt_list(data.get('namespaces_sample'))}",
+                        f"hostnames_sample: {_fmt_list(data.get('hostnames_sample'))}",
+                    ]
+                    if data.get("newest_parquet_utc"):
+                        details_lines.insert(4, f"newest_parquet_utc: {data.get('newest_parquet_utc')}")
+                    if data.get("newest_host_parquet_files") is not None:
+                        details_lines.append(f"newest_host_parquet_files: {data.get('newest_host_parquet_files')}")
+
+                    console.print(Panel.fit(
+                        "\n".join(details_lines),
+                        title="SuzieQ details",
+                        border_style="cyan",
+                    ))
+                    console.print()
+
+            if all_ok:
+                console.print("[green]✅ All systems operational![/green]")
             else:
-                results.append(("LLM (OpenAI)", "⚠️ No API Key", "Set LLM_API_KEY"))
-                json_data["components"]["llm"] = {"status": "no_key", "provider": "openai"}
-        else:
-            results.append(("LLM", "⏭️ Unknown Provider", settings.llm_provider))
-            json_data["components"]["llm"] = {"status": "unknown", "provider": settings.llm_provider}
+                console.print("[yellow]⚠️ Some issues detected. Use -v for details.[/yellow]")
+            console.print()
+
+    except typer.Exit:
+        raise
     except Exception as e:
-        results.append(("LLM", "❌ Failed", str(e)[:60]))
-        json_data["components"]["llm"] = {"status": "failed", "error": str(e)[:60]}
-
-    # 6. Check SuzieQ Parquet Data
-    if not json_output:
-        console.print("[dim]Checking SuzieQ data...[/dim]")
-    try:
-        from pathlib import Path
-        parquet_dir = Path("data/suzieq-parquet")
-        if parquet_dir.exists():
-            tables = [d.name for d in parquet_dir.iterdir() if d.is_dir()]
-            if tables:
-                results.append(("SuzieQ Data", "✅ Available", f"{len(tables)} tables"))
-                json_data["components"]["suzieq"] = {"status": "available", "tables": len(tables)}
-            else:
-                results.append(("SuzieQ Data", "⚠️ Empty", "No parquet tables found"))
-                json_data["components"]["suzieq"] = {"status": "empty"}
-        else:
-            results.append(("SuzieQ Data", "⚠️ Not Found", "data/suzieq-parquet missing"))
-            json_data["components"]["suzieq"] = {"status": "not_found"}
-    except Exception as e:
-        results.append(("SuzieQ Data", "❌ Error", str(e)[:60]))
-        json_data["components"]["suzieq"] = {"status": "error", "error": str(e)[:60]}
-
-    # JSON output mode
-    if json_output:
-        console.print(json_lib.dumps(json_data, indent=2))
-        return
-
-    # Display results table
-    console.print()
-    table = Table(title="System Components", show_header=True, header_style="bold")
-    table.add_column("Component", style="cyan")
-    table.add_column("Status")
-    table.add_column("Details", style="dim")
-
-    all_ok = True
-    for name, status, details in results:
-        if "❌" in status:
-            all_ok = False
-            status_style = "red"
-        elif "⚠️" in status:
-            status_style = "yellow"
-        elif "⏭️" in status:
-            status_style = "dim"
-        else:
-            status_style = "green"
-
-        if verbose or "❌" in status or "⚠️" in status:
-            table.add_row(name, f"[{status_style}]{status}[/{status_style}]", details)
-        else:
-            table.add_row(name, f"[{status_style}]{status}[/{status_style}]", "")
-
-    console.print(table)
-    console.print()
-
-    if all_ok:
-        console.print("[green]✅ All systems operational![/green]")
-    else:
-        console.print("[yellow]⚠️ Some issues detected. Use -v for details.[/yellow]")
-    console.print()
+        console.print(f"[red]Error during health check: {e}[/red]")
+        raise typer.Exit(1)
 
 
 # ============================================
@@ -1193,20 +1261,27 @@ def init_netbox_cmd(
         bool,
         typer.Option("--force", "-f", help="Force import even if devices exist"),
     ] = False,
+    csv: Annotated[
+        str,
+        typer.Option("--csv", help="Path to CSV inventory file (default: config/inventory.csv)"),
+    ] = "config/inventory.csv",
 ) -> None:
     """Initialize NetBox inventory and device configs.
 
     1. Checks NetBox connectivity
-    2. Imports devices from config/inventory.csv
+    2. Imports devices from CSV file (default: config/inventory.csv)
     3. Generates device configurations
 
     Use --force to import even if NetBox already has devices.
+    Use --csv to specify a custom inventory file path.
 
     Examples:
-        olav init netbox           # Import inventory (skip if devices exist)
-        olav init netbox --force   # Force import
+        olav init netbox                                    # Import from default CSV
+        olav init netbox --force                            # Force import
+        olav init netbox --csv /data/custom_devices.csv     # Custom CSV path
+        olav init netbox --csv /data/custom.csv --force     # Custom CSV with force
     """
-    _init_netbox_inventory(force=force)
+    _init_netbox_inventory(force=force, csv_path=csv)
 
 
 @init_app.command("status")
@@ -1278,11 +1353,12 @@ def _init_infrastructure(components: list[str], force: bool = False) -> None:
     console.print("[green]✅ Initialization complete[/green]")
 
 
-def _init_netbox_inventory(force: bool = False) -> None:
+def _init_netbox_inventory(force: bool = False, csv_path: str = "config/inventory.csv") -> None:
     """Initialize NetBox inventory (import devices + generate configs).
 
     Args:
         force: Force import even if NetBox already has devices
+        csv_path: Path to CSV file (relative to project root or absolute)
     """
     import os
     import subprocess
@@ -1295,6 +1371,18 @@ def _init_netbox_inventory(force: bool = False) -> None:
         border_style="blue",
     ))
     console.print()
+
+    # Resolve CSV path
+    if os.path.isabs(csv_path):
+        csv_full_path = csv_path
+    else:
+        csv_full_path = os.path.join(str(_get_project_root()), csv_path)
+
+    # Verify CSV exists
+    if not os.path.exists(csv_full_path):
+        console.print(f"[red]❌ CSV file not found: {csv_path}[/red]")
+        console.print(f"[dim]Full path: {csv_full_path}[/dim]")
+        raise typer.Exit(code=1)
 
     # 1. Check NetBox connectivity
     console.print("[dim]Checking NetBox connectivity...[/dim]")
@@ -1318,6 +1406,7 @@ def _init_netbox_inventory(force: bool = False) -> None:
     console.print("[dim]Importing inventory to NetBox...[/dim]")
     try:
         env = os.environ.copy()
+        env["NETBOX_CSV_PATH"] = csv_full_path
         if force:
             env["NETBOX_INGEST_FORCE"] = "true"
 

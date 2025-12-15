@@ -75,6 +75,17 @@ class StandardModeExecutor:
     # NetBox methods that require HITL
     NETBOX_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+    # Keywords that indicate write operations (used as fallback when method is not specified)
+    # Chinese + English patterns for NetBox write operations
+    NETBOX_WRITE_KEYWORDS = {
+        # Create operations
+        "创建", "新建", "添加", "新增", "create", "add", "new",
+        # Update operations
+        "更新", "修改", "编辑", "变更", "update", "modify", "edit", "change",
+        # Delete operations
+        "删除", "移除", "清除", "remove", "delete", "clear",
+    }
+
     # Parameter name aliases for LLM compatibility
     # Maps: tool_name -> {llm_param_name: actual_param_name}
     PARAM_ALIASES = {
@@ -141,12 +152,14 @@ class StandardModeExecutor:
         self,
         tool_name: str,
         parameters: dict[str, Any],
+        user_query: str = "",
     ) -> tuple[bool, str]:
         """Check if operation requires HITL approval.
 
         Args:
             tool_name: Name of the tool to execute.
             parameters: Tool parameters.
+            user_query: Original user query for keyword-based fallback detection.
 
         Returns:
             Tuple of (requires_hitl, reason)
@@ -172,15 +185,46 @@ class StandardModeExecutor:
 
             return True, f"NETCONF operation: {operation}"
 
-        # NetBox: check HTTP method
+        # NetBox: check HTTP method + keyword fallback
         if tool_name in ("netbox_api_call", "netbox_api"):
-            method = parameters.get("method", "GET").upper()
+            method = parameters.get("method", "").upper()
+            endpoint = parameters.get("path", parameters.get("endpoint", ""))
+
+            # Method explicitly specified as write operation
             if method in self.NETBOX_WRITE_METHODS:
-                # Support both original (endpoint) and mapped (path) parameter names
-                endpoint = parameters.get("path", parameters.get("endpoint", ""))
                 return True, f"NetBox {method} to {endpoint}"
 
+            # Keyword-based fallback: detect write intent from user query
+            # This handles cases where LLM doesn't extract 'method' parameter
+            if not method or method == "GET":
+                query_lower = user_query.lower()
+                for keyword in self.NETBOX_WRITE_KEYWORDS:
+                    if keyword in query_lower:
+                        # Infer method from keyword type
+                        inferred_method = self._infer_http_method(keyword)
+                        return True, f"NetBox {inferred_method} to {endpoint} (detected '{keyword}' in query)"
+
         return False, ""
+
+    def _infer_http_method(self, keyword: str) -> str:
+        """Infer HTTP method from write keyword.
+
+        Args:
+            keyword: The detected write keyword
+
+        Returns:
+            Inferred HTTP method (POST, PUT, PATCH, or DELETE)
+        """
+        keyword_lower = keyword.lower()
+        create_keywords = {"创建", "新建", "添加", "新增", "create", "add", "new"}
+        delete_keywords = {"删除", "移除", "清除", "remove", "delete", "clear"}
+
+        if keyword_lower in create_keywords:
+            return "POST"
+        if keyword_lower in delete_keywords:
+            return "DELETE"
+        # Update keywords default to PATCH
+        return "PATCH"
 
     def _map_parameters(
         self,
@@ -264,7 +308,7 @@ class StandardModeExecutor:
         parameters = self._map_parameters(tool_name, parameters)
 
         # Check HITL requirement (before removing internal params)
-        requires_hitl, hitl_reason = self._requires_hitl(tool_name, parameters)
+        requires_hitl, hitl_reason = self._requires_hitl(tool_name, parameters, user_query)
 
         if requires_hitl:
             logger.warning(f"HITL required for {tool_name}: {hitl_reason}")
@@ -351,7 +395,7 @@ class StandardModeExecutor:
         parameters["user_query"] = user_query
 
         # Check HITL requirement
-        requires_hitl, hitl_reason = self._requires_hitl(tool_name, parameters)
+        requires_hitl, hitl_reason = self._requires_hitl(tool_name, parameters, user_query)
 
         if requires_hitl:
             logger.info(f"Requesting HITL approval for {tool_name}: {hitl_reason}")

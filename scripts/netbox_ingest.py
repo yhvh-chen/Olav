@@ -23,9 +23,16 @@ Exit codes:
 99 skipped (NetBox already initialized)
 
 This script is SAFE to re-run; existing objects are not duplicated.
+
+CSV path resolution order:
+1) CLI argument: --csv
+2) INVENTORY_CSV_PATH env var
+3) NETBOX_CSV_PATH env var (backward compatibility)
+4) Default: config/inventory.csv
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import os
 import sys
@@ -36,6 +43,9 @@ import requests
 BASE_TIMEOUT = 15
 HEADERS: Dict[str, str] = {}
 
+TAG_NAME = os.getenv("NETBOX_DEVICE_TAG", "olav-managed")
+AUTO_TAG_ALL = os.getenv("SUZIEQ_AUTO_TAG_ALL", "false").lower() == "true"
+
 API = {
     "sites": "/api/dcim/sites/",
     "device_roles": "/api/dcim/device-roles/",
@@ -45,6 +55,7 @@ API = {
     "devices": "/api/dcim/devices/",
     "interfaces": "/api/dcim/interfaces/",
     "ip_addresses": "/api/ipam/ip-addresses/",
+    "tags": "/api/extras/tags/",
 }
 
 REQUIRED_COLUMNS = ["name", "device_role", "device_type", "platform", "site", "status", "mgmt_interface", "mgmt_address"]
@@ -154,7 +165,83 @@ def ensure_baseline(base: str, rows: List[Dict[str,str]]) -> Dict[str,int]:
     # Platforms
     for plat in sorted({r["platform"] for r in rows}):
         ids[f"platform:{plat}"] = ensure_object(base, API["platforms"], "name", {"name": plat, "slug": plat})
+
+    # Tags (optional)
+    # If AUTO_TAG_ALL is enabled, ensure the tag exists before creating devices referencing it.
+    if AUTO_TAG_ALL and TAG_NAME:
+        tag_slug = TAG_NAME.strip().lower()
+        if tag_slug:
+            ids["tag:device"] = ensure_object(
+                base,
+                API["tags"],
+                "slug",
+                {"name": TAG_NAME, "slug": tag_slug},
+            )
     return ids
+
+
+def _tag_all_existing_devices(base: str, tag_id: int) -> Dict[str, Any]:
+    """Ensure all existing devices include the given NetBox tag ID.
+
+    This is used when NetBox already has devices and we are in skip mode,
+    but SUZIEQ_AUTO_TAG_ALL=true indicates the operator wants devices tagged.
+    """
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    offset = 0
+    limit = 100
+    while True:
+        resp = get(base, API["devices"], {"limit": limit, "offset": offset})
+        if resp.status_code in (401, 403):
+            fail(2, "Auth failure listing devices")
+        if resp.status_code >= 500:
+            fail(2, f"Server error listing devices: {resp.status_code}")
+
+        payload = resp.json()
+        results = payload.get("results", [])
+        if not results:
+            break
+
+        for dev in results:
+            device_id = dev.get("id")
+            device_name = dev.get("name")
+            current_tags = [t.get("id") for t in (dev.get("tags") or []) if isinstance(t, dict)]
+            current_tags = [t for t in current_tags if isinstance(t, int)]
+
+            if tag_id in current_tags:
+                skipped += 1
+                continue
+
+            new_tags = current_tags + [tag_id]
+            patch_resp = requests.patch(
+                base + API["devices"] + f"{device_id}/",
+                headers=HEADERS,
+                json={"tags": new_tags},
+                timeout=BASE_TIMEOUT,
+            )
+            if patch_resp.status_code not in (200, 201):
+                errors += 1
+                print({
+                    "success": False,
+                    "code": 4,
+                    "error": "Failed to tag device",
+                    "context": {
+                        "device": device_name,
+                        "status": patch_resp.status_code,
+                        "text": (patch_resp.text or "")[:200],
+                    },
+                })
+                continue
+
+            updated += 1
+
+        offset += len(results)
+        if payload.get("next") is None:
+            break
+
+    return {"updated": updated, "skipped": skipped, "errors": errors}
 
 def ensure_device(base: str, row: Dict[str,str], ids: Dict[str,int]) -> Dict[str,Any]:
     # Look up existing device
@@ -174,6 +261,11 @@ def ensure_device(base: str, row: Dict[str,str], ids: Dict[str,int]) -> Dict[str
         "status": row["status"],
         "platform": ids[f"platform:{row['platform']}"] ,
     }
+
+    if AUTO_TAG_ALL and TAG_NAME:
+        tag_slug = TAG_NAME.strip().lower()
+        if tag_slug:
+            body["tags"] = [{"name": TAG_NAME, "slug": tag_slug}]
     create = post_with_retry(base, API["devices"], body)
     if create.status_code not in (200,201):
         # Capture a bit more structured error information if available
@@ -235,6 +327,15 @@ def _ensure_mgmt(base: str, device_id: int, row: Dict[str,str], created: bool=Fa
     return {"name": row["name"], "status": "created" if created else "exists"}
 
 def main() -> None:
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument(
+        "--csv",
+        dest="csv_path",
+        default=None,
+        help="Path to inventory CSV (default: config/inventory.csv)",
+    )
+    args = parser.parse_args()
+
     base = env()
     
     # Mode detection: Check if NetBox already has devices
@@ -245,15 +346,30 @@ def main() -> None:
         device_count = device_check.json().get("count", 0)
         
         if device_count > 0 and not force_mode:
-            print({
+            tag_result: Dict[str, Any] | None = None
+            tag_slug = (TAG_NAME or "").strip().lower()
+
+            # Even if we skip import, optionally ensure tag exists and tag all existing devices.
+            if AUTO_TAG_ALL and tag_slug:
+                tag_id = ensure_object(base, API["tags"], "slug", {"name": TAG_NAME, "slug": tag_slug})
+                tag_result = _tag_all_existing_devices(base, tag_id)
+
+            summary = {
                 "success": True,
                 "code": 99,
                 "mode": "skip",
-                "message": f"NetBox already has {device_count} devices. Skipping import. Set NETBOX_INGEST_FORCE=true to override.",
-                "devices": []
-            })
-            _write_sentinel("inventory.ok", {"mode": "skip", "skipped": True})
-            sys.exit(0)
+                "message": (
+                    f"NetBox already has {device_count} devices. Skipping import. "
+                    "Set NETBOX_INGEST_FORCE=true to override."
+                ),
+                "auto_tag": AUTO_TAG_ALL,
+                "tag": TAG_NAME,
+                "tag_result": tag_result,
+                "devices": [],
+            }
+            print(summary)
+            _write_sentinel("inventory.ok", summary)
+            sys.exit(99)
         
         mode = "force" if device_count > 0 else "bootstrap"
         if mode == "force":
@@ -266,7 +382,13 @@ def main() -> None:
         print(f"Warning: Could not check NetBox device count ({e}). Proceeding with import.")
         mode = "bootstrap"
     
-    rows = parse_csv("config/inventory.csv")
+    csv_path = (
+        args.csv_path
+        or os.getenv("INVENTORY_CSV_PATH")
+        or os.getenv("NETBOX_CSV_PATH")
+        or "config/inventory.csv"
+    )
+    rows = parse_csv(csv_path)
     ids = ensure_baseline(base, rows)
     results: List[Dict[str,Any]] = []
     errors = 0

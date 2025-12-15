@@ -298,6 +298,18 @@ class NetconfAdapter:
             meta = metadata or {}
             meta["xpath"] = xpath
 
+            # Case 0: None response
+            # Many NETCONF operations (especially edit-config) may return no payload.
+            # Preserve the provided error (if any) rather than overwriting it.
+            if netconf_response is None:
+                return ToolOutput(
+                    source="netconf",
+                    device=device,
+                    data=[],
+                    metadata=meta,
+                    error=error,
+                )
+
             # Case 1: Already parsed dict
             if isinstance(netconf_response, dict):
                 # Flatten nested structures if needed
@@ -339,7 +351,7 @@ class NetconfAdapter:
                 device=device,
                 data=[],
                 metadata=meta,
-                error=f"Unknown response format: {type(netconf_response)}",
+                error=error or f"Unknown response format: {type(netconf_response)}",
             )
 
         except Exception as e:

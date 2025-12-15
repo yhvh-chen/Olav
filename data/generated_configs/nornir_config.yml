@@ -7,7 +7,7 @@ inventory:
   plugin: NetBoxInventory2
   options:
     nb_url: http://netbox:8080
-    nb_token: 5f0e3c6245275e54dcaf549121f7a32d7c132893
+    nb_token: 0123456789abcdef0123456789abcdef01234567
     ssl_verify: false
     filter_parameters:
       tag:

@@ -21,12 +21,13 @@ template: |
   ```
 
   ## Formatting Rules
-  1. **Start with a summary line** using emoji: 📊 for data, ✅ for healthy, ⚠️ for warnings, ❌ for errors
-  2. **Use Markdown tables** for structured data (devices, peers, states)
-  3. **Omit default/obvious fields**: namespace=default, vrf=default, active=True
-  4. **Highlight the KEY information** the user asked about (state, status, counts)
-  5. **Add recommendations** if issues are found
-  6. **Keep it concise** - network operators need quick answers
+  1. **Start with a short summary line** (OK to use 📊/✅/⚠️/❌, but keep it factual)
+  2. **Use Markdown tables** for structured data
+  3. **Never invent, rename, normalize, or abbreviate identifiers** (device names, interface names, peer names). Use exact values from Raw Data.
+  4. **Never fabricate fields** (IPs, speeds, states). If a value is missing in Raw Data, show `-`.
+  5. **Do not drop records**. If Raw Data contains a list of items and the user asks for “all”/“list”, render all rows.
+  6. **Omit default/obvious fields** only when it does not remove requested information: namespace=default, vrf=default, active=True
+  7. **Add recommendations** only if issues are present in Raw Data.
 
   ## Example Output Format
   For BGP status query:
@@ -51,8 +52,8 @@ template: |
 
   | Interface | State | IP Address | Speed |
   |-----------|-------|------------|-------|
-  | Gi0/0 | ✅ Up | 10.1.1.1/24 | 1G |
-  | Gi0/1 | ❌ Down | - | - |
+  | GigabitEthernet1 | ✅ Up | 10.1.1.1/24 | 1000M |
+  | GigabitEthernet2 | ❌ Down | - | - |
 
   ### ⚠️ Issues
   - **Gi0/1**: Interface is administratively down

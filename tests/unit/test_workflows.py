@@ -185,8 +185,7 @@ class TestDeviceExecutionWorkflow:
         """Test workflow metadata."""
         assert workflow.name == "device_execution"
         assert "configuration" in workflow.description.lower() or "execution" in workflow.description.lower()
-        assert "netconf_tool" in workflow.tools_required
-        assert "cli_tool" in workflow.tools_required
+        assert "device_config" in workflow.tools_required
 
     @pytest.mark.asyncio
     async def test_graph_has_hitl_interrupt(self, workflow):
@@ -265,6 +264,7 @@ class TestWorkflowOrchestrator:
             "add VLAN 100",
             "shutdown interface",
             "configure OSPF",
+            "add Loopback22 with ip address 22.22.22.22/32",
         ]
 
         for query in queries:

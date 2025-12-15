@@ -1,10 +1,45 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
+
+
+def _netbox_url_for_containers() -> str:
+    """Return a NetBox base URL that is reachable from Docker containers.
+
+    Priority:
+    1) NETBOX_URL_INTERNAL (explicit container URL)
+    2) NETBOX_URL (if it is not a host-loopback URL)
+    3) settings.netbox_url (from .env via pydantic)
+
+    Safety:
+    If the selected URL is a host loopback (localhost/127.0.0.1), fall back to
+    the Docker compose service URL (http://netbox:8080).
+    """
+
+    candidate = os.getenv("NETBOX_URL_INTERNAL") or os.getenv("NETBOX_URL") or settings.netbox_url
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        # Generated configs are mounted into containers; host loopback is not reachable.
+        return "http://netbox:8080"
+
+    return candidate
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    generate_suzieq_config()
+    generate_nornir_config()
 
 
 def generate_suzieq_config() -> None:
@@ -91,14 +126,14 @@ def generate_suzieq_config() -> None:
     # SuzieQ doesn't support ${VAR} substitution except for password: env:VAR
     inventory_path = config_dir / "inventory.yml"
 
-    # Get environment variables - REQUIRED, no defaults for security
-    netbox_url = os.getenv("NETBOX_URL")
-    netbox_token = os.getenv("NETBOX_TOKEN")
-    device_username = os.getenv("DEVICE_USERNAME")
-    netbox_tag = os.getenv("NETBOX_DEVICE_TAG", "olav-managed")
+    # NOTE: inventory.yml is mounted into containers; always choose a container-reachable URL.
+    netbox_url = _netbox_url_for_containers()
+    netbox_token = os.getenv("NETBOX_TOKEN") or settings.netbox_token
+    device_username = os.getenv("DEVICE_USERNAME") or settings.device_username
+    netbox_tag = os.getenv("NETBOX_DEVICE_TAG") or "olav-managed"
 
     if not all([netbox_url, netbox_token, device_username]):
-        msg = "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
+        msg = "Missing required configuration: NETBOX_URL_INTERNAL/NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
         raise ValueError(msg)
 
     inventory_config = {
@@ -148,15 +183,15 @@ def generate_nornir_config() -> None:
     config_dir = Path("data/generated_configs")
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get environment variables - REQUIRED
-    netbox_url = os.getenv("NETBOX_URL")
-    netbox_token = os.getenv("NETBOX_TOKEN")
-    device_username = os.getenv("DEVICE_USERNAME")
-    netbox_tag = os.getenv("NETBOX_DEVICE_TAG", "olav-managed")
+    # Nornir config is also consumed inside containers; keep NetBox URL container-reachable.
+    netbox_url = _netbox_url_for_containers()
+    netbox_token = os.getenv("NETBOX_TOKEN") or settings.netbox_token
+    device_username = os.getenv("DEVICE_USERNAME") or settings.device_username
+    netbox_tag = os.getenv("NETBOX_DEVICE_TAG") or "olav-managed"
     num_workers = int(os.getenv("NORNIR_NUM_WORKERS", "20"))
 
     if not all([netbox_url, netbox_token, device_username]):
-        msg = "Missing required environment variables: NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
+        msg = "Missing required configuration: NETBOX_URL_INTERNAL/NETBOX_URL, NETBOX_TOKEN, DEVICE_USERNAME"
         raise ValueError(msg)
 
     # Generate nornir_config.yml with placeholders (actual substitution in Python code)
@@ -201,6 +236,4 @@ def generate_nornir_config() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    generate_suzieq_config()
-    generate_nornir_config()
+    main()

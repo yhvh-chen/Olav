@@ -18,7 +18,9 @@ is capped at 60%. Real-time verification requires NETCONF/CLI.
 
 import logging
 import time
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
+
+from typing_extensions import TypedDict
 
 from langchain_core.tools import tool
 

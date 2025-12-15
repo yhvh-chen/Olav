@@ -1,0 +1,1 @@
+"""OLAV Client CLI."""

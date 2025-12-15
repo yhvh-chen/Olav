@@ -34,7 +34,9 @@ import json
 import logging
 import sys
 import time
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal
+
+from typing_extensions import TypedDict
 
 if sys.platform == "win32":
     import asyncio

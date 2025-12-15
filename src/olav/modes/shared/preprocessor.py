@@ -17,7 +17,11 @@ Design principles:
 import logging
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
+
+from config.settings import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +87,14 @@ FAST_PATTERNS: list[tuple[re.Pattern[str], str, dict[str, Any], str]] = [
     ),
     # Interface queries
     (
-        re.compile(r"(?:show|get|query|display|check)\s*(?P<hostname>[A-Za-z][\w\-\.]+)?\s*(?:interface)\s*(?:status|state)?", re.IGNORECASE),
+        # Support common verbs (including 'list') and plural 'interfaces'.
+        re.compile(
+            r"(?:show|get|query|display|check|list)\s*(?:all\s*)?(?P<hostname>[A-Za-z][\w\-\.]+)?\s*(?:interfaces?)\s*(?:status|state)?",
+            re.IGNORECASE,
+        ),
         "suzieq_query",
+        # Interfaces should be bounded by poller freshness by default.
+        # We inject a dynamic max_age_seconds (2x poller period) at match time.
         {"table": "interface"},
         "interface_query",
     ),
@@ -111,7 +121,10 @@ FAST_PATTERNS: list[tuple[re.Pattern[str], str, dict[str, Any], str]] = [
     ),
     # All interfaces status
     (
-        re.compile(r"(?:show|get|display)\s*all\s*(?:device\s*)?(?:interface)\s*(?:status|state)?", re.IGNORECASE),
+        re.compile(
+            r"(?:show|get|query|display|check|list)\s*all\s*(?:device\s*)?(?:interfaces?)\s*(?:status|state)?",
+            re.IGNORECASE,
+        ),
         "suzieq_query",
         {"table": "interface"},
         "all_interfaces",
@@ -199,6 +212,41 @@ class QueryPreprocessor:
         """Initialize the preprocessor."""
         self._fast_patterns = FAST_PATTERNS
         self._device_patterns = DEVICE_PATTERNS
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_suzieq_poller_period_seconds() -> int | None:
+        """Best-effort read of SuzieQ poller period (seconds).
+
+        Primary source: generated config written by OLAV at data/generated_configs/suzieq_config.yml.
+        """
+        cfg_path = PROJECT_ROOT / "data" / "generated_configs" / "suzieq_config.yml"
+        if not cfg_path.exists():
+            return None
+
+        try:
+            import yaml
+
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            poller = cfg.get("poller") or {}
+            period = poller.get("period")
+            if period is None:
+                return None
+            period_int = int(period)
+            return period_int if period_int > 0 else None
+        except Exception:
+            return None
+
+    @classmethod
+    def _get_interface_max_age_seconds(cls) -> int:
+        """Default freshness window for interface queries.
+
+        User intent: avoid querying stale inventory by default; use ~2x poll interval.
+        Falls back to 120 seconds if poller period is unknown.
+        """
+        period = cls._get_suzieq_poller_period_seconds() or 60
+        # 2x poll interval; minimum 30s to avoid 0 on bad configs.
+        return max(30, int(period) * 2)
 
     def process(self, query: str) -> PreprocessResult:
         """
@@ -311,6 +359,11 @@ class QueryPreprocessor:
             if match:
                 # Build parameters from base + captured groups
                 parameters = base_params.copy()
+
+                # Inject dynamic freshness windows for interface queries.
+                if pattern_name in {"interface_query", "all_interfaces"}:
+                    parameters.pop("max_age_hours", None)
+                    parameters.setdefault("max_age_seconds", self._get_interface_max_age_seconds())
 
                 # Extract hostname if captured
                 try:

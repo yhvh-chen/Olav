@@ -129,59 +129,11 @@ class UnifiedClassifier:
     def prompt(self) -> str:
         """Lazy-load prompt template."""
         if self._prompt is None:
-            try:
-                # Use load_raw to get template without variable substitution
-                # (unified_classification template has JSON examples with braces
-                #  that would be misinterpreted as variables by PromptTemplate)
-                self._prompt = prompt_manager.load_raw("unified_classification")
-            except FileNotFoundError:
-                # Fallback to legacy location
-                try:
-                    self._prompt = prompt_manager.load_raw_template("core", "unified_classification")
-                except Exception as e:
-                    logger.warning(f"Failed to load unified_classification prompt: {e}")
-                    self._prompt = self._get_fallback_prompt()
+            # Use load_raw to get template without variable substitution
+            # (unified_classification template has JSON examples with braces
+            #  that would be misinterpreted as variables by PromptTemplate)
+            self._prompt = prompt_manager.load_raw("unified_classification")
         return self._prompt
-
-    def _get_fallback_prompt(self) -> str:
-        """Fallback prompt if template loading fails."""
-        return """You are a network operations intent classification and tool selection expert.
-
-Classify user queries and select appropriate tools:
-
-## Intent Categories
-- suzieq: Network state query (BGP/OSPF/interface/route status) → use suzieq_query
-- netbox: CMDB asset management (device inventory, IP allocation) → use netbox_api_call
-- openconfig: YANG schema query → use openconfig_schema_search
-- cli: SSH command line execution → use cli_tool
-- netconf: NETCONF configuration operations → use netconf_tool
-
-## Tools and Parameters
-1. suzieq_query: {table, hostname, namespace, method}
-2. suzieq_schema_search: {query}
-3. netbox_api_call: {endpoint, filters}
-4. cli_tool: {device, command}
-5. netconf_tool: {device, xpath}
-6. openconfig_schema_search: {intent}
-
-## Output Format
-Return JSON:
-{
-  "intent_category": "suzieq|netbox|openconfig|cli|netconf",
-  "tool": "tool_name",
-  "parameters": {...},
-  "confidence": 0.0-1.0,
-  "reasoning": "...",
-  "fallback_tool": "..." (optional)
-}
-
-## Examples
-Query: "Query R1 BGP status"
-→ intent_category: "suzieq", tool: "suzieq_query", parameters: {"table": "bgp", "hostname": "R1"}
-
-Query: "Find device R1 in NetBox"
-→ intent_category: "netbox", tool: "netbox_api_call", parameters: {"endpoint": "/dcim/devices/", "filters": {"name": "R1"}}
-"""
 
     async def classify(
         self,

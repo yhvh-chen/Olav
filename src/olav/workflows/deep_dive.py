@@ -34,7 +34,9 @@ import json
 import logging
 import re
 from operator import add
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal
+
+from typing_extensions import TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver

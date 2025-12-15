@@ -42,7 +42,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
-from olav.tools.nornir_tool import cli_tool, netconf_tool
+from olav.tools.nornir_tool import device_config
 from olav.tools.opensearch_tool import search_episodic_memory, search_openconfig_schema
 from olav.tools.suzieq_parquet_tool import suzieq_query
 
@@ -100,8 +100,7 @@ class DeviceExecutionWorkflow(BaseWorkflow):
         return [
             "search_episodic_memory",  # Historical success cases
             "search_openconfig_schema",  # XPath confirmation
-            "netconf_tool",  # Primary execution (with commit confirmed)
-            "cli_tool",  # Fallback (warning: no auto rollback)
+            "device_config",  # Unified config tool (auto-routes to NETCONF/CLI)
             "suzieq_query",  # Post-change validation
         ]
 
@@ -138,6 +137,8 @@ class DeviceExecutionWorkflow(BaseWorkflow):
             "commit",
             "rollback",
             "create",
+            "delete",  # Added: delete operations
+            "add",     # Added: add operations
             "remove",
             "vlan",
             "area",
@@ -159,22 +160,29 @@ class DeviceExecutionWorkflow(BaseWorkflow):
             suzieq_query,  # CRITICAL: For device discovery when "all devices" is requested
             search_episodic_memory,
             search_openconfig_schema,
-            netconf_tool,  # get-config to retrieve current state
         ]
         planning_tools_node = ToolNode(planning_tools)
 
-        # Execution phase tools: NETCONF/CLI for actual config changes
-        execution_tools = [netconf_tool, cli_tool]
+        # Execution phase tools: Unified device_config (auto-routes to NETCONF/CLI)
+        execution_tools = [device_config]
         execution_tools_node = ToolNode(execution_tools)
 
         # Validation phase tools: Verify config was applied
-        validation_tools = [suzieq_query, netconf_tool, cli_tool]
+        validation_tools = [suzieq_query]
         validation_tools_node = ToolNode(validation_tools)
 
         async def config_planning_node(state: DeviceExecutionState) -> DeviceExecutionState:
             """Generate detailed change plan with rollback strategy."""
             llm = LLMFactory.get_chat_model()
             llm_with_tools = llm.bind_tools(planning_tools)
+
+            # Debug: Show how many messages are in state
+            msg_count = len(state["messages"])
+            print(f"[config_planning_node] Received {msg_count} messages in state")
+            for i, msg in enumerate(state["messages"]):
+                msg_type = type(msg).__name__
+                content_preview = msg.content[:100].replace('\n', ' ') if hasattr(msg, 'content') else "N/A"
+                print(f"  [{i}] {msg_type}: {content_preview}...")
 
             user_query = state["messages"][-1].content
             planning_prompt = prompt_manager.load_prompt(

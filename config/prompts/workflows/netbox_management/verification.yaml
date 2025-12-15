@@ -32,7 +32,7 @@ template: |
   ### Step 3: Secondary Verification (Optional)
   Perform a follow-up GET request to confirm:
   ```
-  netbox_api_call(method="GET", endpoint="/dcim/devices/{{id}}/")
+  netbox_api_call(method="GET", path="/dcim/devices/{{id}}/")
   → Verify: name, site, status match expected values
   ```
 
@@ -58,7 +58,7 @@ template: |
   Check ID returned: 123 ✓
   Check name: "router-new-01" ✓
   
-  Secondary: netbox_api_call(method="GET", endpoint="/dcim/devices/123/")
+  Secondary: netbox_api_call(method="GET", path="/dcim/devices/123/")
   → name = "router-new-01" ✓
   → site = "Beijing" ✓
   ```

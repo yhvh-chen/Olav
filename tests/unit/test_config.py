@@ -34,9 +34,8 @@ class TestEnvSettings:
         assert "http" in settings.opensearch_url
 
     def test_redis_url_auto_built(self):
-        """Test Redis URL is auto-built."""
-        assert settings.redis_url != ""
-        assert "redis://" in settings.redis_url
+        """Test Redis URL is optional (only set when configured)."""
+        assert settings.redis_url == "" or "redis://" in settings.redis_url
 
     def test_llm_settings(self):
         """Test LLM settings have defaults."""

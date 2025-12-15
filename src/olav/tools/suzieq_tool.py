@@ -64,6 +64,7 @@ class SuzieQTool:
         hostname: str | None = None,
         namespace: str | None = None,
         max_age_hours: int = 24,
+        max_age_seconds: int | None = None,
         **filters: Any,
     ) -> ToolOutput:
         """
@@ -84,8 +85,20 @@ class SuzieQTool:
             "table": table,
             "method": method,
             "max_age_hours": max_age_hours,
+            "max_age_seconds": max_age_seconds,
             "filters": filters,
         }
+
+        # Resolve effective time window
+        effective_max_age_seconds: int = 0
+        if max_age_seconds is not None:
+            effective_max_age_seconds = int(max_age_seconds)
+        elif max_age_hours > 0:
+            effective_max_age_seconds = int(max_age_hours) * 3600
+        else:
+            effective_max_age_seconds = 0
+
+        metadata["max_age_seconds_used"] = effective_max_age_seconds
 
         # Load schema dynamically
         suzieq_schema = await self.schema_loader.load_suzieq_schema()
@@ -124,39 +137,22 @@ class SuzieQTool:
             )
 
         # Find table directory
-        # Strategy: Try coalesced first, fallback to raw if coalesced is too old or empty
+        # Strategy: Prefer coalesced first (it contains merged/full state).
+        # Do NOT use filesystem mtime as a freshness signal: on some platforms/bind mounts
+        # (notably Windows), file mtimes can be misleading. We rely on the `timestamp`
+        # column time-window filter below and only fall back to raw if coalesced yields
+        # no usable records.
         coalesced_dir = self.parquet_dir / "coalesced" / table
         raw_dir = self.parquet_dir / table
 
-        table_dir = None
-        use_raw_fallback = False
+        table_dir: Path | None = None
 
-        if coalesced_dir.exists():
-            # Check if coalesced data is fresh enough
-            # NOTE: max_age_hours=0 means "use all historical data", skip file age check
-            import time as time_module
-            coalesced_files = list(coalesced_dir.rglob("*.parquet"))
-            if coalesced_files:
-                if max_age_hours == 0:
-                    # Use all data, no freshness check needed
-                    table_dir = coalesced_dir
-                else:
-                    current_time = time_module.time()
-                    newest_mtime = max(f.stat().st_mtime for f in coalesced_files)
-                    age_hours = (current_time - newest_mtime) / 3600
-
-                    if age_hours <= max_age_hours:
-                        table_dir = coalesced_dir
-                    else:
-                        use_raw_fallback = True
-                        logger.info(f"Coalesced data is {age_hours:.1f}h old, checking raw data...")
-
-        if table_dir is None and raw_dir.exists():
+        if coalesced_dir.exists() and list(coalesced_dir.rglob("*.parquet")):
+            table_dir = coalesced_dir
+        elif raw_dir.exists() and list(raw_dir.rglob("*.parquet")):
             table_dir = raw_dir
-            if use_raw_fallback:
-                logger.info(f"Using raw data directory: {raw_dir}")
-
-        if table_dir is None:
+        else:
+            # Keep backward-compat behavior for error reporting below.
             table_dir = coalesced_dir if coalesced_dir.exists() else raw_dir
 
         if not table_dir.exists():
@@ -198,36 +194,93 @@ class SuzieQTool:
                     dataframe=None, device=hostname or "multi", metadata=metadata
                 )
 
-            # Apply time window filter
+            # Apply time window filter (seconds-based)
             original_count = len(df)
-            latest_timestamp_ms = None
-            if max_age_hours > 0 and "timestamp" in df.columns:
-                latest_timestamp_ms = df["timestamp"].max() if len(df) > 0 else None
-                df = self._filter_by_time_window(df, max_age_hours)
+            dataset_used = "coalesced" if table_dir == coalesced_dir else "raw"
+            coalesced_latest_ms: int | None = None
+            raw_latest_ms: int | None = None
 
-                # Check if time filtering removed all data
-                if len(df) == 0 and original_count > 0 and latest_timestamp_ms is not None:
-                    import time as time_module
-                    current_time_ms = int(time_module.time() * 1000)
-                    data_age_hours = (current_time_ms - latest_timestamp_ms) / (1000 * 3600)
-                    return ToolOutput(
-                        source="suzieq",
-                        device=hostname or "multi",
-                        data=[
-                            {
-                                "status": "DATA_TOO_OLD",
-                                "message": f"Table '{table}' has {original_count} records, but all are older than {max_age_hours} hours",
-                                "data_age_hours": round(data_age_hours, 1),
-                                "hint": f"Data is {round(data_age_hours, 1)} hours old. Try setting max_age_hours={int(data_age_hours) + 1} or max_age_hours=0 for all historical data.",
-                                "suggestion": "Call suzieq_query again with a larger max_age_hours value",
-                            }
-                        ],
-                        metadata={
-                            **metadata,
-                            "original_count": original_count,
-                            "max_age_hours_used": max_age_hours,
-                        },
+            if "timestamp" in df.columns and len(df) > 0:
+                if dataset_used == "coalesced":
+                    coalesced_latest_ms = int(df["timestamp"].max())
+                else:
+                    raw_latest_ms = int(df["timestamp"].max())
+
+            if effective_max_age_seconds > 0 and "timestamp" in df.columns:
+                df = self._filter_by_time_window_seconds(df, effective_max_age_seconds)
+
+                # If coalesced exists but yields no recent rows, try raw as a fallback.
+                if (
+                    len(df) == 0
+                    and table_dir == coalesced_dir
+                    and raw_dir.exists()
+                    and list(raw_dir.rglob("*.parquet"))
+                ):
+                    logger.info(
+                        "Coalesced table '%s' produced no rows within %ss; falling back to raw",
+                        table,
+                        effective_max_age_seconds,
                     )
+                    raw_df = self._read_parquet_table(raw_dir)
+                    if raw_df is None or raw_df.empty:
+                        df = pd.DataFrame()
+                    else:
+                        original_count = len(raw_df)
+                        raw_latest_ms = (
+                            int(raw_df["timestamp"].max())
+                            if "timestamp" in raw_df.columns and len(raw_df) > 0
+                            else None
+                        )
+                        df = raw_df
+                        dataset_used = "raw"
+                        if effective_max_age_seconds > 0 and "timestamp" in df.columns:
+                            df = self._filter_by_time_window_seconds(df, effective_max_age_seconds)
+
+            # Enrich metadata about dataset selection and freshness
+            metadata["dataset_used"] = dataset_used
+            metadata["coalesced_latest_timestamp_ms"] = coalesced_latest_ms
+            metadata["raw_latest_timestamp_ms"] = raw_latest_ms
+
+            # Check if time filtering removed all data
+            if len(df) == 0 and original_count > 0 and (coalesced_latest_ms or raw_latest_ms):
+                import time as time_module
+
+                current_time_ms = int(time_module.time() * 1000)
+                latest_ms = coalesced_latest_ms or raw_latest_ms
+                data_age_seconds = (current_time_ms - int(latest_ms)) / 1000
+                data_age_hours = data_age_seconds / 3600
+
+                coalesced_age_hours: float | None = None
+                raw_age_hours: float | None = None
+                if coalesced_latest_ms is not None:
+                    coalesced_age_hours = (current_time_ms - int(coalesced_latest_ms)) / 1000 / 3600
+                if raw_latest_ms is not None:
+                    raw_age_hours = (current_time_ms - int(raw_latest_ms)) / 1000 / 3600
+
+                window_desc = (
+                    f"{effective_max_age_seconds} seconds"
+                    if effective_max_age_seconds > 0
+                    else "all history"
+                )
+                return ToolOutput(
+                    source="suzieq",
+                    device=hostname or "multi",
+                    data=[
+                        {
+                            "status": "DATA_TOO_OLD",
+                            "message": f"Table '{table}' has {original_count} records, but none are within the last {window_desc}",
+                            "data_age_hours": round(data_age_hours, 2),
+                            "coalesced_age_hours": round(coalesced_age_hours, 2) if coalesced_age_hours is not None else None,
+                            "raw_age_hours": round(raw_age_hours, 2) if raw_age_hours is not None else None,
+                            "hint": "This usually means the poller/coalescer is not producing fresh data for this table/device.",
+                            "suggestion": "Check suzieq-poller logs and verify inventory connectivity.",
+                        }
+                    ],
+                    metadata={
+                        **metadata,
+                        "original_count": original_count,
+                    },
+                )
 
             # Apply hostname filter (handle both single string and list of hostnames)
             if hostname and "hostname" in df.columns:
@@ -301,15 +354,22 @@ class SuzieQTool:
             return pd.concat(dfs, ignore_index=True)
 
     def _filter_by_time_window(self, df: pd.DataFrame, max_age_hours: int) -> pd.DataFrame:
-        """Filter DataFrame to recent time window."""
+        """Backward-compatible hours-based filter."""
+        return self._filter_by_time_window_seconds(df, int(max_age_hours) * 3600)
+
+    def _filter_by_time_window_seconds(self, df: pd.DataFrame, max_age_seconds: int) -> pd.DataFrame:
+        """Filter DataFrame to recent time window (seconds)."""
         import time
 
         current_time_ms = int(time.time() * 1000)
-        cutoff_time_ms = current_time_ms - (max_age_hours * 3600 * 1000)
+        cutoff_time_ms = current_time_ms - (int(max_age_seconds) * 1000)
 
         filtered = df[df["timestamp"] >= cutoff_time_ms]
         logger.info(
-            f"Time window filter: {len(filtered)}/{len(df)} records (last {max_age_hours}h)"
+            "Time window filter: %s/%s records (last %ss)",
+            len(filtered),
+            len(df),
+            max_age_seconds,
         )
         return filtered
 
@@ -445,6 +505,7 @@ def create_suzieq_query_tool():
         hostname: str | None = None,
         namespace: str | None = None,
         max_age_hours: int = 24,
+        max_age_seconds: int | None = None,
     ) -> dict:
         """Query SuzieQ historical network data from Parquet files.
 
@@ -467,6 +528,7 @@ def create_suzieq_query_tool():
             hostname=hostname,
             namespace=namespace,
             max_age_hours=max_age_hours,
+            max_age_seconds=max_age_seconds,
         )
         return result.model_dump()
 

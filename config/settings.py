@@ -17,6 +17,7 @@ Priority:
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # =============================================================================
@@ -51,9 +52,9 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     llm_provider: Literal["openai", "ollama", "azure"] = "ollama"
     llm_api_key: str = ""
-    llm_base_url: str = "http://127.0.0.1:11434"
-    llm_model_name: str = "qwen3:30b"
-    llm_fast_model: str = "qwen3:8b"
+    llm_base_url: str = "http://host.docker.internal:11434"
+    llm_model_name: str = "ministral-3:14b-instruct-2512-q8_0"
+    llm_fast_model: str = "ministral-3:14b-instruct-2512-q8_0"
     llm_temperature: float = 0.1
     llm_max_tokens: int = 16384
 
@@ -62,7 +63,7 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     embedding_provider: Literal["openai", "ollama"] = "ollama"
     embedding_api_key: str = ""
-    embedding_base_url: str = "http://127.0.0.1:11434"
+    embedding_base_url: str = "http://host.docker.internal:11434"
     embedding_model: str = "nomic-embed-text:latest"
     embedding_dimensions: int = 768
 
@@ -74,11 +75,14 @@ class EnvSettings(BaseSettings):
     postgres_user: str = "olav"
     postgres_password: str = "OlavPG123!"
     postgres_db: str = "olav"
+    postgres_uri: str = ""  # If empty, built from other fields at init
 
-    @property
-    def postgres_uri(self) -> str:
-        """Build PostgreSQL connection URI."""
-        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+    @model_validator(mode="after")
+    def build_postgres_uri(self) -> "EnvSettings":
+        """Build postgres_uri from fields if not explicitly set."""
+        if not self.postgres_uri:
+            self.postgres_uri = f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        return self
 
     # =========================================================================
     # OpenSearch
@@ -89,25 +93,43 @@ class EnvSettings(BaseSettings):
     opensearch_password: str = ""
     opensearch_verify_certs: bool = False
     opensearch_index_prefix: str = "olav"
+    opensearch_url: str = ""
 
-    @property
-    def opensearch_url(self) -> str:
-        """Build OpenSearch URL."""
-        return f"http://{self.opensearch_host}:{self.opensearch_port}"
+    @model_validator(mode="after")
+    def build_opensearch_url(self) -> "EnvSettings":
+        """Build OpenSearch URL if not set."""
+        if not self.opensearch_url:
+            self.opensearch_url = f"http://{self.opensearch_host}:{self.opensearch_port}"
+        return self
 
     # =========================================================================
     # Redis
     # =========================================================================
-    redis_host: str = "localhost"
+    # Redis is OPTIONAL in this project (compose uses it behind a profile).
+    # If not explicitly configured, leave redis_url empty and fall back to in-memory cache.
+    redis_url: str = ""  # Preferred: set REDIS_URL=redis://olav-redis:6379
+    redis_host: str = "localhost"  # Used only when explicitly provided via env
     redis_port: int = 6379
     redis_password: str = ""
 
-    @property
-    def redis_url(self) -> str:
-        """Build Redis connection URL."""
-        if self.redis_password:
-            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
-        return f"redis://{self.redis_host}:{self.redis_port}"
+    @model_validator(mode="after")
+    def build_redis_url(self) -> "EnvSettings":
+        """Build redis_url only when Redis config is explicitly provided.
+
+        This avoids accidental localhost:6379 connections in environments where Redis
+        isn't running (QuickTest, Windows host CLI, default docker-compose without cache profile).
+        """
+        if self.redis_url:
+            return self
+
+        fields_set = getattr(self, "model_fields_set", set())
+        if any(k in fields_set for k in ("redis_host", "redis_port", "redis_password")):
+            if self.redis_password:
+                self.redis_url = f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
+            else:
+                self.redis_url = f"redis://{self.redis_host}:{self.redis_port}"
+
+        return self
 
     # =========================================================================
     # NetBox (Single Source of Truth for Inventory)
@@ -121,6 +143,29 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     device_username: str = "cisco"
     device_password: str = "cisco"
+    device_enable_password: str = "cisco"
+
+    # =========================================================================
+    # Environment
+    # =========================================================================
+    environment: Literal["local", "development", "production"] = "local"
+
+    # OLAV runtime mode (used for safe defaults)
+    olav_mode: Literal["QuickTest", "Production"] = "QuickTest"
+
+    @field_validator("olav_mode", mode="before")
+    @classmethod
+    def normalize_olav_mode(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().lower()
+        if normalized in ("quicktest", "quick", "test", "dev", "development", "local"):
+            return "QuickTest"
+        if normalized in ("production", "prod"):
+            return "Production"
+
+        return value
 
     # =========================================================================
     # API Server
@@ -129,6 +174,8 @@ class EnvSettings(BaseSettings):
     server_port: int = 8000
     cors_origins: str = "*"
     cors_allow_credentials: bool = True
+    cors_allow_methods: str = "*"
+    cors_allow_headers: str = "*"
     api_rate_limit_rpm: int = 60
     api_rate_limit_enabled: bool = False
 
@@ -138,6 +185,22 @@ class EnvSettings(BaseSettings):
     token_max_age_hours: int = 24
     session_token_max_age_hours: int = 168
     auth_disabled: bool = False
+    olav_api_token: str = ""  # Master token (OLAV_API_TOKEN)
+
+    @model_validator(mode="after")
+    def apply_mode_defaults(self) -> "EnvSettings":
+        """Apply safe defaults derived from OLAV mode.
+
+        Note: explicit env vars still win (env_file + environment have higher priority).
+        """
+        fields_set = getattr(self, "model_fields_set", set())
+
+        # Default auth behavior: QuickTest disables auth; Production enables auth.
+        # Only apply if auth_disabled wasn't explicitly set.
+        if "auth_disabled" not in fields_set:
+            self.auth_disabled = self.olav_mode == "QuickTest"
+
+        return self
 
     # =========================================================================
     # WebSocket
@@ -193,6 +256,7 @@ class EnvSettings(BaseSettings):
     # Paths (can be overridden via env vars)
     # =========================================================================
     suzieq_data_dir: str = "data/suzieq-parquet"
+    suzieq_max_data_age_seconds: int = 7200
     documents_dir: str = "data/documents"
     reports_dir: str = "data/reports"
     inspection_reports_dir: str = "data/inspection-reports"

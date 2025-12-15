@@ -10,11 +10,13 @@ Enhancements added:
 
 import logging
 import re
+import json
 from pathlib import Path
 
 from config.settings import settings
 from nornir import InitNornir
 from nornir.core import Nornir
+from nornir.core.inventory import ConnectionOptions
 
 from olav.core.memory import OpenSearchMemory
 from config.settings import settings
@@ -69,7 +71,7 @@ class NornirSandbox(SandboxBackendProtocol):
                     "nb_url": settings.netbox_url,
                     "nb_token": settings.netbox_token,
                     "ssl_verify": False,
-                    "filter_parameters": {"tag": ["olav-managed"]},
+                    "filter_parameters": {"tag": ["suzieq"]},
                 },
             },
             logging={
@@ -81,6 +83,25 @@ class NornirSandbox(SandboxBackendProtocol):
         for host in self.nr.inventory.hosts.values():
             host.username = settings.device_username
             host.password = settings.device_password
+
+            # Ensure Netmiko has an enable secret available when enable=True is used
+            # (e.g., for show running-config in config diff capture).
+            existing_netmiko = host.connection_options.get("netmiko")
+            if existing_netmiko is None:
+                host.connection_options["netmiko"] = ConnectionOptions(
+                    extras={"secret": settings.device_enable_password}
+                )
+            else:
+                merged_extras = dict(existing_netmiko.extras or {})
+                merged_extras.setdefault("secret", settings.device_enable_password)
+                host.connection_options["netmiko"] = ConnectionOptions(
+                    hostname=existing_netmiko.hostname,
+                    port=existing_netmiko.port,
+                    username=existing_netmiko.username,
+                    password=existing_netmiko.password,
+                    platform=existing_netmiko.platform,
+                    extras=merged_extras,
+                )
 
             # Normalize NAPALM platform names (NetBox uses different conventions)
             if host.platform and host.platform.startswith("cisco_"):
@@ -272,45 +293,106 @@ class NornirSandbox(SandboxBackendProtocol):
             else:
                 target = self.nr
 
-            # 🔑 NETCONF Implementation via nornir-scrapli or nornir-napalm
-            # For now, simulate NETCONF attempt to test fallback mechanism
+            # 🔑 NETCONF Implementation (ncclient)
+            # NOTE: do not confuse NAPALM (SSH/CLI) with NETCONF.
             try:
-                from nornir_napalm.plugins.tasks import napalm_get
+                from ncclient import manager
 
-                # Attempt NETCONF operation
-                result = target.run(
-                    task=napalm_get,
-                    getters=["config"],
-                )
+                # Filter to specific device if provided
+                if not device:
+                    raise ValueError("NETCONF execution requires a specific device")
 
-                # Extract result
-                if device:
-                    device_result = result[device]
-                    if device_result.failed:
-                        raise Exception(device_result.exception or "NETCONF operation failed")
-                    output = device_result.result
-                else:
-                    output = {name: r.result for name, r in result.items() if not r.failed}
+                host = target.inventory.hosts.get(device)
+                if host is None:
+                    raise ValueError(f"Device '{device}' not found in inventory")
+
+                hostname = host.hostname or host.name
+                port = int(host.data.get("netconf_port", 830)) if isinstance(host.data, dict) else 830
+
+                def _extract_xpath(cmd: str) -> str | None:
+                    import re
+
+                    m = re.search(r"select=([\"'])(?P<xp>.*?)(\1)", cmd)
+                    return m.group("xp") if m else None
+
+                def _extract_config_payload(cmd: str) -> str | None:
+                    import re
+
+                    m = re.search(r"<config>(?P<payload>.*)</config>", cmd, flags=re.DOTALL)
+                    if not m:
+                        return None
+                    # ncclient expects the provided config to be rooted in the NETCONF <config> element
+                    # (in the NETCONF base namespace), not directly in the OpenConfig/native payload.
+                    inner = m.group("payload")
+                    return (
+                        '<config xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">'
+                        f"{inner}"
+                        "</config>"
+                    )
+
+                # Determine op from the command wrapper we generate in NetconfTool
+                is_get = "<get-config" in command
+                is_edit = "<edit-config" in command
+                if not (is_get or is_edit):
+                    raise ValueError("Unsupported NETCONF RPC wrapper; expected <get-config> or <edit-config>")
+
+                with manager.connect(
+                    host=hostname,
+                    port=port,
+                    username=host.username,
+                    password=host.password,
+                    hostkey_verify=False,
+                    allow_agent=False,
+                    look_for_keys=False,
+                    # Avoid ncclient raising opaque XMLError; return rpc-reply so we can inspect <rpc-error>
+                    errors_params={"raise_mode": 0},
+                    timeout=30,
+                ) as m:
+                    if is_get:
+                        xpath = _extract_xpath(command)
+                        if not xpath:
+                            raise ValueError("Missing xpath filter in get-config")
+
+                        reply = m.get_config(source="running", filter=("xpath", xpath))
+                        output: Any = reply.xml
+                        action = "netconf_query"
+                    else:
+                        payload = _extract_config_payload(command)
+                        if not payload:
+                            raise ValueError("Missing <config> payload in edit-config")
+
+                        reply = m.edit_config(target="running", config=payload)
+                        output = reply.xml
+                        # With raise_mode=0, rpc-errors do not raise; detect them via reply.ok
+                        if getattr(reply, "ok", True) is False:
+                            return ExecutionResult(
+                                success=False,
+                                output=output,
+                                error="NETCONF rpc-error (see output for <rpc-error> details)",
+                                metadata={
+                                    "is_write": is_write,
+                                    "device": device,
+                                    "host": hostname,
+                                    "port": port,
+                                },
+                            )
+                        action = "netconf_execute"
 
                 await self.memory.log_execution(
-                    action="netconf_execute" if is_write else "netconf_query",
+                    action=action,
                     command=command,
-                    result=output,
+                    result={"device": device, "host": hostname, "port": port},
                     user="system",
                 )
 
                 return ExecutionResult(
                     success=True,
-                    output=str(output),
-                    metadata={"is_write": is_write, "device": device},
+                    output=output,
+                    metadata={"is_write": is_write, "device": device, "host": hostname, "port": port},
                 )
 
             except ImportError:
-                # nornir-napalm not installed - return specific error
-                msg = (
-                    "NETCONF not available: nornir-napalm plugin not installed. "
-                    "Install with: uv add nornir-napalm"
-                )
+                msg = "NETCONF not available: ncclient not installed. Install with: uv add ncclient"
                 raise ConnectionRefusedError(msg)
 
         except ConnectionRefusedError as e:
@@ -329,17 +411,66 @@ class NornirSandbox(SandboxBackendProtocol):
                 metadata={"device": device, "should_fallback_to_cli": True},
             )
         except Exception as e:
-            logger.error(f"NETCONF command execution failed: {e}")
+            # Try to surface server-side rpc-error details (bad-element, error-path, etc.)
+            rpc_error_details: dict[str, object] | None = None
+            try:
+                from ncclient.operations.errors import OperationError  # type: ignore
+                from ncclient.operations.rpc import RPCError  # type: ignore
+
+                def _rpc_error_to_dict(err: object) -> dict[str, object]:
+                    return {
+                        "error_type": getattr(err, "type", None),
+                        "error_tag": getattr(err, "tag", None),
+                        "error_severity": getattr(err, "severity", None),
+                        "error_message": getattr(err, "message", None),
+                        "error_path": getattr(err, "path", None),
+                        "bad_element": getattr(err, "bad_element", None),
+                        "error_info": getattr(err, "info", None),
+                        "error_xml": getattr(err, "xml", None),
+                    }
+
+                if isinstance(e, RPCError):
+                    rpc_error_details = _rpc_error_to_dict(e)
+                elif isinstance(e, OperationError):
+                    errs = getattr(e, "errors", None)
+                    if isinstance(errs, list) and errs:
+                        rpc_error_details = {
+                            "operation_error": True,
+                            "rpc_errors": [_rpc_error_to_dict(one) for one in errs[:5]],
+                        }
+            except Exception:
+                rpc_error_details = None
+
+            # Fallback: include exception type/args and any obvious structured fields
+            if not rpc_error_details:
+                generic: dict[str, object] = {
+                    "exc_type": type(e).__name__,
+                    "exc_args": getattr(e, "args", None),
+                    "exc_repr": repr(e),
+                }
+                maybe_errors = getattr(e, "errors", None)
+                if isinstance(maybe_errors, list) and maybe_errors:
+                    generic["errors"] = [repr(one) for one in maybe_errors[:5]]
+                maybe_xml = getattr(e, "xml", None)
+                if maybe_xml:
+                    generic["error_xml"] = maybe_xml
+                rpc_error_details = generic
+
+            err_text = str(e)
+            if rpc_error_details:
+                err_text = f"{err_text} | rpc_error={json.dumps(rpc_error_details, ensure_ascii=False)}"
+
+            logger.error(f"NETCONF command execution failed: {err_text}")
             await self.memory.log_execution(
                 action="netconf_error",
                 command=command,
-                result={"error": str(e), "device": device},
+                result={"error": err_text, "device": device},
                 user="system",
             )
             return ExecutionResult(
                 success=False,
                 output="",
-                error=str(e),
+                error=err_text,
                 metadata={"device": device},
             )
 
@@ -567,7 +698,13 @@ class NornirSandbox(SandboxBackendProtocol):
                 config_commands=commands,
             )
 
-            device_result = result[device]
+            device_result = result.get(device)
+            if device_result is None:
+                keys = list(result.keys())
+                raise Exception(
+                    f"No Nornir result returned for device '{device}' (keys={keys}). "
+                    "Likely connection/authentication failure."
+                )
             if device_result.failed:
                 raise Exception(device_result.exception or "Configuration failed")
 

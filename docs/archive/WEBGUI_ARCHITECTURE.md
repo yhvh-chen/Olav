@@ -187,7 +187,7 @@ olav-webgui/
 │                                                             │
 │  1. 后端启动时生成 Token 并打印到控制台:                      │
 │     🔑 ACCESS TOKEN: xxxxx-xxxxx-xxxxx                      │
-│     🌐 WebGUI URL: http://localhost:3100?token=xxxxx        │
+│     📖 API Docs: http://localhost:8000/docs                │
 │     ↓                                                       │
 │  2. 用户访问 WebGUI:                                         │
 │     ├── 方式 A: 点击控制台打印的 URL (自动携带 token)          │
@@ -212,9 +212,6 @@ olav-webgui/
 ============================================================
 🔑 ACCESS TOKEN (valid for 24 hours):
    Abc123XyzTokenStringHere...
-
-🌐 WebGUI URL (click to open):
-   http://localhost:3100?token=Abc123XyzTokenStringHere...
 
 📖 API Docs: http://localhost:8000/docs
 ============================================================
@@ -245,7 +242,7 @@ OLAV_API_TOKEN=your-predefined-secure-token
 │  💡 Token 获取方式:                      │
 │     查看服务器启动日志中的 ACCESS TOKEN  │
 │                                         │
-│  🔗 或直接使用日志中打印的 WebGUI URL    │
+│  🔗 或直接使用日志中打印的 Access Token │
 │                                         │
 └─────────────────────────────────────────┘
 ```
@@ -1025,8 +1022,7 @@ docker-compose up olav-server
 # 🔑 ACCESS TOKEN (valid for 24 hours):
 #    Abc123XyzTokenStringHere...
 #
-# 🌐 WebGUI URL (click to open):
-#    http://localhost:3100?token=Abc123XyzTokenStringHere...
+# 📖 API Docs: http://localhost:8000/docs
 # ============================================================
 ```
 

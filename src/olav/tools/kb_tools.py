@@ -22,6 +22,7 @@ from langchain_core.tools import tool
 from opensearchpy import OpenSearch
 
 from config.settings import settings
+from olav.core.memory import create_opensearch_client
 from olav.models.diagnosis_report import DiagnosisReport
 
 logger = logging.getLogger(__name__)
@@ -45,12 +46,7 @@ DIAGNOSIS_REPORTS_INDEX = "diagnosis-reports"
 
 def _get_opensearch_client() -> OpenSearch:
     """Get OpenSearch client using settings."""
-    return OpenSearch(
-        hosts=[settings.opensearch_url],
-        http_compress=True,
-        use_ssl=False,
-        verify_certs=False,
-    )
+    return create_opensearch_client(settings.opensearch_url)
 
 
 @tool

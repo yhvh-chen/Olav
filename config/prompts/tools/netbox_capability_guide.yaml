@@ -73,14 +73,14 @@ template: |
   
   ### Get Complete Device Info
   ```
-  netbox_api_call(endpoint="/dcim/devices/", name="R1")
+  netbox_api_call(path="/dcim/devices/", name="R1")
   # Returns: primary_ip, site, rack, role, config_context, etc.
   ```
   
   ### Find Device Interface IPs
   ```
   # Step 1: Get device ID
-  netbox_api_call(endpoint="/dcim/devices/", name="R1")
+  netbox_api_call(path="/dcim/devices/", name="R1")
   # Step 2: Get associated IPs
   netbox_api_call(endpoint="/ipam/ip-addresses/", device="R1")
   ```
@@ -88,7 +88,7 @@ template: |
   ### Topology Discovery
   ```
   # Get all cable connections for a device
-  netbox_api_call(endpoint="/dcim/cables/", device="R1")
+  netbox_api_call(path="/dcim/cables/", device="R1")
   ```
   
   ## Important Notes

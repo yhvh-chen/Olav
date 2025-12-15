@@ -106,7 +106,7 @@ olav inspect run daily-check   # 运行巡检
 1. **LangServe 标准化** - 自动生成 OpenAPI 文档，与 LangChain 生态兼容
 2. **Lazy Initialization** - 异步初始化 Orchestrator，避免启动阻塞
 3. **AsyncPostgresSaver** - 异步 Checkpointer，高并发友好
-4. **Token 安全** - 24 小时有效期，启动时自动打印 WebGUI URL+Token
+4. **Token 安全** - 24 小时有效期，启动时自动打印 Token
 
 ### 3.3 启动输出示例
 
@@ -114,8 +114,7 @@ olav inspect run daily-check   # 运行巡检
 =====================================
 🔑 ACCESS TOKEN (valid for 24 hours):
    eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-🌐 WebGUI URL (click to open):
-   http://localhost:3100?token=...
+🌐 API Base URL: http://localhost:8000
 📖 API Docs: http://localhost:8000/docs
 =====================================
 ```
@@ -144,7 +143,7 @@ class Dashboard:
 
 ### 4.3 TUI 局限性
 
-1. **仅限 TUI** - 没有完整的 Web Dashboard（archive 中有 Gradio/Next.js 但已废弃）
+1. **仅限 TUI** - 没有完整的 Web Dashboard（archive 中有 Next.js 方案但已废弃）
 2. **无持久化视图** - 每次会话独立，无法查看历史查询
 3. **缺少可视化** - 没有拓扑图、趋势图等网络运维常见可视化
 
@@ -186,7 +185,7 @@ class Dashboard:
 
 | 优先级 | 建议 | 影响 |
 |--------|------|------|
-| P1 | 恢复 Web GUI（参考 archive 中 Next.js/Gradio） | 降低非技术用户门槛 |
+| P1 | 恢复 Web GUI（参考 archive 中 Next.js 方案） | 降低非技术用户门槛 |
 | P2 | 增加 Slack/Teams 集成 | 真正实现 ChatOps |
 | P3 | 添加拓扑可视化 | 利用 SuzieQ 数据生成网络拓扑图 |
 | P4 | 完善报告系统 | 支持 PDF 导出、定时发送邮件 |

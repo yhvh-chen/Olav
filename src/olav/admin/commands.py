@@ -231,18 +231,29 @@ def show_master_token(
         olav-admin master-token
         olav-admin master-token --generate
     """
-    if generate or os.environ.get("OLAV_API_TOKEN") is None:
-        token = generate_access_token()
+    configured = settings.olav_api_token.strip() if getattr(settings, "olav_api_token", "") else ""
+
+    if generate:
+        token = secrets.token_urlsafe(32)
         console.print()
-        console.print("[green]Master Token:[/green]")
+        console.print("[green]New Master Token (not yet saved):[/green]")
         console.print(f"  {token}")
         console.print()
-        console.print("[dim]Set OLAV_API_TOKEN environment variable to persist this token.[/dim]")
-    else:
-        token = os.environ.get("OLAV_API_TOKEN")
+        console.print("[dim]Persist by setting OLAV_API_TOKEN (in environment or .env) and restarting the server.[/dim]")
+        return
+
+    if configured:
         console.print()
-        console.print("[green]Master Token (from environment):[/green]")
-        console.print(f"  {token}")
+        console.print("[green]Master Token (from settings):[/green]")
+        console.print(f"  {configured}")
+        return
+
+    token = generate_access_token()
+    console.print()
+    console.print("[green]Master Token (auto-generated):[/green]")
+    console.print(f"  {token}")
+    console.print()
+    console.print("[dim]Persist by setting OLAV_API_TOKEN (in environment or .env) and restarting the server.[/dim]")
 
 
 # ============================================

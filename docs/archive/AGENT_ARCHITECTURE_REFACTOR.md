@@ -882,7 +882,7 @@ Server Layer (LangServe + FastAPI):
 1. Phase 1：Server 端基础建设，API 化所有工作流
 2. Phase 2：新 CLI 客户端开发，流式交互与 HITL 审批
 3. Phase 3：认证与多租户，RBAC 权限控制
-4. Phase 4：WebGUI/Slack/Teams Bot 对接
+4. Phase 4：Slack/Teams Bot 对接
 
 ### 9.6 总结
 此架构将 OLAV 从工具升级为平台，实现解耦、安全、扩展与多模式交互。未来可无缝对接 Web、Bot、自动化等多种入口。

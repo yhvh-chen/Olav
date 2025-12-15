@@ -6,7 +6,9 @@ consistent interface and integration with LangGraph StateGraph.
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any
+
+from typing_extensions import TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph import StateGraph, add_messages

@@ -2,7 +2,7 @@ sources:
 - name: netbox-olav
   type: netbox
   url: http://netbox:8080
-  token: 5f0e3c6245275e54dcaf549121f7a32d7c132893
+  token: 0123456789abcdef0123456789abcdef01234567
   tag:
   - olav-managed
   period: 3600

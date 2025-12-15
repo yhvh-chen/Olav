@@ -144,6 +144,21 @@ routes_data = [
     },
 ]
 
+# Sample sqPoller data
+#
+# NOTE: The OLAV server /health/detailed endpoint checks freshness using
+# data/suzieq-parquet/sqPoller/sqvers=*/namespace=*/hostname=*/*.parquet
+# and expects parquet files directly under each hostname directory.
+sq_poller_data = [
+    {
+        "namespace": "default",
+        "hostname": "R1",
+        "service": "test",
+        "status": "success",
+        "timestamp": int(datetime.now().timestamp() * 1000),
+    }
+]
+
 
 def create_partitioned_parquet(table_name: str, data: list, partition_cols: list):
     """Create partitioned Parquet files for a SuzieQ table.
@@ -170,6 +185,18 @@ def create_partitioned_parquet(table_name: str, data: list, partition_cols: list
     print(f"✅ Created {table_name} with {len(data)} records")
 
 
+def create_sq_poller_parquet(data: list) -> None:
+    """Create a minimal sqPoller parquet file for OLAV health checks."""
+    df = pd.DataFrame(data)
+    table_dir = BASE_DIR / "sqPoller" / "sqvers=3.0" / "namespace=default" / "hostname=R1"
+    table_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write a single parquet file directly in the hostname directory
+    out_file = table_dir / "sqPoller-0.parquet"
+    df.to_parquet(out_file, engine="pyarrow", index=False)
+    print(f"✅ Created sqPoller with {len(data)} records")
+
+
 if __name__ == "__main__":
     print("Creating test Parquet data for SuzieQ...")
     
@@ -181,6 +208,9 @@ if __name__ == "__main__":
     
     # Create routes table
     create_partitioned_parquet("routes", routes_data, ["namespace", "hostname"])
+
+    # Create sqPoller table (required by OLAV /health/detailed freshness check)
+    create_sq_poller_parquet(sq_poller_data)
     
     print("\n✅ All test data created successfully!")
     print(f"Location: {BASE_DIR}")

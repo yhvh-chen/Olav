@@ -30,13 +30,12 @@ def main() -> None:
 ║     ════════════════════════════════════════════════════     ║
 ║     🔑 ACCESS TOKEN (valid for 24 hours):                    ║
 ║        <your-token-here>                                     ║
-║                                                              ║
-║     🌐 WebGUI URL (click to open):                           ║
-║        http://localhost:3100?token=<your-token-here>         ║
 ║     ════════════════════════════════════════════════════     ║
 ║                                                              ║
 ║  3. Use the token in API requests:                           ║
 ║     Authorization: Bearer <your-token>                       ║
+║                                                              ║
+║     API Docs: http://localhost:8000/docs                     ║
 ║                                                              ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  MULTI-WORKER DEPLOYMENT                                     ║

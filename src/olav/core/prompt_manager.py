@@ -285,32 +285,6 @@ class PromptManager:
             logger.debug(f"No capability guide found for tool: {tool_name}")
             return ""
 
-    def load_raw_template(self, category: str, name: str) -> str:
-        """Load raw template string without PromptTemplate parsing (legacy API).
-
-        DEPRECATED: Use load_raw() instead.
-
-        Use this for templates containing JSON or other content with {}
-        that would conflict with LangChain's variable syntax.
-
-        Args:
-            category: Prompt category path (e.g., "strategies/fast_path")
-            name: Template name without .yaml extension
-
-        Returns:
-            Raw template string (caller must handle variable substitution)
-
-        Raises:
-            FileNotFoundError: If prompt file doesn't exist
-        """
-        prompt_path = self.prompts_dir / category / f"{name}.yaml"
-        if not prompt_path.exists():
-            msg = f"Prompt file not found: {prompt_path}"
-            raise FileNotFoundError(msg)
-
-        prompt_data = self._load_yaml(prompt_path)
-        return prompt_data["template"]
-
     def load_raw(self, name: str) -> str:
         """Load raw template without variable substitution (new API).
 
