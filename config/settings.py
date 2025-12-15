@@ -73,7 +73,7 @@ class EnvSettings(BaseSettings):
     postgres_host: str = "localhost"
     postgres_port: int = 55432
     postgres_user: str = "olav"
-    postgres_password: str = "OlavPG123!"
+    postgres_password: str = ""
     postgres_db: str = "olav"
     postgres_uri: str = ""  # If empty, built from other fields at init
 
@@ -141,9 +141,9 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     # Device Credentials
     # =========================================================================
-    device_username: str = "cisco"
-    device_password: str = "cisco"
-    device_enable_password: str = "cisco"
+    device_username: str = ""
+    device_password: str = ""
+    device_enable_password: str = ""
 
     # =========================================================================
     # Environment
