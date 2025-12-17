@@ -50,6 +50,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Send
 
 from olav.core.llm import LLMFactory
+from olav.core.prompt_manager import prompt_manager
 from olav.tools.netbox_tool import netbox_api_call
 from olav.tools.nornir_tool import netconf_tool
 from olav.tools.suzieq_parquet_tool import suzieq_query
@@ -199,29 +200,11 @@ class BatchExecutionWorkflow(BaseWorkflow):
 
             user_query = state["messages"][0].content
 
-            system_prompt = """You are a network configuration parsing expert. Parse the user's batch configuration request.
-
-Return JSON format:
-{
-    "operation_type": "Operation type, e.g., add_vlan, change_mtu, configure_ntp, add_route",
-    "operation_params": {
-        "param_name": "param_value"
-    },
-    "device_filter": {
-        "role": "Device role, e.g., switch, router, firewall (optional)",
-        "site": "Site name (optional)",
-        "tag": "Tag (optional)",
-        "name_pattern": "Name pattern (optional)"
-    }
-}
-
-Examples:
-- "Add VLAN 100 to all switches" ->
-  {"operation_type": "add_vlan", "operation_params": {"vlan_id": 100}, "device_filter": {"role": "switch"}}
-
-- "Configure NTP 10.0.0.1 on production devices" ->
-  {"operation_type": "configure_ntp", "operation_params": {"server": "10.0.0.1"}, "device_filter": {"tag": "production"}}
-"""
+            # Load task planner prompt from config
+            system_prompt = prompt_manager.load_prompt(
+                "workflows/batch_execution",
+                "task_planner",
+            )
 
             response = await llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]

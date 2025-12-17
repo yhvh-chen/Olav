@@ -266,13 +266,58 @@ def _tag_all_existing_devices(base: str, tag_id: int) -> Dict[str, Any]:
 
     return {"updated": updated, "skipped": skipped, "errors": errors}
 
+
+def _build_device_tags(row: Dict[str, str], ids: Dict[str, int]) -> list[int]:
+    """Build list of tag IDs for a device from CSV tags and auto-tag settings."""
+    tag_ids = []
+    
+    # 1. Global auto-tag
+    if AUTO_TAG_ALL and TAG_NAME:
+        tag_slug = TAG_NAME.strip().lower()
+        if tag_slug and f"tag:{tag_slug}" in ids:
+            tag_ids.append(ids[f"tag:{tag_slug}"])
+    
+    # 2. CSV tags
+    if row.get("tags"):
+        for t in row["tags"].split(","):
+            t_clean = t.strip()
+            if t_clean:
+                t_slug = t_clean.lower()
+                if f"tag:{t_slug}" in ids:
+                    tag_ids.append(ids[f"tag:{t_slug}"])
+    
+    return list(set(tag_ids))  # Remove duplicates
+
+
 def ensure_device(base: str, row: Dict[str,str], ids: Dict[str,int]) -> Dict[str,Any]:
+    # Build expected tags for this device
+    expected_tag_ids = _build_device_tags(row, ids)
+    
     # Look up existing device
     resp = get(base, API["devices"], {"name": row["name"]})
     if resp.status_code >= 500: fail(2, f"Server error listing devices: {resp.status_code}")
     data = resp.json()
     if data.get("count",0) > 0:
         device_id = data["results"][0]["id"]
+        existing_device = data["results"][0]
+        
+        # Update tags if needed
+        current_tag_ids = [t.get("id") for t in (existing_device.get("tags") or []) if isinstance(t, dict)]
+        current_tag_ids = [t for t in current_tag_ids if isinstance(t, int)]
+        
+        # Merge existing tags with expected tags
+        merged_tag_ids = list(set(current_tag_ids + expected_tag_ids))
+        
+        if set(merged_tag_ids) != set(current_tag_ids):
+            patch_resp = requests.patch(
+                base + API["devices"] + f"{device_id}/",
+                headers=HEADERS,
+                json={"tags": merged_tag_ids},
+                timeout=BASE_TIMEOUT,
+            )
+            if patch_resp.status_code not in (200, 201):
+                return {"name": row["name"], "status": "error", "code": patch_resp.status_code, "text": "tag update failed"}
+        
         # Ensure management interface/IP if mgmt_address provided
         return _ensure_mgmt(base, device_id, row)
     body = {

@@ -37,6 +37,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from olav.core.prompt_manager import prompt_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,61 +114,6 @@ class LLMCompilationResult(BaseModel):
 
 
 # =============================================================================
-# Prompt Template
-# =============================================================================
-
-INTENT_COMPILER_PROMPT = """You are a network operations expert. Generate a SuzieQ query plan based on the user's inspection intent.
-
-## Available SuzieQ Tables
-
-| Table | Description | Common Fields |
-|-------|-------------|---------------|
-| bgp | BGP neighbor status | hostname, peer, state, asn, peerAsn, vrf |
-| ospf | OSPF neighbor status | hostname, ifname, state, area, nbrHostname |
-| interfaces | Interface status | hostname, ifname, state, mtu, speed, errorsIn, errorsOut |
-| routes | Routing table | hostname, prefix, nexthopIps, protocol, vrf |
-| macs | MAC address table | hostname, macaddr, vlan, ifname |
-| arpnd | ARP/ND table | hostname, ipAddress, macaddr, ifname |
-| device | Device information | hostname, model, vendor, version, uptime |
-| lldp | LLDP neighbors | hostname, ifname, peerHostname, peerIfname |
-| vlan | VLAN configuration | hostname, vlanId, vlanName, interfaces |
-
-## Query Methods
-
-- get: Get raw data
-- summarize: Get summary statistics
-- unique: Get unique values
-- aver: Assert/verify
-
-## Inspection Intent
-
-Name: {check_name}
-Description: {intent}
-Severity Level: {severity}
-
-## Output Requirements
-
-Generate a query plan containing:
-1. table: Most relevant SuzieQ table
-2. method: Query method (typically get or summarize)
-3. filters: Query filter conditions
-4. columns: Columns to return (optional)
-5. validation_field: Field to validate
-6. validation_operator: Validation operator (==, !=, >, <, >=, <=)
-7. validation_expected: Expected value or threshold
-
-## Examples
-
-Intent: "Check if BGP neighbors are Established"
-→ table: "bgp", validation_field: "state", validation_operator: "!=", validation_expected: "Established"
-
-Intent: "Check if interfaces have errors"
-→ table: "interfaces", validation_field: "errorsIn", validation_operator: ">", validation_expected: 0
-
-Please generate a query plan based on the above intent."""
-
-
-# =============================================================================
 # Intent Compiler
 # =============================================================================
 
@@ -231,7 +178,15 @@ class IntentCompiler:
         if enable_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.prompt = ChatPromptTemplate.from_template(INTENT_COMPILER_PROMPT)
+        # Load prompt from config
+        intent_prompt_template = prompt_manager.load_prompt(
+            "inspection",
+            "intent_compiler",
+            check_name="{check_name}",
+            intent="{intent}",
+            severity="{severity}",
+        )
+        self.prompt = ChatPromptTemplate.from_template(intent_prompt_template)
         self._llm: BaseChatModel | None = None
 
     def _get_llm(self) -> BaseChatModel:
@@ -482,22 +437,13 @@ class IntentCompiler:
 
             llm = LLMFactory.get_chat_model()
 
-            prompt = f"""You are a network operations expert. Generate the corresponding show command based on the inspection intent.
-
-## Inspection Intent
-{intent}
-
-## Target Data
-{table}
-
-## Constraints
-- Only generate show commands
-- Do not generate any configuration commands (configure, set, delete, etc.)
-- Command must start with "show "
-- Generate generic Cisco IOS/NX-OS compatible commands
-
-## Output
-Output only one show command, no other explanations."""
+            # Load prompt from config
+            prompt = prompt_manager.load_prompt(
+                "inspection",
+                "show_command",
+                intent=intent,
+                table=table,
+            )
 
             response = await llm.ainvoke(prompt)
             command = response.content.strip()

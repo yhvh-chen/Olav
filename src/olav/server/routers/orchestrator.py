@@ -188,17 +188,20 @@ async def orchestrator_stream_events(
 
     logger.info(f"[stream/events] mode={mode}, thread_id={thread_id}, yolo={yolo}, query={user_query[:50]}...")
 
-    # ===== GUARD: Check if query is network-related =====
-    guard = get_network_guard()
-    relevance = await guard.check(user_query)
+    # ===== GUARD: Check if query is network-related (opt-in security feature) =====
+    if settings.enable_guard_mode:
+        guard = get_network_guard()
+        relevance = await guard.check(user_query)
 
-    if not relevance.is_relevant:
-        logger.info(f"Query rejected by network guard: {relevance.reason}")
-        async def rejection_stream():
-            # Send rejection as a message event
-            yield f"data: {json_module.dumps({'type': 'message', 'content': REJECTION_MESSAGE}, ensure_ascii=False)}\n\n"
-            yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
-        return StreamingResponse(rejection_stream(), media_type="text/event-stream")
+        if not relevance.is_relevant:
+            logger.info(f"Query rejected by network guard: {relevance.reason}")
+            async def rejection_stream():
+                # Send rejection as a message event
+                yield f"data: {json_module.dumps({'type': 'message', 'content': REJECTION_MESSAGE}, ensure_ascii=False)}\n\n"
+                yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
+            return StreamingResponse(rejection_stream(), media_type="text/event-stream")
+    else:
+        logger.debug("Network guard disabled (ENABLE_GUARD_MODE=false)")
 
     # ===== PERMISSION: Check if viewer role trying to access write operations =====
     # Viewers can only use standard mode (read-only queries)

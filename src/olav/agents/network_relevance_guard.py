@@ -49,19 +49,13 @@ class RelevanceResult(BaseModel):
 
 
 class LLMRelevanceDecision(BaseModel):
-    """Structured output for LLM relevance check."""
+    """Minimal structured output for LLM relevance check.
+    
+    Simplified to boolean-only to maximize compatibility across LLM providers.
+    """
 
-    is_network_related: bool = Field(
+    is_relevant: bool = Field(
         description="True if query is about network/infrastructure operations, False otherwise"
-    )
-    confidence: float = Field(
-        default=0.9,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score for the decision"
-    )
-    reasoning: str = Field(
-        description="Brief explanation for the decision (1-2 sentences)"
     )
 
 
@@ -100,40 +94,13 @@ class NetworkRelevanceGuard:
 
     def _get_fallback_prompt(self) -> str:
         """Fallback prompt if config not available."""
-        return """You are a pre-filter for the OLAV network operations system. Your task is to quickly determine if a user query is related to network operations.
+        return """You are a network operations assistant pre-filter.
 
-## Network operations related queries (return is_network_related=true):
+Determine if this query is related to network infrastructure or operations.
 
-1. **Network device operations**: Routers, switches, firewalls, load balancers - query, configuration, diagnostics
-2. **Network protocols**: BGP, OSPF, ISIS, MPLS, VXLAN, EVPN, STP, LACP, etc.
-3. **Network connectivity**: Interface status, ports, VLANs, links, neighbor relationships, sessions
-4. **IP networking**: IP addresses, subnets, routing tables, ARP, MAC addresses, gateways
-5. **Network faults**: Connectivity issues, packet loss, latency, bandwidth, traffic anomalies
-6. **Network security**: ACLs, firewall rules, NAT, VPN
-7. **Device inventory**: NetBox, device inventory, racks, sites, IP allocation
-8. **Network monitoring**: SuzieQ, performance metrics, alerts, logs
+When uncertain, return true - it's better to allow than to block.
 
-## Non-network operations related queries (return is_network_related=false):
-
-1. **General Q&A**: Math calculations, weather, translation, chitchat
-2. **Application layer issues**: Web applications, databases, containers, microservices (unless network connectivity is involved)
-3. **Programming development**: Code writing, debugging, framework usage
-4. **Other IT**: Operating systems (non-network config), storage, backup
-
-## Decision rules:
-
-- If query mentions specific network device names (e.g., R1, SW1, Core-Router) → related
-- If query mentions network protocols or concepts → related
-- If query involves IP addresses, interfaces, VLANs → related
-- If query is purely chitchat or non-technical → not related
-- When uncertain, lean towards related (better to allow than block)
-
-## Output format:
-
-Return JSON with:
-- is_network_related: bool - Whether related to network operations
-- confidence: float - Confidence score (0.0-1.0)
-- reasoning: str - Brief reasoning (1-2 sentences)"""
+Return JSON only: {"is_relevant": true} or {"is_relevant": false}"""
 
     async def check(self, query: str) -> RelevanceResult:
         """
@@ -158,14 +125,13 @@ Return JSON with:
 
             logger.debug(
                 f"Network relevance check: query='{query[:50]}...', "
-                f"relevant={result.is_network_related}, "
-                f"confidence={result.confidence:.2f}"
+                f"relevant={result.is_relevant}"
             )
 
             return RelevanceResult(
-                is_relevant=result.is_network_related,
-                confidence=result.confidence,
-                reason=result.reasoning,
+                is_relevant=result.is_relevant,
+                confidence=1.0,
+                reason="LLM classification",
                 method="llm"
             )
 

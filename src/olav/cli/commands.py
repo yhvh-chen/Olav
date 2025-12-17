@@ -1411,7 +1411,7 @@ def _init_netbox_inventory(force: bool = False, csv_path: str = "config/inventor
             env["NETBOX_INGEST_FORCE"] = "true"
 
         result = subprocess.run(
-            [uv_path, "run", "python", "scripts/netbox_ingest.py"],
+            [uv_path, "run", "python", "-m", "olav.etl.netbox_ingest"],
             check=False, capture_output=True,
             text=True,
             cwd=str(_get_project_root()),

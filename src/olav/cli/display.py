@@ -41,36 +41,32 @@ if TYPE_CHECKING:
 # ============================================
 # ASCII Art & Branding
 # ============================================
-OLAV_LOGO = """[bold blue] ██████  [/bold blue][bold cyan]██       [/bold cyan][bold green]  █████  [/bold green][bold magenta]██    ██[/bold magenta]
-[bold blue]██    ██ [/bold blue][bold cyan]██       [/bold cyan][bold green] ██   ██ [/bold green][bold magenta]██    ██[/bold magenta]
-[bold blue]██    ██ [/bold blue][bold cyan]██       [/bold cyan][bold green] ███████ [/bold green][bold magenta]██    ██[/bold magenta]
-[bold blue]██    ██ [/bold blue][bold cyan]██       [/bold cyan][bold green] ██   ██ [/bold green][bold magenta] ██  ██ [/bold magenta]
-[bold blue] ██████  [/bold blue][bold cyan]████████ [/bold cyan][bold green] ██   ██ [/bold green][bold magenta]  ████  [/bold magenta]"""
 
-# Big OLAV logo (8 lines tall, using larger block characters)
-OLAV_LOGO_BIG = """[bold blue] ▄██████▄  [/bold blue][bold cyan]██        [/bold cyan][bold green]  ▄█████▄  [/bold green][bold magenta]██      ██[/bold magenta]
-[bold blue]██      ██ [/bold blue][bold cyan]██        [/bold cyan][bold green] ██     ██ [/bold green][bold magenta]██      ██[/bold magenta]
-[bold blue]██      ██ [/bold blue][bold cyan]██        [/bold cyan][bold green] ██     ██ [/bold green][bold magenta]██      ██[/bold magenta]
-[bold blue]██      ██ [/bold blue][bold cyan]██        [/bold cyan][bold green] █████████ [/bold green][bold magenta]██      ██[/bold magenta]
-[bold blue]██      ██ [/bold blue][bold cyan]██        [/bold cyan][bold green] ██     ██ [/bold green][bold magenta] ██    ██ [/bold magenta]
-[bold blue]██      ██ [/bold blue][bold cyan]██        [/bold cyan][bold green] ██     ██ [/bold green][bold magenta]  ██  ██  [/bold magenta]
-[bold blue] ▀██████▀  [/bold blue][bold cyan]█████████ [/bold cyan][bold green] ██     ██ [/bold green][bold magenta]   ████   [/bold magenta]"""
+# Modern OLAV logo with gradient effect and separators (fixed width)
+OLAV_LOGO = """[bold bright_cyan] ▄████▄ [/][bold blue]▓[/][bold white]  ██      [/][bold bright_green]  ▄████▄  [/][bold blue]▓[/][bold magenta]  ██    ██[/]
+[bold bright_cyan]██▀  ▀██[/][bold blue]▓[/][bold white]  ██      [/][bold bright_green] ██▀  ▀██ [/][bold blue]▓[/][bold magenta]  ██    ██[/]
+[bold bright_cyan]██    ██[/][bold blue]▓[/][bold white]  ██      [/][bold bright_green] ████████ [/][bold blue]▓[/][bold magenta]  ██    ██[/]
+[bold bright_cyan]██▄  ▄██[/][bold blue]▓[/][bold white]  ██      [/][bold bright_green] ██    ██ [/][bold blue]▓[/][bold magenta]   ██  ██ [/]
+[bold bright_cyan] ▀████▀ [/][bold blue]▓[/][bold white]  ████████[/][bold bright_green] ██    ██ [/][bold blue]▓[/][bold magenta]    ████  [/]
+[bold blue] ▓▓▓▓▓▓ [/][bold blue] [/][bold grey39]  ▓▓▓▓▓▓▓▓[/][bold dark_green]  ▓▓    ▓▓ [/][bold blue] [/][bold purple]    ▓▓   [/]"""
 
-# Small snowman (7 lines, same height as big logo)
-SNOWMAN_SMALL = """[cyan]  ❄ [/cyan][bold white]⛄[/bold white][cyan] ❄[/cyan]
-[bold white]  .~~~.[/bold white]
-[bold white] ( [cyan]°[/cyan] [cyan]°[/cyan] )[/bold white]
-[bold white]  ( [orange1]>[/orange1] )[/bold white]
-[bold white] ([red]~~~~~[/red])[/bold white]
-[bold white]  (   )[/bold white]
-[dim white]  ❆ ❅ ❆[/dim white]"""
+# Big OLAV logo (same as modern, for consistency)
+OLAV_LOGO_BIG = OLAV_LOGO
+
+# Modern snowman with cleaner aesthetic (fixed width for alignment)
+SNOWMAN_SMALL = """[cyan]   ✶   [/][bold white]▄▀▀▄[/][cyan]   ✶   [/]
+[bold white]   .  ( [cyan]°[/] [cyan]°[/] )  .   [/]
+[bold white]   . (  [orange1]>[/]  ) .    [/]
+[bold white]  (   [red]~[/]   )      [/]
+[bold white]  ▄▀     ▀▄     [/]
+[dim white]   ❆   ❅   ❆   [/]"""
 
 # Legacy snowman (for backward compatibility)
 SNOWMAN_ASCII = SNOWMAN_SMALL
 
-SNOWMAN_MINI = "[bold white]⛄[/bold white] [cyan]❄[/cyan] [white]❆[/white] [cyan]❄[/cyan]"
+SNOWMAN_MINI = "[bold white]⛄[/] [cyan]❄[/] [white]❆[/] [cyan]❄[/]"
 
-WINTER_BORDER = "[cyan]❄[/cyan] [white]❆[/white] [blue]❅[/blue]"
+WINTER_BORDER = "[cyan]❄[/] [white]❆[/] [blue]❅[/]"
 
 
 def get_olav_banner() -> Text:

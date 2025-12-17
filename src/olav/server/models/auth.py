@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from enum import Enum
 
@@ -31,13 +31,13 @@ class SessionToken(BaseModel):
     client_id: str = Field(description="Auto-generated unique client identifier")
     client_name: str = Field(description="Human-readable client name (e.g., 'alice-laptop')")
     role: UserRole = Field(default=UserRole.OPERATOR, description="User role (admin, operator, viewer)")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime = Field(description="Token expiration time")
 
     @property
     def is_expired(self) -> bool:
         """Check if this session token has expired."""
-        return datetime.now() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
 class RegisterRequest(BaseModel):
     """Request model for client registration."""

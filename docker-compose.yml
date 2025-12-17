@@ -6,9 +6,9 @@ services:
     image: fluent/fluent-bit:latest
     container_name: olav-fluent-bit
     ports:
-      - "${FLUENT_SYSLOG_PORT:-514}:514/udp"
-      - "${FLUENT_SYSLOG_PORT:-514}:514/tcp"
-      - "${FLUENT_HTTP_PORT:-2020}:2020"
+      - "${FLUENT_SYSLOG_PORT_EXTERNAL:-514}:514/udp"
+      - "${FLUENT_SYSLOG_PORT_EXTERNAL:-514}:514/tcp"
+      - "${FLUENT_HTTP_PORT_EXTERNAL:-2020}:2020"
     volumes:
       - ./config/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./config/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
@@ -49,8 +49,8 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "${OPENSEARCH_PORT:-9200}:9200"
-      - "${OPENSEARCH_METRICS_PORT:-9600}:9600"
+      - "${OPENSEARCH_PORT_EXTERNAL:-9200}:9200"
+      - "${OPENSEARCH_METRICS_PORT_EXTERNAL:-9600}:9600"
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     restart: unless-stopped
@@ -71,7 +71,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT_EXTERNAL:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -118,7 +118,7 @@ services:
       - .env
     user: "0:0"  # Run as root to avoid Windows bind-mount permission issues
     ports:
-      - "${SUZIEQ_GUI_PORT:-8501}:8501"  # GUI
+      - "${SUZIEQ_GUI_PORT_EXTERNAL:-8501}:8501"  # GUI
     volumes:
       - ./data/suzieq-parquet:/suzieq/parquet
       - ./data/generated_configs:/suzieq/config:ro
@@ -276,7 +276,7 @@ services:
       DB_WAIT_TIMEOUT: 90
       DB_WAIT_DEBUG: 1
     ports:
-      - "${NETBOX_PORT:-8080}:8080"
+      - "${NETBOX_PORT_EXTERNAL:-8080}:8080"
     networks:
       - olav-network
     profiles:
@@ -310,18 +310,17 @@ services:
     env_file:
       - .env
     environment:
-      # Override for Docker network (containers use service name, not localhost)
-      POSTGRES_URI: ${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      # Container network URLs (use internal hostnames, NOT localhost)
+      # These override any .env values to ensure containers use Docker network
+      POSTGRES_URI: postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav
+      OPENSEARCH_URL: http://opensearch:9200
       REDIS_URL: ${REDIS_URL:-}  # Optional: redis://olav-redis:6379 if using --profile cache
-      NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
+      NETBOX_URL: http://netbox:8080
       # LLM Configuration for container (use host.docker.internal to reach host Ollama)
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434}
-      # Disable auth for testing (set to false in production!)
-      AUTH_DISABLED: ${AUTH_DISABLED:-true}
     ports:
-      - "${OLAV_APP_PORT:-8888}:8000"
+      - "${OLAV_APP_PORT_EXTERNAL:-8888}:8000"
     volumes:
       - ./config:/app/config  # Writable for prompt debugging
       - ./data:/app/data
@@ -352,7 +351,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${OLAV_SERVER_PORT:-8000}:8000"  # API Server (host -> container 8000)
+      - "${OLAV_SERVER_PORT_EXTERNAL:-8000}:8000"  # API Server (host -> container 8000)
     volumes:
       - ./config:/app/config
       - ./data/suzieq-parquet:/app/data/suzieq-parquet:ro  # SuzieQ Parquet data (read-only)
@@ -366,15 +365,12 @@ services:
       - SERVER_PORT=8000
       - OLAV_USE_DYNAMIC_ROUTER=true
       - CORS_ORIGINS=http://localhost:3000
-      # Override for Docker network (containers use service name, not localhost)
-      - POSTGRES_URI=${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav}
-      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+      # Container network URLs (use internal hostnames, NOT localhost)
+      # These are hardcoded to prevent .env host-side values from leaking into container
+      - POSTGRES_URI=postgresql://olav:${POSTGRES_PASSWORD:-olav}@postgres:5432/olav
+      - OPENSEARCH_URL=http://opensearch:9200
       - REDIS_URL=${REDIS_URL:-}  # Optional: redis://olav-redis:6379 if using --profile cache
-      - NETBOX_URL=${NETBOX_URL:-http://netbox:8080}
-      # Auth defaults:
-      # - QuickTest should default to AUTH_DISABLED=true
-      # - Production setups (setup.ps1/setup.sh) override this to false at runtime
-      - AUTH_DISABLED=${AUTH_DISABLED:-true}
+      - NETBOX_URL=http://netbox:8080
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf --max-time 8 http://localhost:8000/health | python -c \"import sys, json; j=json.load(sys.stdin); sys.exit(0 if j.get('orchestrator_ready') else 1)\" || exit 1"]
@@ -399,8 +395,10 @@ services:
     container_name: olav-tests
     environment:
       OLAV_SERVER_URL: http://olav-server:8000
-      POSTGRES_URI: ${POSTGRES_URI:-postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OLAV_API_URL: http://olav-server:8000
+      # Container network URLs (hardcoded for Docker network)
+      POSTGRES_URI: postgresql://olav:${POSTGRES_PASSWORD:-OlavPG123!}@postgres:5432/olav
+      OPENSEARCH_URL: http://opensearch:9200
     depends_on:
       olav-server:
         condition: service_healthy
@@ -408,7 +406,7 @@ services:
       - olav-network
     profiles:
       - testing
-    command: ["uv", "run", "pytest", "tests/e2e"]
+    command: ["uv", "run", "pytest", "--timeout=300", "tests/e2e"]
 
 volumes:
   opensearch_data:

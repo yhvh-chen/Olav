@@ -315,7 +315,7 @@ class WorkflowOrchestrator:
 
         try:
             # Use aget_tuple to retrieve the latest checkpoint state
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
             checkpoint_tuple = await self.checkpointer.aget_tuple(config)
 
             if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
@@ -401,17 +401,12 @@ class WorkflowOrchestrator:
                 if hasattr(m, "content")
             )
 
-            summary_prompt = f"""Summarize the following conversation history concisely.
-Focus on:
-1. Devices and interfaces mentioned
-2. Configuration changes discussed
-3. Key diagnostic findings
-4. Any unresolved issues
-
-Conversation:
-{old_content}
-
-Provide a concise summary (max 500 words):"""
+            # Load prompt from config
+            summary_prompt = prompt_manager.load_prompt(
+                "agents",
+                "conversation_summary",
+                old_content=old_content,
+            )
 
             # Use a lightweight LLM call for summarization
             llm = LLMFactory.get_chat_model(json_mode=False, reasoning=False)
@@ -452,7 +447,7 @@ Provide a concise summary (max 500 words):"""
             return
 
         try:
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
             # Load existing messages or start fresh
             existing_messages: list[BaseMessage] = []
@@ -518,18 +513,21 @@ Provide a concise summary (max 500 words):"""
         Returns:
             Execution result from selected workflow
         """
-        # ===== GUARD: Check if query is network-related =====
-        relevance = await self.network_guard.check(user_query)
-        if not relevance.is_relevant:
-            logger.info(f"Query rejected by network guard: {relevance.reason}")
-            print(f"[Orchestrator] Non-network query rejected ({relevance.method})")
-            return {
-                "workflow_type": "REJECTED",
-                "result": {"success": False, "rejected": True},
-                "interrupted": False,
-                "final_message": REJECTION_MESSAGE,
-                "mode": mode,
-            }
+        # ===== GUARD: Check if query is network-related (opt-in security feature) =====
+        if settings.enable_guard_mode:
+            relevance = await self.network_guard.check(user_query)
+            if not relevance.is_relevant:
+                logger.info(f"Query rejected by network guard: {relevance.reason}")
+                print(f"[Orchestrator] Non-network query rejected ({relevance.method})")
+                return {
+                    "workflow_type": "REJECTED",
+                    "result": {"success": False, "rejected": True},
+                    "interrupted": False,
+                    "final_message": REJECTION_MESSAGE,
+                    "mode": mode,
+                }
+        else:
+            logger.debug("Network guard disabled (ENABLE_GUARD_MODE=false)")
 
         # ===== EXPERT MODE: Direct to SupervisorDrivenWorkflow =====
         if mode == "expert":

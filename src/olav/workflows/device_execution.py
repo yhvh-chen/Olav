@@ -353,19 +353,15 @@ class DeviceExecutionWorkflow(BaseWorkflow):
             """Generate final answer with execution summary."""
             llm = LLMFactory.get_chat_model()
 
-            final_prompt = f"""Summarize the execution results and provide a final answer.
-
-User Request: {state["messages"][0].content}
-Change Plan: {state.get("config_plan")}
-Approval Status: {state.get("approval_status")}
-Execution Result: {state.get("execution_result")}
-Validation Result: {state.get("validation_result")}
-
-Requirements:
-- If rejected, explain the reason
-- If executed, summarize affected devices, configuration items, and validation status
-- If validation failed, provide rollback recommendations
-"""
+            final_prompt = prompt_manager.load_prompt(
+                "workflows/device_execution",
+                "final_answer",
+                user_request=state["messages"][0].content,
+                config_plan=str(state.get("config_plan")),
+                approval_status=str(state.get("approval_status")),
+                execution_result=str(state.get("execution_result")),
+                validation_result=str(state.get("validation_result")),
+            )
 
             response = await llm.ainvoke([SystemMessage(content=final_prompt)])
 

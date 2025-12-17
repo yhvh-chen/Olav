@@ -264,18 +264,12 @@ class QueryDiagnosticWorkflow(BaseWorkflow):
             macro_result = state["messages"][-1].content
             macro_data = {"analysis": macro_result}
 
-            eval_prompt = f"""Evaluate whether the current macro analysis data is sufficient to answer the user's question.
-
-User request: {state["messages"][0].content}
-Macro analysis: {macro_result}
-
-Evaluation criteria:
-- If user asks "why"/"reason", historical data alone is insufficient, needs real-time config verification → needs_micro=True
-- If anomalous state detected (NotEstd/down/error), need real-time config to confirm root cause → needs_micro=True
-- If just statistics/overview/list, historical data is sufficient → needs_micro=False
-
-Return true or false
-"""
+            eval_prompt = prompt_manager.load_prompt(
+                "workflows/query_diagnostic",
+                "eval_sufficiency",
+                user_request=state["messages"][0].content,
+                macro_result=macro_result,
+            )
 
             await llm.ainvoke([SystemMessage(content=eval_prompt)])
 
@@ -332,17 +326,13 @@ Return true or false
             micro_result = state["messages"][-1].content if state.get("needs_micro") else None
             micro_data = {"diagnosis": micro_result} if micro_result else None
 
-            final_prompt = f"""Synthesize all analysis and provide final answer.
-
-User request: {state["messages"][0].content}
-Macro analysis: {state.get("macro_data")}
-Micro diagnosis: {micro_data}
-
-Requirements:
-- Answer user's question directly
-- If diagnostic task, provide clear root cause
-- Use clear structured output (tables/lists)
-"""
+            final_prompt = prompt_manager.load_prompt(
+                "workflows/query_diagnostic",
+                "final_answer",
+                user_request=state["messages"][0].content,
+                macro_data=str(state.get("macro_data")),
+                micro_data=str(micro_data),
+            )
 
             response = await llm.ainvoke([SystemMessage(content=final_prompt)])
 

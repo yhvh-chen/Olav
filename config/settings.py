@@ -137,6 +137,7 @@ class EnvSettings(BaseSettings):
     netbox_url: str = ""
     netbox_token: str = ""
     netbox_verify_ssl: bool = True
+    netbox_device_tag: str = "olav-managed"  # Tag used to filter devices from NetBox
 
     # =========================================================================
     # Device Credentials
@@ -184,7 +185,7 @@ class EnvSettings(BaseSettings):
     # =========================================================================
     token_max_age_hours: int = 24
     session_token_max_age_hours: int = 168
-    auth_disabled: bool = False
+    auth_disabled: bool | None = None  # Changed to Optional/None default
     olav_api_token: str = ""  # Master token (OLAV_API_TOKEN)
 
     @model_validator(mode="after")
@@ -193,11 +194,9 @@ class EnvSettings(BaseSettings):
 
         Note: explicit env vars still win (env_file + environment have higher priority).
         """
-        fields_set = getattr(self, "model_fields_set", set())
-
         # Default auth behavior: QuickTest disables auth; Production enables auth.
-        # Only apply if auth_disabled wasn't explicitly set.
-        if "auth_disabled" not in fields_set:
+        # Only apply if auth_disabled wasn't explicitly set (is None).
+        if self.auth_disabled is None:
             self.auth_disabled = self.olav_mode == "QuickTest"
 
         return self
@@ -216,7 +215,7 @@ class EnvSettings(BaseSettings):
     enable_agentic_rag: bool = True
     enable_deep_dive_memory: bool = True
     stream_stateless: bool = True  # Enable streaming
-    enable_guard_mode: bool = True
+    enable_guard_mode: bool = False  # Query guard (reject non-network queries)
     enable_hitl: bool = True
     yolo_mode: bool = False  # Skip approval (dangerous, test only)
 

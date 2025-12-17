@@ -443,8 +443,24 @@ class CLITool:
 
 
 # Register tools with ToolRegistry
-ToolRegistry.register(NetconfTool())
-ToolRegistry.register(CLITool())
+# NETCONF: HITL required for edit-config (write) only
+ToolRegistry.register(
+    NetconfTool(),
+    requires_hitl=lambda args: args.get("operation") == "edit-config",
+    # More specific triggers - avoid generic "配置" which conflicts with openconfig
+    triggers=["netconf", "rpc", "edit-config", "get-config", "netconf配置", "设备配置变更"],
+    category="netconf",
+    aliases=["netconf_tool", "netconf_execute"],
+)
+# CLI: HITL required for config commands only (not show commands)
+# Note: cli_execute is raw, cli_show/cli_config wrappers provide semantic distinction
+ToolRegistry.register(
+    CLITool(),
+    requires_hitl=lambda args: not args.get("command", "").strip().lower().startswith("show"),
+    triggers=["cli", "ssh", "command line", "show run", "命令行"],
+    category="cli",
+    aliases=["cli_tool", "cli_execute"],
+)
 
 # ---------------------------------------------------------------------------
 # Compatibility Wrappers (@tool) for legacy workflow/test integration

@@ -52,8 +52,6 @@ archive/
 
 # Docs
 docs/
-*.md
-!README.md
 
 # Git
 .git/

@@ -1,0 +1,25 @@
+# Query Diagnostic Final Answer Prompt
+# Synthesizes macro and micro analysis into final answer
+
+_type: prompt
+input_variables:
+  - user_request
+  - macro_data
+  - micro_data
+template: |
+  Synthesize all analysis and provide final answer.
+
+  ## User Request
+  {user_request}
+
+  ## Macro Analysis
+  {macro_data}
+
+  ## Micro Diagnosis
+  {micro_data}
+
+  ## Requirements
+  - Answer user's question directly
+  - If diagnostic task, provide clear root cause
+  - Use clear structured output (tables/lists)
+  - Include device names and interface details where applicable

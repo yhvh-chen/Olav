@@ -44,6 +44,7 @@ OLAV moves beyond simple RAG by implementing a **Schema-Aware Architecture**:
 - **Human-in-the-Loop (HITL)**: "Safety First" philosophy. All write operations (NETCONF/CLI) trigger an interrupt requiring operator approval.
 - **Funnel Debugging**: Automatically narrows down issues from Macro (network-wide SuzieQ analysis) to Micro (device-level NETCONF diagnostics).
 - **Granular Access Control**: Implements a dual-token system (Master/Session) with role-based permissions to strictly separate administrative registration from operational execution.
+- **Query Guard (Optional)**: LLM-based pre-filter that rejects non-network queries (prompt injection protection). Disabled by default, enable via `ENABLE_GUARD_MODE=true`.
 
 ### 🌐 Multi-Vendor Support
 - **No Vendor Lock-in**: Built on open standards (NETCONF/YANG, OpenConfig) and vendor-agnostic drivers.
@@ -127,7 +128,7 @@ Start the chat session for ad-hoc queries and operations.
 uv run olav
 ```
 
-### Expert Mode (Deep Dive)
+### Expert Mode
 For complex troubleshooting that requires recursive investigation (e.g., "Why is BGP flapping on R1?"), use Expert Mode. This enables the **DeepDiveWorkflow** which can spawn sub-agents to investigate multiple layers (L1-L3) automatically.
 
 ```bash
@@ -136,7 +137,7 @@ uv run olav -e "Diagnose intermittent packet loss on Core-Switch-01"
 uv run olav --expert "Check BGP anomalies in DataCenter-A"
 ```
 
-### Automated Inspection (巡检模式)
+### Automated Inspection
 Run declarative health checks defined in YAML configuration files.
 
 1. **Define Inspection Profile**:
@@ -166,7 +167,7 @@ Run declarative health checks defined in YAML configuration files.
    uv run olav inspect jobs
    ```
 
-## 🏗 Distributed Architecture & Security
+## 🔒 Distributed Architecture & Security
 
 OLAV is designed for enterprise scale and security:
 
@@ -176,9 +177,117 @@ OLAV is designed for enterprise scale and security:
 
 ### 🔐 Zero-Trust Security Model
 - **Token Separation**:
-  - **Master Token**: Used only for initial client registration (Admin only).
+  - **Master Token**: Auto-generated on server startup, used for client registration.
   - **Session Tokens**: Unique, revocable tokens issued to each client device.
-- **Role-Based Access**: Granular control over who can execute write operations vs. read-only queries.
+- **Role-Based Access**: `admin` (skip HITL) | `operator` (HITL required) | `viewer` (read-only).
+
+## 🔑 Token Management
+
+**Server Startup** (Master Token auto-generated):
+```bash
+docker-compose up -d
+# Master Token printed in logs: docker-compose logs olav-app | grep "Master Token"
+
+# Or set fixed token in .env for multi-worker mode:
+# OLAV_API_TOKEN=<your_secure_token>
+```
+
+**Client Registration** (with role):
+```bash
+# Register as operator (default, HITL required for writes)
+olav register -n my-laptop -t <MASTER_TOKEN> --server http://<SERVER>:<PORT>
+
+# Register as admin (can skip HITL)
+olav register -n admin-station -t <MASTER_TOKEN> --role admin --server http://<SERVER>:<PORT>
+
+# Register as viewer (read-only)
+olav register -n monitoring-client -t <MASTER_TOKEN> --role viewer --server http://<SERVER>:<PORT>
+
+# Verify
+olav status
+```
+
+**Session Management** (server-side):
+```bash
+uv run olav token list              # List all registered clients
+uv run olav token revoke <name>     # Revoke a client's access
+```
+
+## 💻 CLI Client Deployment
+
+OLAV supports two deployment modes: **Local CLI** (full environment) and **Remote CLI** (lightweight client).
+
+### Local CLI (Full Environment)
+Use this mode when running directly on the OLAV server or development machine with the full environment.
+
+```bash
+# Start interactive mode
+uv run olav
+
+# Single query
+uv run olav -q "Check BGP status on R1"
+
+# Expert mode (Deep Dive)
+uv run olav -e "Diagnose packet loss on Core-Switch-01"
+```
+
+### Remote CLI (Lightweight Client)
+For operators who need to connect to a remote OLAV server without installing the full environment.
+
+**Installation:**
+```bash
+# From PyPI (when published)
+pip install olav-client
+
+# Or install from source
+cd client/
+uv pip install .
+```
+
+**Configuration:**
+
+The server URL and port depend on your OLAV server deployment. Check your `.env` file for:
+- `OLAV_SERVER_PORT_EXTERNAL` - the external port exposed by the server (default: `18000`)
+
+```bash
+# Set server URL via environment variable
+export OLAV_SERVER_URL=http://<SERVER_IP>:${OLAV_SERVER_PORT_EXTERNAL}
+
+# Or use config file: ~/.olav/config.toml
+cat > ~/.olav/config.toml << EOF
+[server]
+url = "http://your-server:18000"  # Match your .env OLAV_SERVER_PORT_EXTERNAL
+timeout = 300
+EOF
+```
+
+**Register Client:**
+```bash
+# First-time registration (requires Master Token from admin)
+olav register -n my-laptop -t <MASTER_TOKEN> --server http://<SERVER_IP>:<PORT>
+```
+
+**Usage:**
+```bash
+# Interactive chat loop
+olav
+
+# Single-shot query
+olav -q "Show interfaces on R1"
+
+# Check connectivity and autocomplete
+olav status
+```
+
+### Deployment Comparison
+
+| Feature | Local CLI (`uv run olav`) | Remote CLI (`olav-client`) |
+|---------|---------------------------|---------------------------|
+| Installation | Full environment + dependencies | Lightweight pip package |
+| Network Access | Direct to devices | Via OLAV server API |
+| Expert Mode | ✅ Supported | ✅ Supported |
+| Inspection | ✅ Full access | ✅ Via server |
+| Use Case | Server/Dev machine | Operator workstations |
 
 ## 📄 License
 

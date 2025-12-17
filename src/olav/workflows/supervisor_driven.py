@@ -574,46 +574,12 @@ async def quick_analyzer_node(state: SupervisorDrivenState) -> dict:
     llm = LLMFactory.get_chat_model(reasoning=True)
 
     # Load Quick Analyzer prompt
-    try:
-        system_prompt = prompt_manager.load_prompt(
-            "workflows/deep_dive",
-            "quick_analyzer",
-            layer=current_layer,
-            layer_info=LAYER_INFO[current_layer],
-        )
-    except (FileNotFoundError, ValueError):
-        # Fallback prompt with funnel debugging guidance
-        system_prompt = f"""You are a network Quick Analyzer investigating {current_layer}.
-
-## Funnel Debugging
-You have TWO tiers of tools:
-
-**Tier 1: SuzieQ (Historical Data, Fast, 60% Confidence Cap)**
-- Use suzieq_schema_search to discover available tables
-- Use suzieq_query for historical data analysis
-- Good for: overview, trend analysis, pattern detection
-- Limitation: Data may be stale (polling interval ~60s)
-
-**Tier 2: Nornir (Real-Time Data, 95% Confidence)**
-- Use cli_show for real-time show/debug commands
-- Use netconf_get for structured NETCONF data
-- Good for: verification, current state, detailed inspection
-- Use when: SuzieQ data is insufficient OR contradiction detected
-
-## Context from Supervisor
-The task description may include KB/Syslog context from Supervisor's Round 0 analysis.
-Use this context to guide your investigation - it indicates similar historical cases
-and recent fault events that may be relevant.
-
-## Your Job:
-1. START with SuzieQ (fast macro analysis)
-2. If confidence < 60% or SuzieQ data is stale, use cli_show for real-time verification
-3. Report findings with clear confidence levels:
-   - SuzieQ-only findings: max 60% confidence
-   - CLI/NETCONF-verified findings: up to 95% confidence
-
-Focus on {current_layer}: {LAYER_INFO[current_layer]['description']}
-"""
+    system_prompt = prompt_manager.load_prompt(
+        "workflows/deep_dive",
+        "quick_analyzer",
+        layer=current_layer,
+        layer_info=LAYER_INFO[current_layer],
+    )
 
     # Run ReAct agent
     react_agent = create_react_agent(llm, tools)
@@ -729,23 +695,19 @@ async def report_generator_node(state: SupervisorDrivenState) -> dict:
 {findings_text}
 
 ## Task
-Based on the findings, provide:
-1. Root Cause: A clear, concise description of the primary issue
-2. Root Cause Device: Which device is the source of the problem (if identifiable)
-3. Root Cause Layer: Which OSI layer (L1, L2, L3, or L4)
-4. Confidence: Your confidence level (0-100%)
-5. Evidence: List the key evidence points
-6. Recommended Action: What should be done to fix this
+Analyze findings and provide a device-centric root cause analysis.
 
-Format your response as:
-ROOT_CAUSE: [description]
-DEVICE: [device name or "Unknown"]
+Format your response EXACTLY as:
+ROOT_CAUSE: [One sentence describing the primary issue]
+DEVICE: [Device name, e.g., R1, SW1, or "Unknown"]
+INTERFACE: [Interface name if applicable, e.g., GigabitEthernet0/0, or "N/A"]
 LAYER: [L1/L2/L3/L4 or "Unknown"]
 CONFIDENCE: [0-100]
+AFFECTED_DEVICES: [Comma-separated list of all devices with issues, e.g., "R1, R2"]
 EVIDENCE:
-- [point 1]
-- [point 2]
-RECOMMENDED_ACTION: [action]
+- [Device:Interface] Finding 1
+- [Device:Interface] Finding 2
+RECOMMENDED_ACTION: [Specific remediation step]
 """
 
     response = await llm.ainvoke([SystemMessage(content=root_cause_prompt)])
@@ -757,6 +719,8 @@ RECOMMENDED_ACTION: [action]
     root_cause = "Unable to determine root cause"
     root_cause_device = None
     root_cause_layer = None
+    root_cause_interface = None
+    affected_devices = []
     confidence = 0.5
     evidence_chain = []
     recommended_action = ""
@@ -769,6 +733,15 @@ RECOMMENDED_ACTION: [action]
         device = match.group(1).strip()
         if device.lower() != "unknown":
             root_cause_device = device
+
+    if match := re.search(r"INTERFACE:\s*(.+?)(?=\n|$)", response_text):
+        iface = match.group(1).strip()
+        if iface.lower() not in ("n/a", "unknown", "none"):
+            root_cause_interface = iface
+
+    if match := re.search(r"AFFECTED_DEVICES:\s*(.+?)(?=\n|$)", response_text):
+        devices_str = match.group(1).strip()
+        affected_devices = [d.strip() for d in devices_str.split(",") if d.strip()]
 
     if match := re.search(r"LAYER:\s*(L[1-4])", response_text):
         root_cause_layer = match.group(1)
@@ -787,16 +760,24 @@ RECOMMENDED_ACTION: [action]
     if match := re.search(r"RECOMMENDED_ACTION:\s*(.+?)(?=\n[A-Z_]+:|$)", response_text, re.DOTALL):
         recommended_action = match.group(1).strip()
 
-    # Build device summaries
+    # Build device summaries from affected_devices and layer_findings
     device_summaries = {}
-    if path_devices:
-        for device in path_devices:
-            device_summaries[device] = DeviceSummary(
-                device=device,
-                status="degraded" if device == root_cause_device else "healthy",
-                layer_findings=layer_findings,
-                confidence=confidence if device == root_cause_device else 0.5,
-            )
+    all_devices = set(affected_devices) | set(path_devices)
+    if root_cause_device:
+        all_devices.add(root_cause_device)
+
+    for device in all_devices:
+        is_root = device == root_cause_device
+        device_summaries[device] = DeviceSummary(
+            device=device,
+            status="faulty" if is_root else ("degraded" if device in affected_devices else "healthy"),
+            layer_findings=layer_findings,
+            confidence=confidence if is_root else 0.5,
+        )
+
+    # Include interface in root cause if available
+    if root_cause_interface and root_cause_device:
+        root_cause = f"{root_cause} (Interface: {root_cause_interface})"
 
     # Extract metadata
     combined_text = f"{root_cause} {recommended_action} {' '.join(evidence_chain)}"
@@ -807,9 +788,9 @@ RECOMMENDED_ACTION: [action]
     # Create structured report
     report = DiagnosisReport(
         fault_description=query,
-        source=path_devices[0] if path_devices else None,
+        source=path_devices[0] if path_devices else (root_cause_device if root_cause_device else None),
         destination=path_devices[-1] if len(path_devices) > 1 else None,
-        fault_path=path_devices,
+        fault_path=list(all_devices) if all_devices else [],
         root_cause=root_cause,
         root_cause_device=root_cause_device,
         root_cause_layer=root_cause_layer,
@@ -1205,7 +1186,7 @@ class SupervisorDrivenWorkflow(BaseWorkflow):
 
         config = {}
         if "thread_id" in kwargs:
-            config["configurable"] = {"thread_id": kwargs["thread_id"]}
+            config["configurable"] = {"thread_id": kwargs["thread_id"], "checkpoint_ns": ""}
 
         return await graph.ainvoke(initial_state, config)
 

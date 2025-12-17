@@ -14,10 +14,10 @@ Usage:
     uv run cli.py
     
     # Single query
-    uv run cli.py query "查询 R1 BGP 状态"
+    uv run cli.py query "Query R1 BGP status"
     
     # Expert mode
-    uv run cli.py query -m expert "审计所有边界路由器"
+    uv run cli.py query -m expert "Audit all border routers"
     
     # Inspection commands
     uv run cli.py inspect list
@@ -25,7 +25,7 @@ Usage:
     
     # Document management
     uv run cli.py doc list
-    uv run cli.py doc search "BGP 配置"
+    uv run cli.py doc search "BGP configuration"
     
 Environment Variables:
     OLAV_SERVER_URL: API server URL (default: http://localhost:8000)

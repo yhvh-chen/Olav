@@ -5,6 +5,7 @@ These rules define which changes require human approval
 before being applied to NetBox.
 """
 
+from olav.core.prompt_manager import prompt_manager
 from olav.sync.models import DiffResult, DiffSeverity, EntityType
 
 # Fields that always require HITL approval
@@ -90,31 +91,27 @@ def get_hitl_prompt(diff: DiffResult) -> str:
 
     emoji = severity_emoji.get(diff.severity, "")
 
-    prompt = f"""
-{emoji} HITL Approval Required
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Device:     {diff.device}
-Entity:     {diff.entity_type.value}
-Field:      {diff.field}
-Severity:   {diff.severity.value}
-
-Current (NetBox):  {diff.netbox_value}
-Proposed (Network): {diff.network_value}
-
-Source: {diff.source.value}
-"""
-
+    # Build additional context section
+    additional_context = ""
     if diff.additional_context:
-        prompt += "\nAdditional Context:\n"
+        additional_context = "\nAdditional Context:\n"
         for key, value in diff.additional_context.items():
-            prompt += f"  {key}: {value}\n"
+            additional_context += f"  {key}: {value}\n"
 
-    prompt += """
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Approve this change? [y/N]: """
-
-    return prompt
+    # Load prompt from config
+    return prompt_manager.load_prompt(
+        "sync",
+        "hitl_prompt",
+        emoji=emoji,
+        device=diff.device,
+        entity_type=diff.entity_type.value,
+        field=diff.field,
+        severity=diff.severity.value,
+        netbox_value=diff.netbox_value,
+        network_value=diff.network_value,
+        source=diff.source.value,
+        additional_context=additional_context,
+    )
 
 
 def get_hitl_summary(diffs: list[DiffResult]) -> str:

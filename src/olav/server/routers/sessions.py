@@ -135,7 +135,7 @@ async def list_sessions(
                 # Fallback: Use checkpointer to get latest state if first message missing
                 if not first_message and state.checkpointer:
                     try:
-                        config = {"configurable": {"thread_id": row["thread_id"]}}
+                        config = {"configurable": {"thread_id": row["thread_id"], "checkpoint_ns": ""}}
                         # This gets the LATEST state, which contains the full history
                         cp_tuple = await state.checkpointer.aget_tuple(config)
                         if cp_tuple and cp_tuple.checkpoint:
@@ -216,7 +216,7 @@ async def get_session(
     if state.checkpointer:
         logger.info(f"Attempting to get session {thread_id} via checkpointer")
         try:
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
             # aget_tuple retrieves the latest checkpoint, handling checkpoint_writes automatically
             checkpoint_tuple = await state.checkpointer.aget_tuple(config)
 

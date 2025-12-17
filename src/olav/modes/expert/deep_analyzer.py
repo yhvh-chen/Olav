@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from olav.core.llm import LLMFactory
+from olav.core.prompt_manager import prompt_manager
 from olav.modes.expert.supervisor import (
     LAYER_INFO,
     REALTIME_CONFIDENCE,
@@ -38,56 +39,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Data Classes
 # =============================================================================
-
-
-@dataclass
-class DeepAnalyzerResult:
-    """Result from DeepAnalyzer workflow integration."""
-    success: bool
-    confidence: float
-    findings: list[str]
-    root_cause_found: bool = False
-    root_cause: str | None = None
-    tool_outputs: list[dict] = field(default_factory=list)
-
-
-# =============================================================================
-# Prompts
-# =============================================================================
-
-DEEP_ANALYZER_SYSTEM_PROMPT = """You are OLAV's Deep Analyzer for network fault diagnosis, responsible for verifying fault hypotheses through real-time device access.
-
-## Current Task
-- **Layer**: {layer} ({layer_name})
-- **Hypothesis**: {hypothesis}
-- **Suspected Devices**: {suspected_devices}
-
-## Phase 1 Findings (SuzieQ Historical Data)
-{phase1_findings}
-
-## Your Task
-1. Use OpenConfig/CLI tools to read device **real-time configuration**
-2. Verify if Phase 1 hypothesis is correct
-3. If root cause is found, provide clear evidence
-
-## Available Tools
-- **openconfig_schema_search**: Find OpenConfig XPath
-- **netconf_get**: NETCONF read real-time configuration
-- **cli_show**: CLI show commands (vendor-specific)
-
-## Key Checkpoints (Routing Policy Issues)
-1. `show run | section route-map` - View route-map configuration
-2. `show run | section prefix-list` - View prefix-list configuration
-3. `show bgp neighbors X.X.X.X policy` - View BGP neighbor policy
-4. `show ip bgp X.X.X.X/X longer-prefixes` - Verify if prefix is advertised
-
-## Output Format
-After analysis, summarize:
-- **Root Cause Confirmed**: Whether root cause is confirmed
-- **Evidence**: Specific configuration lines or status
-- **Confidence**: 0.0-0.95 (real-time data upper limit)
-- **Recommended Fix**: Specific modification suggestions (read-only mode, not executed)
-"""
 
 
 # =============================================================================
@@ -261,19 +212,22 @@ class DeepAnalyzer:
         # Format phase1 findings
         phase1_text = "\n".join(f"- {f}" for f in phase1_findings) if phase1_findings else "None"
 
-        # Build prompt
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", DEEP_ANALYZER_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-
-        prompt.partial(
+        # Load prompt from config
+        system_prompt = prompt_manager.load_prompt(
+            "modes/expert",
+            "deep_analyzer",
             layer=task.layer,
             layer_name=layer_info.get("name", "Unknown"),
             hypothesis=hypothesis,
             suspected_devices=", ".join(suspected_devices) if suspected_devices else "Unspecified",
             phase1_findings=phase1_text,
         )
+
+        # Build prompt template
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
 
         # Get realtime tools
         tools = self._get_realtime_tools()
@@ -318,13 +272,7 @@ Key command reference:
             collected_messages = []
 
             input_messages = [
-                SystemMessage(content=DEEP_ANALYZER_SYSTEM_PROMPT.format(
-                    layer=task.layer,
-                    layer_name=layer_info.get("name", "Unknown"),
-                    hypothesis=hypothesis,
-                    suspected_devices=", ".join(suspected_devices) if suspected_devices else "Unspecified",
-                    phase1_findings=phase1_text,
-                )),
+                SystemMessage(content=system_prompt),
                 ("user", input_msg),
             ]
 

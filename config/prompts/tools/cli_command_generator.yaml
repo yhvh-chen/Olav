@@ -5,140 +5,28 @@ input_variables:
   - available_commands
   - context
 template: |
-  You are a network CLI command expert. Generate the exact CLI command(s) for the given intent and platform.
+  You are a network CLI command expert. Generate CLI command(s) for the given intent and platform.
 
-  ## Context
-
-  **User Intent**: {intent}
-  **Target Platform**: {platform}
-  **Available Commands** (from TextFSM templates): {available_commands}
-  **Additional Context**: {context}
-
-  ## Chain of Thought - Command Generation
-
-  <thinking>
-  Step 1: Analyze the user intent
-  - What information does the user need?
-  - What operation needs to be performed?
-
-  Step 2: Match platform syntax
-  - Identify the correct platform (IOS, IOS-XR, NX-OS, EOS, JunOS)
-  - Use platform-specific command syntax
-  - Consider command variations for different versions
-
-  Step 3: Select optimal commands
-  - Prefer commands with TextFSM templates (structured output)
-  - Include pipe filters if helpful
-  - Consider alternatives for fallback
-
-  Step 4: Safety check
-  - Verify no dangerous commands (reload, erase, etc.)
-  - Check command is read-safe or write-safe as needed
-  </thinking>
-
-  ## Platform-Specific Syntax Reference
-
-  ### Cisco IOS / IOS-XE
-  - show running-config [interface X | section Y]
-  - show ip interface brief
-  - show ip route [vrf NAME]
-  - show ip bgp [summary | neighbor X]
-  - show interfaces [X] [status | trunk]
-  - show version
-
-  ### Cisco IOS-XR
-  - show running-config [formal] [interface X]
-  - show ip interface brief
-  - show route [vrf NAME]
-  - show bgp [ipv4 unicast | vpnv4 unicast] [summary]
-  - show interface [X] [brief | description]
-  - show version
-
-  ### Cisco NX-OS
-  - show running-config [interface X | vrf Y]
-  - show ip interface brief vrf all
-  - show ip route [vrf NAME]
-  - show bgp [l2vpn evpn | ipv4 unicast] [summary]
-  - show interface [X] [status | brief]
-  - show version
-  - show vlan [brief]
-  - show nve peers
-
-  ### Arista EOS
-  - show running-config [interfaces X | section Y]
-  - show ip interface brief
-  - show ip route [vrf NAME]
-  - show ip bgp [summary]
-  - show interfaces [X] [status]
-  - show version
-
-  ### Juniper JunOS
-  - show configuration [interfaces X | protocols]
-  - show interfaces [terse | extensive]
-  - show route [table NAME]
-  - show bgp [summary | neighbor X]
-  - show chassis hardware
-  - show version
+  ## Input
+  - **Intent**: {intent}
+  - **Platform**: {platform}
+  - **Available Commands**: {available_commands}
+  - **Context**: {context}
 
   ## Rules
+  1. Generate platform-specific syntax based on the platform parameter
+  2. Prefer commands from available_commands list (have TextFSM templates)
+  3. Avoid dangerous commands (reload, erase, format, delete)
+  4. Include pipe filters if helpful for output filtering
 
-  1. Use platform-specific syntax (e.g., "show ip interface brief" for IOS vs "show interfaces terse" for JunOS)
-  2. Prefer commands that have TextFSM templates for structured output
-  3. Avoid dangerous commands (reload, write erase, etc.)
-  4. Include pipe filters if helpful (e.g., "| include X" for IOS, "| match X" for JunOS)
-  5. Return empty arrays if the intent cannot be fulfilled
-
-  ## Output Format (JSON)
-
+  ## Output (JSON only)
   ```json
-  {
+  {{
     "commands": ["command1", "command2"],
-    "explanation": "Brief explanation of what each command does",
-    "warnings": ["Any warnings about the commands"],
-    "alternatives": ["Alternative commands if primary fails"]
-  }
-  ```
-
-  ## Examples
-
-  ### Example 1: BGP neighbor status on Cisco IOS
-  Intent: "Show BGP neighbor status"
-  Platform: cisco_ios
-
-  <thinking>
-  - User wants BGP neighbor information
-  - Platform is Cisco IOS → use "show ip bgp" commands
-  - BGP summary gives quick overview, neighbors gives details
-  </thinking>
-
-  Output:
-  ```json
-  {
-    "commands": ["show ip bgp summary", "show ip bgp neighbors"],
-    "explanation": "show ip bgp summary shows all BGP neighbors and their state, show ip bgp neighbors provides detailed info",
+    "explanation": "Brief explanation",
     "warnings": [],
-    "alternatives": ["show bgp all summary"]
-  }
+    "alternatives": []
+  }}
   ```
 
-  ### Example 2: Interface errors on Arista EOS
-  Intent: "Check for interface errors"
-  Platform: arista_eos
-
-  <thinking>
-  - User wants interface error counters
-  - Platform is Arista EOS → use "show interfaces counters"
-  - Error counters indicate potential hardware/cable issues
-  </thinking>
-
-  Output:
-  ```json
-  {
-    "commands": ["show interfaces counters errors"],
-    "explanation": "Shows input/output error counters for all interfaces",
-    "warnings": ["High CRC errors may indicate cable or transceiver issues"],
-    "alternatives": ["show interfaces | include errors"]
-  }
-  ```
-
-  Generate the command(s) for the given intent and platform:
+  Generate commands:

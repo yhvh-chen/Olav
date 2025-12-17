@@ -30,7 +30,12 @@ To run the standalone client CLI from the monorepo, prefer `uv run --project cli
 
 ## Configure
 
-- Set server URL: `OLAV_SERVER_URL` (example: `http://localhost:18001`)
+The server URL and port depend on your OLAV server deployment. Check your `.env` file for:
+- `OLAV_SERVER_PORT_EXTERNAL` - the external port exposed by the server (e.g., `18000`)
+
+Set the server URL via environment variable or config file:
+
+- Environment: `OLAV_SERVER_URL` (example: `http://localhost:${OLAV_SERVER_PORT_EXTERNAL}`)
 - Provide a token via `OLAV_API_TOKEN`, or register to create a session token.
 
 Note: `olav register --server ...` will also persist the server URL to `~/.olav/config.toml` for later commands.
@@ -39,7 +44,7 @@ Optional config file: `~/.olav/config.toml`
 
 ```toml
 [server]
-url = "http://localhost:18001"
+url = "http://localhost:18000"  # Match your .env OLAV_SERVER_PORT_EXTERNAL
 timeout = 300
 ```
 
@@ -49,5 +54,5 @@ timeout = 300
 olav                 # Interactive chat loop
 olav -q "check BGP"  # Single-shot query
 olav status          # Basic connectivity + autocomplete checks
-olav register -n my-laptop -t <MASTER_TOKEN> --server http://localhost:18001
+olav register -n my-laptop -t <MASTER_TOKEN> --server http://localhost:<PORT>
 ```

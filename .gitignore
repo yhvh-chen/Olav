@@ -85,6 +85,7 @@ archive/
 # Root level debug/test scripts
 /debug_*.py
 /test_*.py
+tests
 
 # Dev/Test Infrastructure
 docker-compose.dev.yml

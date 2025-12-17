@@ -566,5 +566,17 @@ def create_suzieq_schema_tool():
 
 
 # Register tools with ToolRegistry
-ToolRegistry.register(SuzieQTool())
-ToolRegistry.register(SuzieQSchemaSearchTool())
+# SuzieQ is read-only (Parquet queries) - no HITL required
+ToolRegistry.register(
+    SuzieQTool(),
+    requires_hitl=False,
+    triggers=["bgp", "ospf", "interface", "route", "vlan", "mac", "lldp", "arp", "mlag", "网络状态", "邻居"],
+    category="suzieq",
+    aliases=["suzieq_query", "network_query"],
+)
+ToolRegistry.register(
+    SuzieQSchemaSearchTool(),
+    requires_hitl=False,
+    triggers=["suzieq schema", "suzieq table", "suzieq 表"],
+    category="suzieq",
+)

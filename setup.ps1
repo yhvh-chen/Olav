@@ -7,9 +7,7 @@ Goal:
 - This script reads .env, selects mode (QuickTest default), and starts Docker services.
 
 Usage:
-  .\setup.ps1                 # Auto (defaults to QuickTest unless .env sets OLAV_MODE=production)
-  .\setup.ps1 -Mode QuickTest
-  .\setup.ps1 -Mode Production
+  .\setup.ps1                 # Mode is determined by OLAV_MODE in .env (defaults to QuickTest)
 
 Notes:
 - QuickTest forces AUTH_DISABLED=true and OPENSEARCH_SECURITY_DISABLED=true at runtime.
@@ -17,10 +15,7 @@ Notes:
 #>
 
 [CmdletBinding()]
-param(
-    [ValidateSet('','QuickTest','Production')]
-    [string]$Mode = ''
-)
+param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -460,6 +455,51 @@ function Invoke-NetBoxInit {
     }
 }
 
+function Invoke-SchemaInit {
+    <#
+    .SYNOPSIS
+    Initialize OpenSearch indexes and PostgreSQL Checkpointer tables.
+
+    .DESCRIPTION
+    Runs `olav init all` to create:
+    - PostgreSQL Checkpointer tables (langgraph state persistence)
+    - SuzieQ schema index (from SuzieQ avro schemas)
+    - OpenConfig schema index (from YANG models or stub data)
+    - NetBox schema index (from NetBox OpenAPI schema)
+    - Episodic memory index (RAG for past successful operations)
+    - Syslog index (for log ingestion)
+
+    .PARAMETER ProjectRoot
+    Path to the project root directory.
+
+    .PARAMETER Force
+    If specified, force reset all indexes (delete and recreate).
+    #>
+    param(
+        [string]$ProjectRoot,
+        [switch]$Force
+    )
+
+    Write-Info "Initializing OpenSearch indexes and PostgreSQL tables..."
+
+    Push-Location $ProjectRoot
+    try {
+        $args = @('run', 'olav', 'init', 'all')
+        if ($Force) { $args += '--force' }
+
+        $result = Invoke-UvWithDiagnostics -ProjectRoot $ProjectRoot -UvArgs $args -TreatFailureAsWarning
+        if ($result) {
+            Write-Success "Schema and index initialization completed"
+        }
+        else {
+            Write-WarningMsg "Schema initialization had warnings (some indexes may need manual setup)"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Invoke-DockerComposeUp {
     param(
         [string]$ProjectRoot,
@@ -587,13 +627,8 @@ function Invoke-OlavStatus {
 
 function Resolve-Mode {
     param(
-        [string]$ModeArg,
         [hashtable]$EnvMap
     )
-
-    if (-not [string]::IsNullOrWhiteSpace($ModeArg)) {
-        return $ModeArg
-    }
 
     $raw = (Get-EnvValue -EnvMap $EnvMap -Key 'OLAV_MODE' -Default 'quicktest').Trim().ToLowerInvariant()
     if ($raw -eq 'production' -or $raw -eq 'prod') {
@@ -612,7 +647,7 @@ function Main {
     Assert-EnvExists -EnvPath $envPath -ExamplePath $envExample
 
     $envMap = Read-DotEnvFile -Path $envPath
-    $resolvedMode = Resolve-Mode -ModeArg $Mode -EnvMap $envMap
+    $resolvedMode = Resolve-Mode -EnvMap $envMap
 
     Write-Info "OLAV setup (mode: $resolvedMode)"
 
@@ -656,15 +691,15 @@ function Main {
 
     # Validate minimal keys used by Docker compose / server
     $portKeys = @(
-        'OLAV_SERVER_PORT',
-        'OLAV_APP_PORT',
-        'NETBOX_PORT',
-        'POSTGRES_PORT',
-        'OPENSEARCH_PORT',
-        'OPENSEARCH_METRICS_PORT',
-        'SUZIEQ_GUI_PORT',
-        'FLUENT_SYSLOG_PORT',
-        'FLUENT_HTTP_PORT'
+        'OLAV_SERVER_PORT_EXTERNAL',
+        'OLAV_APP_PORT_EXTERNAL',
+        'NETBOX_PORT_EXTERNAL',
+        'POSTGRES_PORT_EXTERNAL',
+        'OPENSEARCH_PORT_EXTERNAL',
+        'OPENSEARCH_METRICS_PORT_EXTERNAL',
+        'SUZIEQ_GUI_PORT_EXTERNAL',
+        'FLUENT_SYSLOG_PORT_EXTERNAL',
+        'FLUENT_HTTP_PORT_EXTERNAL'
     )
     Assert-RequiredVars -EnvMap $envMap -RequiredKeys $portKeys -Context 'Docker port mapping'
 
@@ -672,14 +707,15 @@ function Main {
         Assert-RequiredVars -EnvMap $envMap -RequiredKeys @('OLAV_API_TOKEN') -Context 'Production auth'
     }
 
-    $serverPort = Get-EnvValue -EnvMap $envMap -Key 'OLAV_SERVER_PORT' -Default '18001'
+    # Use EXTERNAL ports for host-side access (Wait-ForOlavServer, Invoke-OlavStatus, Invoke-NetBoxInit)
+    $serverPort = Get-EnvValue -EnvMap $envMap -Key 'OLAV_SERVER_PORT_EXTERNAL' -Default '18000'
     $masterToken = Get-EnvValue -EnvMap $envMap -Key 'OLAV_API_TOKEN'
 
     $netboxEnabled = ConvertTo-Bool -Value (Get-EnvValue -EnvMap $envMap -Key 'NETBOX_ENABLED' -Default 'true') -Default $true
     $netboxAutoInit = ConvertTo-Bool -Value (Get-EnvValue -EnvMap $envMap -Key 'NETBOX_AUTO_INIT' -Default 'true') -Default $true
     $netboxAutoInitForce = ConvertTo-Bool -Value (Get-EnvValue -EnvMap $envMap -Key 'NETBOX_AUTO_INIT_FORCE' -Default 'false') -Default $false
     $inventoryCsvPath = Get-EnvValue -EnvMap $envMap -Key 'INVENTORY_CSV_PATH' -Default 'config/inventory.csv'
-    $netboxPort = Get-EnvValue -EnvMap $envMap -Key 'NETBOX_PORT' -Default '18080'
+    $netboxPort = Get-EnvValue -EnvMap $envMap -Key 'NETBOX_PORT_EXTERNAL' -Default '18080'
     $netboxToken = Get-EnvValue -EnvMap $envMap -Key 'NETBOX_TOKEN' -Default ''
     $deviceUsername = Get-EnvValue -EnvMap $envMap -Key 'DEVICE_USERNAME' -Default ''
     $devicePassword = Get-EnvValue -EnvMap $envMap -Key 'DEVICE_PASSWORD' -Default ''
@@ -718,6 +754,20 @@ function Main {
         Invoke-ComposeWithDiagnostics -ProjectRoot $projectRoot -ComposeArgs @('up', '-d') -TreatFailureAsWarning | Out-Null
     }
     Write-Success "Docker services started"
+
+    # Wait for Postgres and OpenSearch before initializing schema
+    Write-Info "Waiting for Postgres and OpenSearch to be ready..."
+    $pgOk = Wait-ForContainerHealthy -ContainerName 'olav-postgres' -TimeoutSeconds 60
+    $osOk = Wait-ForContainerHealthy -ContainerName 'olav-opensearch' -TimeoutSeconds 120
+
+    if ($pgOk -and $osOk) {
+        # Initialize OpenSearch indexes and PostgreSQL Checkpointer
+        # This ensures NetBox schema can be fetched from the running NetBox instance
+        Invoke-SchemaInit -ProjectRoot $projectRoot -Force:$netboxAutoInitForce
+    }
+    else {
+        Write-WarningMsg "Postgres or OpenSearch not healthy, skipping schema init"
+    }
 
     if ($generatedNetboxSecret) {
         Write-Info "Recreating NetBox to apply generated NETBOX_SECRET_KEY..."

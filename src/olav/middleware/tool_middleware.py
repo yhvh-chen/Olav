@@ -378,30 +378,8 @@ class ToolMiddleware:
         )
 
     Attributes:
-        TOOL_GUIDE_MAPPING: Tool name to capability_guide prefix mapping
+        None - tool guide mapping is now derived from ToolRegistry.
     """
-
-    # Tool name to capability_guide prefix mapping
-    # capability_guide files are located at config/prompts/tools/{prefix}_capability_guide.yaml
-    TOOL_GUIDE_MAPPING: dict[str, str] = {
-        # SuzieQ tools
-        "suzieq_query": "suzieq",
-        "suzieq_schema_search": "suzieq",
-        "suzieq_summarize": "suzieq",
-        # NETCONF tools
-        "netconf_get": "netconf",
-        "netconf_edit": "netconf",
-        "netconf_tool": "netconf",
-        # CLI tools
-        "cli_execute": "cli",
-        "cli_tool": "cli",
-        # NetBox tools
-        "netbox_api_call": "netbox",
-        "netbox_schema_search": "netbox",
-        "netbox_query": "netbox",
-        "netbox_create": "netbox",
-        "netbox_update": "netbox",
-    }
 
     def __init__(self) -> None:
         """Initialize Middleware, set up cache."""
@@ -410,6 +388,9 @@ class ToolMiddleware:
     def get_tool_guide(self, tool_name: str) -> str:
         """
         Get capability guide for a tool.
+
+        Uses ToolRegistry._categories to derive the guide prefix,
+        replacing the hardcoded TOOL_GUIDE_MAPPING.
 
         Args:
             tool_name: Tool name (e.g., "suzieq_query")
@@ -420,9 +401,17 @@ class ToolMiddleware:
         if tool_name in self._guide_cache:
             return self._guide_cache[tool_name]
 
-        guide_prefix = self.TOOL_GUIDE_MAPPING.get(tool_name)
+        # Get category from ToolRegistry (replaces TOOL_GUIDE_MAPPING)
+        from olav.tools.base import ToolRegistry
+        guide_prefix = ToolRegistry._categories.get(tool_name)
+
         if not guide_prefix:
-            logger.debug(f"No capability guide mapping for tool: {tool_name}")
+            # Try resolving alias
+            resolved = ToolRegistry._aliases.get(tool_name, tool_name)
+            guide_prefix = ToolRegistry._categories.get(resolved)
+
+        if not guide_prefix:
+            logger.debug(f"No category for tool: {tool_name}")
             return ""
 
         guide = prompt_manager.load_tool_capability_guide(guide_prefix)
@@ -503,6 +492,7 @@ class ToolMiddleware:
         Collect and deduplicate capability guides.
 
         Tools with the same guide_prefix share one guide to avoid duplication.
+        Uses ToolRegistry._categories for tool-to-guide mapping.
 
         Args:
             tools: List of tools
@@ -510,11 +500,14 @@ class ToolMiddleware:
         Returns:
             Merged capability guides
         """
+        from olav.tools.base import ToolRegistry
+
         guides = []
         seen_prefixes: set[str] = set()
 
         for tool in tools:
-            guide_prefix = self.TOOL_GUIDE_MAPPING.get(tool.name)
+            # Get category from ToolRegistry (self-declared by tools)
+            guide_prefix = ToolRegistry._categories.get(tool.name)
             if guide_prefix and guide_prefix not in seen_prefixes:
                 guide = self.get_tool_guide(tool.name)
                 if guide:
@@ -534,12 +527,15 @@ class ToolMiddleware:
         Dynamically register tool to guide mapping.
 
         Used for extending support for custom tools.
+        Now delegates to ToolRegistry._categories.
 
         Args:
             tool_name: Tool name
-            guide_prefix: capability_guide file prefix
+            guide_prefix: capability_guide file prefix (category)
         """
-        self.TOOL_GUIDE_MAPPING[tool_name] = guide_prefix
+        from olav.tools.base import ToolRegistry
+
+        ToolRegistry._categories[tool_name] = guide_prefix
         logger.debug(f"Registered tool mapping: {tool_name} -> {guide_prefix}")
 
 

@@ -197,8 +197,8 @@ NETBOX_ENABLED="${NETBOX_ENABLED:-true}"
 NETBOX_AUTO_INIT="${NETBOX_AUTO_INIT:-true}"
 NETBOX_AUTO_INIT_FORCE="${NETBOX_AUTO_INIT_FORCE:-false}"
 INVENTORY_CSV="${INVENTORY_CSV_PATH:-config/inventory.csv}"
-NETBOX_PORT="${NETBOX_PORT:-8080}"
-SERVER_PORT="${OLAV_SERVER_PORT:-8000}"
+NETBOX_PORT="${NETBOX_PORT_EXTERNAL:-${NETBOX_PORT:-8080}}"
+SERVER_PORT="${OLAV_SERVER_PORT_EXTERNAL:-${OLAV_SERVER_PORT:-8000}}"
 
 # Prepare Images
 info "Preparing Docker images..."
@@ -239,6 +239,31 @@ else
 fi
 
 success "Docker services started"
+
+# Wait for Postgres and OpenSearch before schema init
+info "Waiting for Postgres and OpenSearch to be ready..."
+PG_OK=false
+OS_OK=false
+
+if wait_for_container_healthy "olav-postgres" 60; then
+    PG_OK=true
+fi
+
+if wait_for_container_healthy "olav-opensearch" 120; then
+    OS_OK=true
+fi
+
+# Initialize OpenSearch indexes and PostgreSQL Checkpointer tables
+if [[ "$PG_OK" == "true" && "$OS_OK" == "true" ]]; then
+    info "Initializing OpenSearch indexes and PostgreSQL tables..."
+    INIT_ARGS=(run olav init all)
+    if [[ "$NETBOX_AUTO_INIT_FORCE" == "true" ]]; then INIT_ARGS+=(--force); fi
+    
+    (cd "$ROOT_DIR" && uv "${INIT_ARGS[@]}") || warn "Schema initialization had warnings"
+    success "Schema and index initialization completed"
+else
+    warn "Postgres or OpenSearch not healthy, skipping schema init"
+fi
 
 if [[ "$GENERATED_NETBOX_SECRET" == "true" ]]; then
     info "Recreating NetBox to apply generated secret..."

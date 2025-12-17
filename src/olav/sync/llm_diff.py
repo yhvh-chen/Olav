@@ -85,50 +85,6 @@ class ComparisonResult(BaseModel):
 # ============ LLM Diff Engine ============
 
 
-COMPARISON_PROMPT = """You are a network engineer comparing data between NetBox (DCIM/IPAM) and actual network state.
-
-**Task**: Compare the following two JSON objects and identify meaningful differences.
-
-**NetBox Data** (Source of Truth - DCIM/IPAM):
-```json
-{netbox_json}
-```
-
-**Network Data** (Live state from SuzieQ/device):
-```json
-{network_json}
-```
-
-**Comparison Rules**:
-1. **Interface Names**: "GigabitEthernet0/0" = "Gi0/0" = "ge-0/0/0" (consider equivalent)
-2. **Admin State**: `enabled: true` ≈ `adminState: "up"`, `enabled: false` ≈ `adminState: "down"`
-3. **Speed Units**: Be aware of kbps vs Mbps vs Gbps conversions
-4. **MAC Address**: Normalize format (xx:xx:xx = xx-xx-xx = xxxx.xxxx)
-5. **IP Address**: /32 suffix on host addresses may be implicit
-6. **Empty vs Missing**: Empty string "" and null/missing are often equivalent
-7. **Case**: Field names and string values may have different casing
-
-**Severity Guidelines**:
-- `info`: Cosmetic differences (formatting, case, empty vs null)
-- `warning`: Should be reviewed but not urgent (description mismatch, stale data)
-- `critical`: Operational impact (admin state mismatch, IP mismatch, missing critical interface)
-
-**Auto-Correctable** (safe to sync without human approval):
-- Description, comments, labels
-- MTU (if network value is authoritative)
-- Serial number, software version updates
-
-**Requires Human Approval** (NOT auto-correctable):
-- Admin state changes (enabled/disabled)
-- IP address changes
-- VLAN assignments
-- Creating/deleting interfaces
-
-Return your analysis as a structured ComparisonResult.
-Focus on **meaningful** differences that require attention.
-Ignore fields that are semantically equivalent or cosmetically different."""
-
-
 class LLMDiffEngine:
     """
     LLM-driven diff engine that compares NetBox and network data.
@@ -307,19 +263,12 @@ class LLMDiffEngine:
         model = self._get_model()
 
         # Load prompt from YAML
-        try:
-            prompt = prompt_manager.load_prompt(
-                "sync",
-                "netbox_comparison",
-                netbox_json=json.dumps(netbox_data, indent=2, default=str),
-                network_json=json.dumps(network_data, indent=2, default=str),
-            )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Failed to load netbox_comparison prompt: {e}, using fallback")
-            prompt = COMPARISON_PROMPT.format(
-                netbox_json=json.dumps(netbox_data, indent=2, default=str),
-                network_json=json.dumps(network_data, indent=2, default=str),
-            )
+        prompt = prompt_manager.load_prompt(
+            "sync",
+            "netbox_comparison",
+            netbox_json=json.dumps(netbox_data, indent=2, default=str),
+            network_json=json.dumps(network_data, indent=2, default=str),
+        )
 
         try:
             result = await model.ainvoke(prompt)

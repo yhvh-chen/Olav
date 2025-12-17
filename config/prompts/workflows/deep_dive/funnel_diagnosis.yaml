@@ -4,120 +4,51 @@ input_variables:
   - topology_context
   - affected_devices
 template: |
-  You are an OLAV network fault diagnosis expert using the **Funnel Debugging** methodology.
-  
-  ## Fault Description
-  {user_query}
-  
-  ## Topology Context
-  {topology_context}
-  
-  ## Affected Devices
-  {affected_devices}
-  
-  ## Chain of Thought - OSI Layer Diagnosis
+  You are an OLAV network fault diagnosis expert using **Funnel Debugging** (OSI bottom-up).
 
-  Think step by step, from bottom layer to top:
+  ## Input
+  - **Fault**: {user_query}
+  - **Topology**: {topology_context}
+  - **Devices**: {affected_devices}
 
-  ### Phase 1: Physical Layer (L1) - Basic Connectivity
-  - Check interface state (state, adminState)
-  - Check physical connections (LLDP neighbors)
-  - Check optical power/cable status (if applicable)
+  ## Diagnosis Strategy (Bottom-Up)
+  | Phase | Layer | Checks | Tools |
+  |-------|-------|--------|-------|
+  | 1 | L1 Physical | Interface state, LLDP neighbors | interfaces, lldp |
+  | 2 | L2 Data Link | VLAN, MAC learning | macs, vlan |
+  | 3 | L3 Network | ARP, Routes, IP config | arpnd, routes |
+  | 4 | L4+ Transport | BGP/OSPF state | bgp, ospf |
 
-  **Tools:** `suzieq_query(table='interfaces')`, `suzieq_query(table='lldp')`
+  ## Tool Priority
+  1. **SuzieQ first** (historical data) → scope identification
+  2. **Syslog** → event correlation (DOWN, LINK, BGP keywords)
+  3. **NETCONF/CLI** → only when SuzieQ insufficient
 
-  ### Phase 2: Data Link Layer (L2) - L2 Forwarding
-  - Check VLAN configuration consistency
-  - Check MAC address table learning
-  - Check STP/RSTP state
-
-  **Tools:** `suzieq_query(table='macs')`, `suzieq_query(table='vlan')`
-
-  ### Phase 3: Network Layer (L3) - IP Reachability
-  - Check ARP/ND table
-  - Check routing table (route existence)
-  - Check IP address configuration
-
-  **Tools:** `suzieq_query(table='arpnd')`, `suzieq_query(table='routes')`
-
-  ### Phase 4: Transport Layer (L4+) - Protocol State
-  - Check IGP neighbors (OSPF/IS-IS)
-  - Check BGP neighbor state
-  - Check protocol configuration (timers, auth, policy)
-
-  **Tools:** `suzieq_query(table='bgp')`, `suzieq_query(table='ospf')`
-
-  ## Tool Usage Strategy
-
-  1. **SuzieQ First** (Macro): Use historical data for quick scope identification
-     - interfaces: Interface state, error counters
-     - lldp: Physical neighbor verification
-     - macs: MAC address learning
-     - arpnd: ARP/ND table
-     - routes: Routing table
-     - bgp/ospf: Protocol state
-
-  2. **Syslog Correlation** (Events): Search device logs in anomaly time window
-     - Keywords: DOWN, BGP, OSPF, LINK, CONFIG, NEIGHBOR
-     - Purpose: Locate triggering events (e.g., LINK-DOWN causing BGP flap)
-     - Time range: Use start_time/end_time to limit search window
-
-  3. **NETCONF/CLI Deep Dive** (Micro): Only when SuzieQ data is insufficient
-     - Get real-time configuration
-     - Get detailed error information
-     - Get show command output
-
-  ## Output Format (Strict JSON)
-
-  Generate a layered diagnosis plan:
-
+  ## Output (JSON only)
   ```json
   {{
     "diagnosis_plan": {{
-      "summary": "Diagnosis plan overview",
-      "affected_scope": ["R1", "R2", "SW1"],
+      "summary": "Overview",
+      "affected_scope": ["R1", "R2"],
       "hypothesis": [
-        {{"layer": "L4", "issue": "BGP neighbor not established", "probability": "high"}},
-        {{"layer": "L1", "issue": "Physical interface down", "probability": "medium"}}
+        {{"layer": "L4", "issue": "BGP not established", "probability": "high"}}
       ]
     }},
     "phases": [
       {{
         "phase": 1,
         "layer": "L1",
-        "name": "Physical Layer Check",
+        "name": "Physical Check",
         "checks": [
-          {{"tool": "suzieq_query", "table": "interfaces", "filters": {{"hostname": ["R1", "R2"]}}, "purpose": "Check interface state"}},
-          {{"tool": "suzieq_query", "table": "lldp", "filters": {{"hostname": ["R1", "R2"]}}, "purpose": "Verify physical neighbors"}}
+          {{"tool": "suzieq_query", "table": "interfaces", "filters": {{"hostname": ["R1"]}}, "purpose": "Interface state"}}
         ]
-      }},
-      {{
-        "phase": 2,
-        "layer": "L3",
-        "name": "Network Layer Check",
-        "checks": [
-          {{"tool": "suzieq_query", "table": "arpnd", "filters": {{}}, "purpose": "Check ARP table"}},
-          {{"tool": "suzieq_query", "table": "routes", "filters": {{}}, "purpose": "Check routing table"}}
-        ]
-      }},
-      {{
-        "phase": 3,
-        "layer": "L4",
-        "name": "BGP Protocol Check",
-        "checks": [
-          {{"tool": "suzieq_query", "table": "bgp", "filters": {{}}, "purpose": "Check BGP neighbor state"}}
-        ],
-        "deep_dive_trigger": "If BGP state != Established, trigger config check"
       }}
     ]
   }}
   ```
 
-  ## Constraints
-
-  - Each phase contains 1-3 SuzieQ checks
-  - Start from lower layers (L1) and work upward
-  - If problem found at a layer, prioritize drilling down before moving up
-  - Mark `deep_dive_trigger` conditions to indicate when NETCONF is needed
-
-  Return only JSON.
+  ## Rules
+  - Each phase: 1-3 checks max
+  - Start L1, work upward
+  - If problem found, drill down before moving up
+  - Return JSON only

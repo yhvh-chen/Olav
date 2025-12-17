@@ -358,8 +358,22 @@ class NetBoxSchemaSearchTool:
 
 
 # Register tools with ToolRegistry
-ToolRegistry.register(NetBoxAPITool())
-ToolRegistry.register(NetBoxSchemaSearchTool())
+# NetBox API: HITL required for write operations (POST/PUT/PATCH/DELETE)
+_NETBOX_READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
+ToolRegistry.register(
+    NetBoxAPITool(),
+    requires_hitl=lambda args: args.get("method", "GET").upper() not in _NETBOX_READ_ONLY_METHODS,
+    triggers=["netbox", "dcim", "ipam", "cmdb", "资产", "设备信息", "库存"],
+    category="netbox",
+    aliases=["netbox_api_call", "netbox_query"],
+)
+# Schema search is read-only
+ToolRegistry.register(
+    NetBoxSchemaSearchTool(),
+    requires_hitl=False,
+    triggers=["netbox schema", "netbox 模式"],
+    category="netbox",
+)
 
 # ---------------------------------------------------------------------------
 # Compatibility Wrappers (LangChain @tool functions)

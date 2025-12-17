@@ -8,7 +8,7 @@ inconsistent tool return types (DataFrame, dict, str, XML, etc.).
 Key Components:
 - ToolOutput: Pydantic model for unified tool responses
 - BaseTool: Protocol defining tool interface
-- ToolRegistry: Simple tool registry with self-registration
+- ToolRegistry: Simple tool registry with self-registration and HITL checking
 
 Design Principles:
 1. All tools return ToolOutput (source, device, timestamp, data, metadata)
@@ -16,6 +16,7 @@ Design Principles:
 3. Adapters normalize vendor-specific formats (XML, JSON, text) to dict
 4. LLM receives clean JSON - no parsing required
 5. Tools self-register on module import (no discover_tools needed)
+6. Tools declare HITL requirements at registration time (Tool Self-Declaration)
 
 Usage:
     from olav.tools.base import ToolOutput, BaseTool, ToolRegistry
@@ -31,20 +32,39 @@ Usage:
                 data=[{"result": "success"}]
             )
 
-    # Self-register at module load
-    ToolRegistry.register(MyTool())
+    # Self-register at module load with HITL declaration
+    ToolRegistry.register(MyTool(), requires_hitl=False)  # Read-only tool
+
+    # Dynamic HITL based on parameters (e.g., HTTP method)
+    ToolRegistry.register(
+        NetBoxAPITool(),
+        requires_hitl=lambda args: args.get("method", "GET") not in {"GET", "HEAD", "OPTIONS"}
+    )
 
     # Retrieve tool
     tool = ToolRegistry.get_tool("my_tool")
+
+    # Check if HITL required for specific call
+    needs_hitl = ToolRegistry.check_hitl("netbox_api", {"method": "POST"})  # True
+    needs_hitl = ToolRegistry.check_hitl("netbox_api", {"method": "GET"})   # False
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+# Type alias for HITL checker function
+# True = requires HITL, False = auto-approve
+HITLChecker = Callable[[dict[str, Any]], bool]
+
+# Tool triggers for keyword-based classification
+TriggerKeywords = list[str]
 
 
 class ToolOutput(BaseModel):
@@ -174,34 +194,68 @@ class BaseTool(Protocol):
 
 class ToolRegistry:
     """
-    Simple registry for OLAV tools.
+    Registry for OLAV tools with Self-Declaration pattern.
 
-    Provides a centralized registry for tool instances. Tools register
-    themselves at module load time via ToolRegistry.register().
+    Provides a centralized registry for tool instances with:
+    - Tool registration with HITL requirements (hitl_config)
+    - Trigger keywords for classification (triggers)
+    - Unified HITL checking API
+    - Keyword-based tool matching for fast classification
+    - Tool lookup by name or alias
 
-    Note: discover_tools() has been removed - tools self-register on import.
-
-    Attributes:
-        _tools: Dict mapping tool names to tool instances
+    Self-Declaration Pattern:
+    - Tools declare their own triggers, HITL config, category at registration
+    - No external config files or hardcoded mappings needed
+    - Single source of truth for tool metadata
 
     Example:
-        # Registration (in tool module)
-        ToolRegistry.register(SuzieqTool())
+        # Full self-declaration
+        ToolRegistry.register(
+            OpenConfigSchemaTool(),
+            requires_hitl=False,
+            triggers=["openconfig", "yang", "xpath", "schema"],
+            category="knowledge",
+            aliases=["schema_search"],
+        )
 
-        # Retrieval
-        tool = ToolRegistry.get_tool("suzieq_query")
-        result = await tool.execute(table="bgp")
+        # Keyword match for classification
+        match = ToolRegistry.keyword_match("查找 BGP 相关的 OpenConfig YANG 路径")
+        # Returns: ("openconfig_schema_search", "knowledge", 0.9)
+
+        # Check HITL
+        needs_hitl = ToolRegistry.check_hitl("openconfig_schema_search", {})  # False
     """
 
     _tools: dict[str, BaseTool] = {}
+    _hitl_checkers: dict[str, bool | HITLChecker] = {}
+    _triggers: dict[str, list[str]] = {}  # tool_name -> trigger keywords
+    _categories: dict[str, str] = {}  # tool_name -> category
 
     @classmethod
-    def register(cls, tool: BaseTool) -> None:
+    def register(
+        cls,
+        tool: BaseTool,
+        requires_hitl: bool | HITLChecker = True,
+        triggers: list[str] | None = None,
+        category: str = "general",
+        aliases: list[str] | None = None,
+    ) -> None:
         """
-        Register a tool instance.
+        Register a tool instance with Self-Declaration.
 
         Args:
             tool: Tool instance implementing BaseTool protocol
+            requires_hitl: HITL requirement declaration
+                - True: Always require HITL approval (default, safety-first)
+                - False: Never require HITL (read-only tools)
+                - Callable: Dynamic check based on call arguments
+            triggers: Keyword list for classification matching
+                - e.g., ["openconfig", "yang", "xpath"] for schema search
+                - Used by keyword_match() before LLM fallback
+            category: Tool category for intent classification
+                - e.g., "knowledge", "query", "execution"
+            aliases: Alternative names for this tool
+                - e.g., ["netbox_api_call"] for "netbox_api"
 
         Note:
             If tool with same name exists, silently skips (idempotent).
@@ -227,15 +281,107 @@ class ToolRegistry:
             raise ValueError(msg)
 
         cls._tools[tool.name] = tool
-        logger.debug(f"Registered tool: {tool.name}")
+        cls._hitl_checkers[tool.name] = requires_hitl
+        cls._triggers[tool.name] = triggers or []
+        cls._categories[tool.name] = category
 
-    # Tool name aliases for LLM compatibility
-    # LLM may use different names than the actual registered tool names
-    _aliases: dict[str, str] = {
-        "netbox_api_call": "netbox_api",
-        "cli_tool": "cli_execute",
-        "netconf_tool": "netconf_execute",
-    }
+        # Register aliases
+        if aliases:
+            for alias in aliases:
+                cls._aliases[alias] = tool.name
+
+        logger.debug(
+            f"Registered tool: {tool.name} "
+            f"(hitl={requires_hitl}, triggers={triggers}, category={category})"
+        )
+
+    @classmethod
+    def check_hitl(cls, tool_name: str, args: dict[str, Any] | None = None) -> bool:
+        """
+        Check if HITL approval is required for a tool call.
+
+        Args:
+            tool_name: Tool identifier (supports aliases)
+            args: Tool call arguments (for dynamic HITL checkers)
+
+        Returns:
+            True if HITL required, False if auto-approve
+
+        Note:
+            Returns True (require HITL) if tool not found (safety-first).
+        """
+        # Resolve alias
+        resolved_name = cls._aliases.get(tool_name, tool_name)
+
+        # Get HITL checker
+        checker = cls._hitl_checkers.get(resolved_name)
+
+        if checker is None:
+            # Unknown tool - require HITL for safety
+            logger.warning(f"HITL check for unknown tool '{tool_name}' - defaulting to True")
+            return True
+
+        if isinstance(checker, bool):
+            return checker
+
+        # Callable checker - invoke with args
+        if args is None:
+            args = {}
+
+        try:
+            return checker(args)
+        except Exception as e:
+            logger.error(f"HITL checker for '{tool_name}' raised exception: {e}")
+            return True  # Safety-first on error
+
+    # Tool name aliases - populated dynamically via register(aliases=...)
+    _aliases: dict[str, str] = {}
+
+    @classmethod
+    def keyword_match(cls, query: str) -> tuple[str, str, float] | None:
+        """
+        Match query against tool triggers for fast classification.
+
+        This replaces the 3-layer architecture (FastPath + LLM + Fallback)
+        with a simple 2-layer approach: Keyword Match → LLM Fallback.
+
+        Uses "best match" strategy: returns the tool with the most trigger matches,
+        not just the first match. This handles cases where multiple tools have
+        overlapping triggers (e.g., "配置" in netconf vs "openconfig" in schema search).
+
+        Args:
+            query: User's natural language query.
+
+        Returns:
+            Tuple of (tool_name, category, confidence) if matched, None otherwise.
+            Confidence is 0.9 for keyword matches.
+        """
+        query_lower = query.lower()
+
+        # Find all matches and count triggers matched per tool
+        matches: list[tuple[str, str, int, int]] = []  # (tool_name, category, match_count, trigger_specificity)
+
+        for tool_name, triggers in cls._triggers.items():
+            if not triggers:
+                continue
+
+            # Count how many triggers match
+            matched_triggers = [kw for kw in triggers if kw in query_lower]
+            if matched_triggers:
+                category = cls._categories.get(tool_name, "general")
+                # Specificity = sum of lengths of matched triggers (longer = more specific)
+                specificity = sum(len(t) for t in matched_triggers)
+                matches.append((tool_name, category, len(matched_triggers), specificity))
+
+        if not matches:
+            return None
+
+        # Sort by: 1) match count (desc), 2) specificity (desc)
+        matches.sort(key=lambda x: (x[2], x[3]), reverse=True)
+        best_match = matches[0]
+
+        logger.debug(f"Keyword match: {best_match[0]} (matches={best_match[2]}, specificity={best_match[3]})")
+        return (best_match[0], best_match[1], 0.9)
 
     @classmethod
     def get_tool(cls, name: str) -> BaseTool | None:
@@ -278,6 +424,10 @@ class ToolRegistry:
         Clear all registered tools (primarily for testing).
         """
         cls._tools.clear()
+        cls._hitl_checkers.clear()
+        cls._triggers.clear()
+        cls._categories.clear()
+        cls._aliases.clear()
         logger.debug("Cleared tool registry")
 
     @classmethod

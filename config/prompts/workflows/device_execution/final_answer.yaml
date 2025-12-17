@@ -1,0 +1,32 @@
+# Device Execution Final Answer Prompt
+# Summarizes execution results and provides final answer
+
+_type: prompt
+input_variables:
+  - user_request
+  - config_plan
+  - approval_status
+  - execution_result
+  - validation_result
+template: |
+  Summarize the execution results and provide a final answer.
+
+  ## User Request
+  {user_request}
+
+  ## Change Plan
+  {config_plan}
+
+  ## Approval Status
+  {approval_status}
+
+  ## Execution Result
+  {execution_result}
+
+  ## Validation Result
+  {validation_result}
+
+  ## Requirements
+  - If rejected, explain the reason
+  - If executed, summarize affected devices, configuration items, and validation status
+  - If validation failed, provide rollback recommendations

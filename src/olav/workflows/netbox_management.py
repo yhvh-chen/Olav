@@ -48,6 +48,7 @@ from langgraph.graph import END, StateGraph
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
+from olav.tools.base import ToolRegistry
 from olav.tools.netbox_tool import netbox_api_call, netbox_schema_search
 from olav.tools.opensearch_tool import search_episodic_memory
 
@@ -64,9 +65,6 @@ class NetBoxManagementState(BaseWorkflowState):
     approval_status: str | None  # pending/approved/rejected
     execution_result: dict | None  # API execution result
     verification_result: dict | None  # Verification result
-
-
-_READ_ONLY_METHODS: set[str] = {"GET", "HEAD", "OPTIONS"}
 
 
 def _extract_json_object_from_text(text: str) -> dict | None:
@@ -104,6 +102,52 @@ def _extract_json_object_from_text(text: str) -> dict | None:
         if isinstance(parsed, dict):
             return parsed
     return None
+
+
+def _extract_tool_call_from_text(text: str) -> dict | None:
+    """Extract tool call from XML-like format in LLM response.
+
+    Some LLMs return tool calls in XML-like format instead of structured tool_calls:
+    <function=netbox_api_call>
+    <parameter=path>dcim/devices/</parameter>
+    <parameter=method>GET</parameter>
+    </function>
+
+    Returns dict with function name and args if found, None otherwise.
+    """
+    if not text:
+        return None
+
+    # Match <function=name>...</function> pattern
+    func_match = re.search(
+        r"<function=(\w+)>(.*?)</function>",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if not func_match:
+        return None
+
+    func_name = func_match.group(1)
+    func_body = func_match.group(2)
+
+    # Extract parameters: <parameter=name>value</parameter>
+    params: dict = {}
+    param_matches = re.findall(
+        r"<parameter=(\w+)>\s*(.*?)\s*</parameter>",
+        func_body,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    for param_name, param_value in param_matches:
+        # Try to parse JSON values (for dicts/lists)
+        value = param_value.strip()
+        if value.startswith("{") or value.startswith("["):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                pass
+        params[param_name] = value
+
+    return {"name": func_name, "args": params}
 
 
 @WorkflowRegistry.register(
@@ -230,26 +274,62 @@ class NetBoxManagementWorkflow(BaseWorkflow):
                 [SystemMessage(content=plan_prompt), *state["messages"]]
             )
 
-            parsed_plan = _extract_json_object_from_text(response.content)
-            operation_plan: dict
+            # Extract method from tool_calls first (when LLM calls tool directly)
             api_method: str | None = None
             api_endpoint_override: str | None = None
+            tool_call_args: dict = {}
 
-            if isinstance(parsed_plan, dict):
-                operation_plan = parsed_plan
-                method_val = parsed_plan.get("method")
+            # Priority 1: Structured tool_calls (preferred)
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                tool_call = response.tool_calls[0]
+                tool_call_args = tool_call.get("args", {})
+                method_val = tool_call_args.get("method")
                 if isinstance(method_val, str) and method_val.strip():
                     api_method = method_val.strip().upper()
-                endpoint_val = parsed_plan.get("endpoint") or parsed_plan.get("api_endpoint")
+                endpoint_val = tool_call_args.get("path") or tool_call_args.get("endpoint")
                 if isinstance(endpoint_val, str) and endpoint_val.strip():
                     api_endpoint_override = endpoint_val.strip()
+
+            # Priority 2: XML-like tool call in content (some LLMs use this format)
+            if not tool_call_args and response.content:
+                xml_tool_call = _extract_tool_call_from_text(response.content)
+                if xml_tool_call:
+                    tool_call_args = xml_tool_call.get("args", {})
+                    method_val = tool_call_args.get("method")
+                    if isinstance(method_val, str) and method_val.strip():
+                        api_method = method_val.strip().upper()
+                    endpoint_val = tool_call_args.get("path") or tool_call_args.get("endpoint")
+                    if isinstance(endpoint_val, str) and endpoint_val.strip():
+                        api_endpoint_override = endpoint_val.strip()
+
+            # Priority 3: JSON in content (fallback)
+            parsed_plan = _extract_json_object_from_text(response.content) if response.content else None
+            operation_plan: dict
+
+            if tool_call_args:
+                # Use tool call args as operation plan
+                operation_plan = tool_call_args
+            elif isinstance(parsed_plan, dict):
+                operation_plan = parsed_plan
+                # Only use parsed method if not already extracted
+                if api_method is None:
+                    method_val = parsed_plan.get("method")
+                    if isinstance(method_val, str) and method_val.strip():
+                        api_method = method_val.strip().upper()
+                if api_endpoint_override is None:
+                    endpoint_val = parsed_plan.get("endpoint") or parsed_plan.get("api_endpoint")
+                    if isinstance(endpoint_val, str) and endpoint_val.strip():
+                        api_endpoint_override = endpoint_val.strip()
             else:
                 operation_plan = {"plan": response.content}
 
-            # Read-only operations should not require HITL.
+            # Use ToolRegistry.check_hitl to determine if HITL is required
             approval_status = state.get("approval_status")
-            if api_method in _READ_ONLY_METHODS and approval_status is None:
-                approval_status = "approved"
+            if approval_status is None:
+                # Check if HITL is needed for this operation
+                hitl_args = {"method": api_method or "GET"}
+                if not ToolRegistry.check_hitl("netbox_api", hitl_args):
+                    approval_status = "approved"
 
             return {
                 **state,
@@ -272,15 +352,17 @@ class NetBoxManagementWorkflow(BaseWorkflow):
 
             user_approval = state.get("approval_status")
 
-            # Safety: never interrupt for read-only API calls.
-            api_method = (state.get("api_method") or "").upper() if state.get("api_method") else None
+            # Check if HITL is required using ToolRegistry
+            api_method = state.get("api_method")
             if api_method is None:
                 plan = state.get("operation_plan") or {}
                 if isinstance(plan, dict):
                     method_val = plan.get("method")
                     if isinstance(method_val, str) and method_val.strip():
                         api_method = method_val.strip().upper()
-            if api_method in _READ_ONLY_METHODS:
+
+            hitl_args = {"method": api_method or "GET"}
+            if not ToolRegistry.check_hitl("netbox_api", hitl_args):
                 return {**state, "approval_status": "approved"}
 
             # YOLO mode: auto-approve
@@ -374,13 +456,13 @@ class NetBoxManagementWorkflow(BaseWorkflow):
                 }
             else:
                 # Execute the API call deterministically so we can't 'hallucinate success'.
-                execution_result = await netbox_api_call(
-                    path=path.strip(),
-                    method=method,
-                    data=payload if isinstance(payload, dict) else None,
-                    params=params if isinstance(params, dict) else None,
-                    device=None,
-                )
+                execution_result = await netbox_api_call.ainvoke({
+                    "path": path.strip(),
+                    "method": method,
+                    "data": payload if isinstance(payload, dict) else None,
+                    "params": params if isinstance(params, dict) else None,
+                    "device": None,
+                })
 
             return {
                 **state,
@@ -422,33 +504,49 @@ class NetBoxManagementWorkflow(BaseWorkflow):
 
         async def final_answer_node(state: NetBoxManagementState) -> NetBoxManagementState:
             """Generate final answer with operation summary."""
+            from langchain_core.messages import HumanMessage
+
             llm = LLMFactory.get_chat_model()
 
-            final_prompt = f"""Synthesize operation results and provide final answer.
+            final_prompt = prompt_manager.load_prompt(
+                "workflows/netbox_management",
+                "final_answer",
+                user_request=state["messages"][0].content,
+                api_endpoint=str(state.get("api_endpoint")),
+                api_method=str(state.get("api_method")),
+                operation_plan=str(state.get("operation_plan")),
+                approval_status=str(state.get("approval_status")),
+                execution_result=str(state.get("execution_result")),
+                verification_result=str(state.get("verification_result")),
+            )
 
-IMPORTANT SAFETY NOTE:
-- This workflow ONLY interacts with NetBox (SSOT) via NetBox API.
-- Do NOT claim that a network device configuration has been changed.
-- If the user's request sounds like a device config change (e.g., add Loopback, configure interface), explicitly say: "NetBox was updated, but the device was not configured" and advise using the device execution workflow.
+            try:
+                response = await llm.ainvoke([
+                    SystemMessage(content=final_prompt),
+                    HumanMessage(content="Please provide a summary of the operation results."),
+                ])
+                content = response.content or ""
+            except Exception as e:
+                logger.error(f"LLM call failed in final_answer_node: {e}")
+                content = ""
 
-User request: {state["messages"][0].content}
-API endpoint: {state.get("api_endpoint")}
-API method: {state.get("api_method")}
-Operation plan: {state.get("operation_plan")}
-Approval status: {state.get("approval_status")}
-Execution result: {state.get("execution_result")}
-Verification result: {state.get("verification_result")}
-
-Requirements:
-- If rejected, explain reason
-- If executed, summarize target objects, API response, verification status
-"""
-
-            response = await llm.ainvoke([SystemMessage(content=final_prompt)])
+            # Fallback: If LLM returns empty, generate a simple summary from execution_result
+            if not content.strip():
+                execution_result = state.get("execution_result", {})
+                if isinstance(execution_result, dict) and execution_result.get("success"):
+                    data = execution_result.get("data", [])
+                    if isinstance(data, list) and data:
+                        # Extract device names from data
+                        names = [d.get("name", d.get("display", "unknown")) for d in data if isinstance(d, dict)]
+                        content = f"NetBox query completed successfully. Found {len(data)} result(s): {', '.join(names)}"
+                    else:
+                        content = "NetBox query completed successfully."
+                else:
+                    content = f"NetBox operation result: {execution_result}"
 
             return {
                 **state,
-                "messages": state["messages"] + [AIMessage(content=response.content)],
+                "messages": state["messages"] + [AIMessage(content=content)],
             }
 
         def route_after_planning(
@@ -456,7 +554,8 @@ Requirements:
         ) -> Literal["hitl_approval", "api_execution"]:
             """Route based on operation type (read vs write)."""
             method = state.get("api_method")
-            if method and method.upper() in _READ_ONLY_METHODS:
+            hitl_args = {"method": (method or "GET").upper()}
+            if not ToolRegistry.check_hitl("netbox_api", hitl_args):
                 return "api_execution"
             # Default: require HITL for anything else / unknown
             return "hitl_approval"

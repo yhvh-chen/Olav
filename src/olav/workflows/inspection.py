@@ -188,15 +188,11 @@ class InspectionWorkflow(BaseWorkflow):
         user_query = messages[-1].content if messages else ""
 
         # Load prompt from YAML
-        try:
-            system_prompt = prompt_manager.load_prompt(
-                "workflows/inspection",
-                "scope_extraction",
-                user_query=user_query,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Failed to load scope_extraction prompt: {e}, using fallback")
-            system_prompt = f"Extract device scope from: {user_query}"
+        system_prompt = prompt_manager.load_prompt(
+            "workflows/inspection",
+            "scope_extraction",
+            user_query=user_query,
+        )
 
         try:
             response = await self.llm.ainvoke(

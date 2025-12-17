@@ -104,62 +104,61 @@ class DiagnosisReport(BaseModel):
         return doc
 
     def render_markdown(self) -> str:
-        """Render full Markdown report.
+        """Render full Markdown report with device details.
 
         Returns:
             Formatted Markdown string
         """
-        evidence = "\n".join(f"- {e}" for e in self.evidence_chain) if self.evidence_chain else "No evidence collected."
+        evidence = "\n".join(f"- {e}" for e in self.evidence_chain) if self.evidence_chain else "- No evidence collected."
 
+        # Device summaries with detailed findings
         device_sections = []
         for name, summary in self.device_summaries.items():
-            findings_text = ""
+            status_icon = {"faulty": "❌", "degraded": "⚠️", "healthy": "✅"}.get(summary.status, "❓")
+            findings_lines = []
             for layer, findings in summary.layer_findings.items():
                 if findings:
-                    findings_text += f"\n  - **{layer}**: {', '.join(findings[:3])}"
-            device_sections.append(f"- **{name}** ({summary.status}){findings_text}")
-        devices_text = "\n".join(device_sections) if device_sections else "No device summaries."
+                    for f in findings[:3]:
+                        findings_lines.append(f"  - {layer}: {f}")
+            findings_text = "\n".join(findings_lines) if findings_lines else "  - No issues detected"
+            device_sections.append(f"### {status_icon} {name} ({summary.status})\n{findings_text}")
+        devices_text = "\n\n".join(device_sections) if device_sections else "_No devices analyzed._"
 
         return f"""# 🔍 Network Diagnosis Report
 
-**Report ID**: `{self.report_id}`
+**Report ID**: `{self.report_id}`  
 **Timestamp**: {self.timestamp}
 
 ---
 
-## 📋 Fault Description
+## 📋 Query
 
-{self.fault_description}
+> {self.fault_description}
 
-## 🎯 Root Cause Analysis
+## 🎯 Root Cause
 
 | Field | Value |
 |-------|-------|
-| **Root Cause** | {self.root_cause} |
-| **Device** | {self.root_cause_device or 'Unknown'} |
+| **Cause** | {self.root_cause} |
+| **Device** | `{self.root_cause_device or 'Unknown'}` |
 | **Layer** | {self.root_cause_layer or 'Unknown'} |
-| **Confidence** | {self.confidence*100:.0f}% |
+| **Confidence** | **{self.confidence*100:.0f}%** |
 
-## 📊 Evidence Chain
+## 📊 Evidence
 
 {evidence}
 
-## 🖥️ Device Summaries
+## 🖥️ Device Analysis
 
 {devices_text}
 
 ## 💡 Recommended Action
 
-{self.recommended_action or 'No specific action recommended.'}
+{self.recommended_action or '_No specific action recommended._'}
 
 ---
 
-## 🏷️ Metadata
-
-- **Tags**: {', '.join(self.tags) if self.tags else 'None'}
-- **Protocols**: {', '.join(self.affected_protocols) if self.affected_protocols else 'None'}
-- **Layers**: {', '.join(self.affected_layers) if self.affected_layers else 'None'}
-- **Fault Path**: {' → '.join(self.fault_path) if self.fault_path else 'Not determined'}
+*Tags*: {', '.join(self.tags) if self.tags else 'None'} | *Protocols*: {', '.join(self.affected_protocols) if self.affected_protocols else 'None'} | *Layers*: {', '.join(self.affected_layers) if self.affected_layers else 'N/A'} | *Path*: {' → '.join(self.fault_path) if self.fault_path else 'N/A'}
 """
 
 

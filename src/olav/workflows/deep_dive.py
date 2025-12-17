@@ -1365,19 +1365,15 @@ Path hypothesis: {" → ".join(topology.get("path_hypothesis", []))}
         findings_text = "\n".join(f"- {f}" for f in findings) if findings else "- No obvious anomalies found"
 
         # Load prompt from YAML
-        try:
-            prompt = prompt_manager.load_prompt(
-                "workflows/deep_dive",
-                "root_cause_report",
-                user_query=user_query,
-                affected_devices=", ".join(topology.get("affected_devices", [])),
-                scope=topology.get("scope", "unknown"),
-                phases_summary=chr(10).join(phases_summary),
-                findings=findings_text,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Failed to load root_cause_report prompt: {e}, using fallback")
-            prompt = f"Generate root cause analysis for: {user_query}\nFindings: {findings_text}"
+        prompt = prompt_manager.load_prompt(
+            "workflows/deep_dive",
+            "root_cause_report",
+            user_query=user_query,
+            affected_devices=", ".join(topology.get("affected_devices", [])),
+            scope=topology.get("scope", "unknown"),
+            phases_summary=chr(10).join(phases_summary),
+            findings=findings_text,
+        )
 
         response = await self.llm.ainvoke(
             [

@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from olav.core.llm import LLMFactory
+from olav.core.prompt_manager import prompt_manager
 from olav.modes.expert.supervisor import (
     LAYER_INFO,
     SUZIEQ_MAX_CONFIDENCE,
@@ -24,33 +25,6 @@ from olav.modes.expert.supervisor import (
 from olav.modes.shared.debug import DebugContext
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Prompts
-# =============================================================================
-
-QUICK_ANALYZER_SYSTEM_PROMPT = """You are OLAV's Quick Analyzer for network fault diagnosis, responsible for investigating faults in specific network layers.
-
-## Current Task
-- **Layer**: {layer} ({layer_name})
-- **Description**: {task_description}
-- **Suggested Tables**: {suggested_tables}
-
-## Execution Strategy
-1. Use SuzieQ tools to query relevant tables
-2. Analyze returned data, look for anomalies
-3. Summarize findings and provide confidence assessment
-
-## Output Format
-After analysis, summarize:
-- Found issues (one issue per line)
-- Confidence assessment (0.0-0.6, SuzieQ historical data upper limit)
-- Whether real-time verification is needed (if CLI/NETCONF confirmation required)
-
-## Available SuzieQ Tables
-{available_tables}
-"""
 
 
 # =============================================================================
@@ -148,20 +122,22 @@ class QuickAnalyzer:
         """
         layer_info = LAYER_INFO.get(task.layer, {})
 
-        # Build prompt
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", QUICK_ANALYZER_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-
-        # Format system prompt with task details
-        prompt.partial(
+        # Load prompt from config
+        system_prompt = prompt_manager.load_prompt(
+            "modes/expert",
+            "quick_analyzer",
             layer=task.layer,
             layer_name=layer_info.get("name", "Unknown"),
             task_description=task.description,
             suggested_tables=", ".join(task.suggested_tables),
             available_tables=self._get_available_tables_desc(),
         )
+
+        # Build prompt template
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
 
         # Get tools
         tools = self._get_suzieq_tools()

@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from olav.core.llm import LLMFactory
+from olav.core.prompt_manager import prompt_manager
 from olav.models.diagnosis_report import DeviceSummary
 
 logger = logging.getLogger(__name__)
@@ -189,41 +190,14 @@ async def inspect_node(state: DeviceInspectorState) -> dict:
 """
 
     # System prompt for device inspection
-    system_prompt = f"""You are a Device Inspector agent focused on investigating device: **{device}**
-
-## Investigation Context
-{context}
-{known_issues_section}
-## Layers to Check
-{chr(10).join(layer_instructions)}
-
-## Instructions
-1. Start with suzieq_schema_search to discover available fields for each table
-2. Use suzieq_query with hostname="{device}" to focus on this specific device
-3. For each layer, collect findings and assess confidence level
-4. Look for anomalies: down interfaces, missing neighbors, route issues, etc.
-
-## Output Format
-After investigation, provide a structured summary:
-
-```
-LAYER_FINDINGS:
-L1: [finding1, finding2, ...]
-L2: [finding1, finding2, ...]
-L3: [finding1, finding2, ...]
-L4: [finding1, finding2, ...]
-
-LAYER_CONFIDENCE:
-L1: 0.XX
-L2: 0.XX
-L3: 0.XX
-L4: 0.XX
-
-OVERALL_STATUS: healthy|degraded|critical
-```
-
-Be thorough but efficient. Focus only on device {device}.
-"""
+    system_prompt = prompt_manager.load_prompt(
+        "workflows/device_inspector",
+        "system_prompt",
+        device=device,
+        context=context,
+        known_issues_section=known_issues_section,
+        layer_instructions=chr(10).join(layer_instructions),
+    )
 
     # Create and run ReAct agent
     llm = LLMFactory.get_chat_model()

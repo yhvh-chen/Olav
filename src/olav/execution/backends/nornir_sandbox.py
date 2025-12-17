@@ -71,7 +71,7 @@ class NornirSandbox(SandboxBackendProtocol):
                     "nb_url": settings.netbox_url,
                     "nb_token": settings.netbox_token,
                     "ssl_verify": False,
-                    "filter_parameters": {"tag": ["suzieq"]},
+                    "filter_parameters": {"tag": [settings.netbox_device_tag]},
                 },
             },
             logging={

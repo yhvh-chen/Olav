@@ -32,25 +32,24 @@ template: |
   - **harmful**: Attacks, exploitation, unauthorized access
   
   ## Output Format
-  Return valid JSON only:
+  Return JSON with a single boolean field:
   ```json
-  {
-    "is_relevant": true|false,
-    "category": "category_name",
-    "reason": "Brief explanation"
-  }
+  {{"is_relevant": true}}
+  ```
+  or
+  ```json
+  {{"is_relevant": false}}
   ```
   
   ## Examples
   
-  Query: "Show BGP status on R1"
-  → {"is_relevant": true, "category": "network_query", "reason": "BGP status query"}
-  
-  Query: "Tell me a joke"
-  → {"is_relevant": false, "category": "general_chat", "reason": "Not network related"}
+  Query: "Show BGP status on R1" → {{"is_relevant": true}}
+  Query: "查询所有设备的 BGP 邻居状态" → {{"is_relevant": true}}
+  Query: "Tell me a joke" → {{"is_relevant": false}}
+  Query: "1+1=?" → {{"is_relevant": false}}
   
   Query: "Write a Python script"
-  → {"is_relevant": false, "category": "programming", "reason": "General programming request"}
+  → {{"is_relevant": false, "category": "programming", "reason": "General programming request"}}
   
   Query: "Write a Python script to configure BGP"
-  → {"is_relevant": true, "category": "configuration", "reason": "Network automation task"}
+  → {{"is_relevant": true, "category": "configuration", "reason": "Network automation task"}}

@@ -451,9 +451,26 @@ class MemoryStoreTool(BaseTool):
 
 
 # Register tools with registry for compatibility layer
-ToolRegistry.register(OpenConfigSchemaTool())
-ToolRegistry.register(EpisodicMemoryTool())
-ToolRegistry.register(MemoryStoreTool())
+ToolRegistry.register(
+    OpenConfigSchemaTool(),
+    requires_hitl=False,
+    # More specific triggers - compound phrases for better matching
+    triggers=["openconfig", "yang path", "yang schema", "xpath", "openconfig路径", "yang模型"],
+    category="openconfig",
+    aliases=["schema_search", "yang_search"],
+)
+ToolRegistry.register(
+    EpisodicMemoryTool(),
+    requires_hitl=False,
+    triggers=["memory", "history", "记忆"],
+    category="knowledge",
+)
+ToolRegistry.register(
+    MemoryStoreTool(),
+    requires_hitl=False,
+    triggers=[],  # Internal tool, not triggered by user queries
+    category="knowledge",
+)
 
 # ---------------------------------------------------------------------------
 # Compatibility Wrappers (@tool) expected by existing workflows

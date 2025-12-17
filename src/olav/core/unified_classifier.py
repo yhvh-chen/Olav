@@ -4,13 +4,18 @@ Unified Intent and Tool Classifier.
 This module combines intent classification and tool selection into a single
 LLM call to reduce API calls and improve response time.
 
-Optimization:
-- Previous: 2 LLM calls (classify_intent + select_tool)
-- Now: 1 LLM call (unified_classify)
+Architecture (2-Layer):
+1. Keyword Match: Check ToolRegistry.keyword_match() first (instant, from triggers)
+2. LLM Fallback: Use LLM for complex queries not matched by keywords
 
-Expected improvement:
-- Reduces LLM calls by 1 per request
-- Reduces latency by 30-50% for simple queries
+This replaces the previous 3-layer architecture:
+- OLD: Fast Path (regex) → LLM → Fallback (keywords)
+- NEW: Keyword Match (from ToolRegistry.triggers) → LLM
+
+Benefits:
+- Single source of truth: triggers declared at tool registration
+- No separate preprocessor.py patterns to maintain
+- No fallback keywords that only trigger on LLM failure
 """
 
 import logging
@@ -22,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
+from olav.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -139,14 +145,18 @@ class UnifiedClassifier:
         self,
         query: str,
         schema_context: dict[str, Any] | None = None,
-        skip_fast_path: bool = False,
+        skip_keyword_match: bool = False,
     ) -> UnifiedClassificationResult:
-        """Classify user query and select tool in a single LLM call.
+        """Classify user query and select tool.
+
+        2-Layer Architecture:
+        1. Keyword Match: Check ToolRegistry.keyword_match() (from tool triggers)
+        2. LLM Fallback: Use LLM for complex queries
 
         Args:
             query: User's natural language query.
             schema_context: Optional schema context from discovery (table names, etc.)
-            skip_fast_path: If True, skip regex fast path and always use LLM.
+            skip_keyword_match: If True, skip keyword matching and always use LLM.
 
         Returns:
             UnifiedClassificationResult with intent, tool, and parameters.
@@ -154,19 +164,43 @@ class UnifiedClassifier:
         import time
 
         # =================================================================
-        # Fast Path: Try regex matching first (50ms vs 1.5s LLM)
+        # Layer 1: Keyword Match (from ToolRegistry.triggers)
         # =================================================================
-        if not skip_fast_path:
-            fast_result = self._try_fast_path(query)
-            if fast_result is not None:
-                logger.info(
-                    f"Fast path hit: {fast_result.tool} "
-                    f"(confidence: {fast_result.confidence:.2f}, pattern: regex)"
-                )
-                return fast_result
+        # Keyword match is ONLY used for tools that don't require parameters.
+        # Tools like suzieq_query need LLM to extract 'table' parameter.
+        PARAM_FREE_TOOLS = {
+            "suzieq_schema_search",
+            "openconfig_schema_search",
+        }
+        
+        if not skip_keyword_match:
+            match = ToolRegistry.keyword_match(query)
+            if match is not None:
+                tool_name, category, confidence = match
+                # Only use keyword match shortcut for parameter-free tools
+                if tool_name in PARAM_FREE_TOOLS:
+                    logger.info(
+                        f"Keyword match hit (param-free): {tool_name} "
+                        f"(category: {category}, confidence: {confidence:.2f})"
+                    )
+                    result = UnifiedClassificationResult(
+                        intent_category=category,  # type: ignore
+                        tool=tool_name,  # type: ignore
+                        parameters={},
+                        confidence=confidence,
+                        reasoning=f"Keyword match: {tool_name}",
+                    )
+                    result._llm_time_ms = 0.0
+                    result._keyword_match = True
+                    return result
+                else:
+                    # For tools requiring parameters, log the hint but continue to LLM
+                    logger.debug(
+                        f"Keyword match hint: {tool_name} (requires params, using LLM)"
+                    )
 
         # =================================================================
-        # Slow Path: LLM classification
+        # Layer 2: LLM Classification
         # =================================================================
         try:
             # Build enhanced prompt with schema context
@@ -189,7 +223,6 @@ class UnifiedClassifier:
             logger.debug(f"LLM classification took {llm_duration_ms:.0f}ms")
 
             if isinstance(result, UnifiedClassificationResult):
-                # Store LLM timing in result for performance tracking
                 result._llm_time_ms = llm_duration_ms
                 logger.info(
                     f"Unified classifier: {result.intent_category}/{result.tool} "
@@ -204,118 +237,23 @@ class UnifiedClassifier:
                 return classification
 
             logger.warning(f"Unexpected LLM response type: {type(result)}")
-            return self._fallback_classify(query)
+            return self._default_result(query)
 
         except Exception as e:
-            logger.warning(f"Unified classification failed: {e}")
-            return self._fallback_classify(query)
+            logger.warning(f"LLM classification failed: {e}")
+            return self._default_result(query)
 
-    def _try_fast_path(self, query: str) -> UnifiedClassificationResult | None:
+    def _default_result(self, query: str) -> UnifiedClassificationResult:
+        """Default classification when LLM fails.
+
+        Returns SuzieQ as the safest default for network queries.
         """
-        Try regex-based fast path classification.
-
-        Returns UnifiedClassificationResult if a pattern matches, None otherwise.
-        Falls back to None for diagnostic queries (requiring Expert Mode).
-        """
-        try:
-            from olav.modes.shared.preprocessor import preprocess_query
-
-            result = preprocess_query(query)
-
-            # Diagnostic queries should not use fast path
-            if result.is_diagnostic:
-                logger.debug("Fast path skipped: diagnostic query detected")
-                return None
-
-            # Check if we have a fast path match
-            if result.can_use_fast_path and result.fast_path_match:
-                match = result.fast_path_match
-
-                # Map tool to intent category
-                tool_to_category = {
-                    "suzieq_query": "suzieq",
-                    "netbox_api_call": "netbox",
-                    "cli_tool": "cli",
-                    "netconf_tool": "netconf",
-                }
-                intent_category = tool_to_category.get(match.tool, "suzieq")
-
-                classification = UnifiedClassificationResult(
-                    intent_category=intent_category,
-                    tool=match.tool,
-                    parameters=match.parameters,
-                    confidence=match.confidence,
-                    reasoning=f"Fast path: {match.pattern_name}",
-                )
-                # Mark as fast path for performance tracking
-                classification._llm_time_ms = 0.0
-                classification._fast_path = True
-
-                return classification
-
-            return None
-
-        except ImportError as e:
-            logger.warning(f"Fast path unavailable: {e}")
-            return None
-        except Exception as e:
-            logger.debug(f"Fast path failed: {e}")
-            return None
-
-    def _fallback_classify(self, query: str) -> UnifiedClassificationResult:
-        """Keyword-based fallback classification.
-
-        Uses minimal keyword matching as a safety net when LLM fails.
-        """
-        query_lower = query.lower()
-
-        # NetBox keywords
-        if any(kw in query_lower for kw in ["netbox", "cmdb", "asset", "device list", "inventory"]):
-            return UnifiedClassificationResult(
-                intent_category="netbox",
-                tool="netbox_api_call",
-                parameters={"endpoint": "/dcim/devices/"},
-                confidence=0.6,
-                reasoning="Keyword fallback: netbox/cmdb",
-            )
-
-        # NETCONF keywords
-        if any(kw in query_lower for kw in ["netconf", "rpc", "edit-config"]):
-            return UnifiedClassificationResult(
-                intent_category="netconf",
-                tool="netconf_tool",
-                parameters={},
-                confidence=0.6,
-                reasoning="Keyword fallback: netconf",
-            )
-
-        # OpenConfig keywords
-        if any(kw in query_lower for kw in ["openconfig", "yang", "xpath"]):
-            return UnifiedClassificationResult(
-                intent_category="openconfig",
-                tool="openconfig_schema_search",
-                parameters={"intent": query},
-                confidence=0.6,
-                reasoning="Keyword fallback: openconfig/yang",
-            )
-
-        # CLI keywords
-        if any(kw in query_lower for kw in ["cli", "ssh", "command line", "show run"]):
-            return UnifiedClassificationResult(
-                intent_category="cli",
-                tool="cli_tool",
-                parameters={},
-                confidence=0.6,
-                reasoning="Keyword fallback: cli/ssh",
-            )
-
-        # Default to SuzieQ for network state queries
         return UnifiedClassificationResult(
             intent_category="suzieq",
             tool="suzieq_query",
             parameters={},
             confidence=0.5,
-            reasoning="Default: network state query via SuzieQ",
+            reasoning="Default: LLM failed, using SuzieQ as fallback",
             fallback_tool="cli_tool",
         )
 
