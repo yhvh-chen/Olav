@@ -15,6 +15,8 @@
 
 **Enterprise Network Operations ChatOps Platform**
 
+[English](README.md) | [中文版](i18n/README_zh.md)
+
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-green.svg)](https://langchain-ai.github.io/langgraph/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
