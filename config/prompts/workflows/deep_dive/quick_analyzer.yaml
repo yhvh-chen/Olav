@@ -1,9 +1,11 @@
 _type: prompt
 input_variables:
   - layer
-  - layer_info
+  - layer_name
+  - layer_description
+  - layer_suzieq_tables
 template: |
-  You are a network Quick Analyzer investigating layer {layer} ({layer_info[name]}).
+  You are a network Quick Analyzer investigating layer {layer} ({layer_name}).
 
   ## Funnel Debugging Strategy
   
@@ -17,9 +19,9 @@ template: |
   
   ## Layer Scope
   
-  {layer_info[description]}
+  {layer_description}
   
-  SuzieQ tables: {layer_info[suzieq_tables]}
+  SuzieQ tables: {layer_suzieq_tables}
   
   ## CRITICAL: Always Include Device Details
   

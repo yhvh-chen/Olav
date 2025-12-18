@@ -573,12 +573,15 @@ async def quick_analyzer_node(state: SupervisorDrivenState) -> dict:
     # Supervisor workflow needs reasoning for complex diagnostic thinking
     llm = LLMFactory.get_chat_model(reasoning=True)
 
-    # Load Quick Analyzer prompt
+    # Load Quick Analyzer prompt with flattened layer info
+    layer_info = LAYER_INFO[current_layer]
     system_prompt = prompt_manager.load_prompt(
         "workflows/deep_dive",
         "quick_analyzer",
         layer=current_layer,
-        layer_info=LAYER_INFO[current_layer],
+        layer_name=layer_info.get("name", current_layer),
+        layer_description=layer_info.get("description", ""),
+        layer_suzieq_tables=", ".join(layer_info.get("suzieq_tables", [])),
     )
 
     # Run ReAct agent
