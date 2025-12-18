@@ -300,6 +300,13 @@ class EnvSettings(BaseSettings):
     llm_retry_backoff_multiplier: float = 2.0
     llm_retry_max_delay: float = 30.0
 
+    # =========================================================================
+    # DeepDive/Workflow Confidence Thresholds
+    # =========================================================================
+    deepdive_min_confidence: float = 0.9
+    deepdive_suzieq_max_confidence: float = 0.6
+    deepdive_realtime_confidence: float = 0.95
+
 
 # =============================================================================
 # Global Settings Instance

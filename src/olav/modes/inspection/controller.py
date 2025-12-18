@@ -121,6 +121,19 @@ class DeviceFilter(BaseModel):
     )
 
 
+class ScheduleConfig(BaseModel):
+    """Optional structured schedule configuration for inspections.
+
+    Supports either a simple cron expression string (kept for backward
+    compatibility) or a structured object with `enabled`, `cron` and
+    `timezone` fields as used by inspection YAML files.
+    """
+
+    enabled: bool = Field(default=True, description="Whether the schedule is enabled")
+    cron: str | None = Field(default=None, description="Cron expression (e.g. '0 9 * * *')")
+    timezone: str | None = Field(default=None, description="Timezone for cron schedule")
+
+
 class InspectionConfig(BaseModel):
     """Full inspection configuration."""
 
@@ -129,8 +142,9 @@ class InspectionConfig(BaseModel):
     devices: DeviceFilter = Field(default_factory=DeviceFilter)
     checks: list[CheckConfig] = Field(default_factory=list)
 
-    # Optional scheduling (for future cron integration)
-    schedule: str | None = None  # Cron expression
+    # Optional scheduling: allow either a plain cron string, or a structured
+    # ScheduleConfig object matching the YAML layout used by inspection files.
+    schedule: str | ScheduleConfig | None = None
     timeout_seconds: int = 300
 
 
@@ -470,6 +484,10 @@ class InspectionModeController:
         # Parse devices filter
         if "devices" in raw:
             raw["devices"] = DeviceFilter(**raw["devices"])
+
+        # Parse schedule: allow structured dict in YAML
+        if "schedule" in raw and isinstance(raw["schedule"], dict):
+            raw["schedule"] = ScheduleConfig(**raw["schedule"])
 
         return InspectionConfig(**raw)
 

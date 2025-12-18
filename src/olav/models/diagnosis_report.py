@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -87,6 +88,16 @@ class DiagnosisReport(BaseModel):
         description="Layers with issues: L1, L2, ..."
     )
 
+    # Investigation Process (for detailed report)
+    investigation_process: list[str] = Field(
+        default_factory=list,
+        description="Step-by-step investigation process with timestamps"
+    )
+    duration_seconds: float = Field(
+        default=0.0,
+        description="Total investigation duration in seconds"
+    )
+
     # Report Content
     markdown_content: str = Field(default="", description="Full Markdown report")
 
@@ -160,6 +171,210 @@ class DiagnosisReport(BaseModel):
 
 *Tags*: {', '.join(self.tags) if self.tags else 'None'} | *Protocols*: {', '.join(self.affected_protocols) if self.affected_protocols else 'None'} | *Layers*: {', '.join(self.affected_layers) if self.affected_layers else 'N/A'} | *Path*: {' → '.join(self.fault_path) if self.fault_path else 'N/A'}
 """
+
+    def render_detailed_markdown(self) -> str:
+        """Render detailed Markdown report with investigation process.
+
+        Similar to Inspection report style, includes:
+        - Investigation process steps
+        - Detailed findings by layer
+        - Root cause analysis
+        - Recommended actions
+
+        Returns:
+            Formatted Markdown string
+        """
+        # Determine overall status
+        if self.confidence >= 0.8:
+            status_icon = "🟢"
+            status_text = "HIGH CONFIDENCE"
+        elif self.confidence >= 0.5:
+            status_icon = "🟡"
+            status_text = "MEDIUM CONFIDENCE"
+        else:
+            status_icon = "🔴"
+            status_text = "LOW CONFIDENCE"
+
+        # Format duration
+        duration = self.duration_seconds
+        if duration >= 3600:
+            duration_str = f"{duration / 3600:.1f}h"
+        elif duration >= 60:
+            duration_str = f"{duration / 60:.1f}m"
+        else:
+            duration_str = f"{duration:.1f}s"
+
+        # Format timestamp
+        try:
+            ts = datetime.fromisoformat(self.timestamp)
+            time_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            time_str = self.timestamp[:19]
+
+        # Header
+        lines = [
+            f"# {status_icon} Network Diagnosis Report — {status_text}",
+            "",
+            f"> **ID**: `{self.report_id}`  ",
+            f"> **Time**: {time_str} · **Duration**: {duration_str}  ",
+            f"> **Confidence**: {self.confidence*100:.0f}%",
+            "",
+        ]
+
+        # Original Query
+        lines.extend([
+            "## 📋 Original Query",
+            "",
+            f"> {self.fault_description}",
+            "",
+        ])
+
+        # Investigation Process
+        if self.investigation_process:
+            lines.extend([
+                "## 🔍 Investigation Process",
+                "",
+            ])
+            for i, step in enumerate(self.investigation_process, 1):
+                lines.append(f"{i}. {step}")
+            lines.append("")
+
+        # Root Cause Analysis
+        lines.extend([
+            "## 🎯 Root Cause",
+            "",
+            "| Field | Value |",
+            "|-------|-------|",
+            f"| **Cause** | {self.root_cause} |",
+            f"| **Device** | `{self.root_cause_device or 'Unknown'}` |",
+            f"| **Layer** | {self.root_cause_layer or 'Unknown'} |",
+            f"| **Confidence** | **{self.confidence*100:.0f}%** |",
+            "",
+        ])
+
+        # Evidence Chain
+        if self.evidence_chain:
+            lines.extend([
+                "## 📊 Evidence",
+                "",
+            ])
+            for e in self.evidence_chain:
+                lines.append(f"- {e}")
+            lines.append("")
+
+        # Device Analysis (detailed)
+        if self.device_summaries:
+            lines.extend([
+                "## 🖥️ Device Analysis",
+                "",
+            ])
+
+            # Group by status
+            faulty = [(n, s) for n, s in self.device_summaries.items() if s.status == "faulty"]
+            degraded = [(n, s) for n, s in self.device_summaries.items() if s.status == "degraded"]
+            healthy = [(n, s) for n, s in self.device_summaries.items() if s.status == "healthy"]
+
+            # Faulty devices first
+            if faulty:
+                lines.append("### ❌ Faulty Devices\n")
+                for name, summary in faulty:
+                    self._append_device_details(lines, name, summary)
+
+            # Degraded devices
+            if degraded:
+                lines.append("### ⚠️ Degraded Devices\n")
+                for name, summary in degraded:
+                    self._append_device_details(lines, name, summary)
+
+            # Healthy devices (collapsed)
+            if healthy:
+                lines.append(f"### ✅ Healthy Devices ({len(healthy)})\n")
+                lines.append(", ".join(f"`{n}`" for n, _ in healthy))
+                lines.append("")
+
+        # Recommended Action
+        if self.recommended_action:
+            lines.extend([
+                "## 💡 Recommended Action",
+                "",
+                self.recommended_action,
+                "",
+            ])
+
+        # Metadata footer
+        lines.extend([
+            "---",
+            "",
+            f"*Tags*: {', '.join(self.tags) if self.tags else 'None'} | "
+            f"*Protocols*: {', '.join(self.affected_protocols) if self.affected_protocols else 'None'} | "
+            f"*Layers*: {', '.join(self.affected_layers) if self.affected_layers else 'N/A'}",
+            "",
+            f"*Fault Path*: {' → '.join(self.fault_path) if self.fault_path else 'N/A'}",
+        ])
+
+        return "\n".join(lines)
+
+    def _append_device_details(self, lines: list[str], name: str, summary: "DeviceSummary") -> None:
+        """Append device details to lines."""
+        lines.append(f"**{name}** (confidence: {summary.confidence*100:.0f}%)")
+        lines.append("")
+
+        # Layer findings table
+        has_findings = any(summary.layer_findings.get(layer) for layer in ["L1", "L2", "L3", "L4"])
+        if has_findings:
+            lines.append("| Layer | Findings |")
+            lines.append("|-------|----------|")
+            for layer in ["L1", "L2", "L3", "L4"]:
+                findings = summary.layer_findings.get(layer, [])
+                if findings:
+                    # Join multiple findings
+                    findings_text = "; ".join(findings[:3])
+                    if len(findings) > 3:
+                        findings_text += f" (+{len(findings)-3} more)"
+                    lines.append(f"| {layer} | {findings_text} |")
+            lines.append("")
+        else:
+            lines.append("_No specific findings._\n")
+
+    def save(self, output_dir: Path | str | None = None) -> Path:
+        """Save report to local file.
+
+        Args:
+            output_dir: Optional output directory. Defaults to data/reports.
+
+        Returns:
+            Path to saved report file.
+        """
+        from config.settings import get_path
+
+        # Use provided dir or default
+        if output_dir:
+            reports_dir = Path(output_dir)
+            reports_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            reports_dir = get_path("reports")
+
+        # Generate filename: diagnosis_{report_id}_{timestamp}.md
+        # Parse timestamp for filename
+        try:
+            ts = datetime.fromisoformat(self.timestamp)
+            ts_str = ts.strftime("%Y%m%d_%H%M%S")
+        except Exception:
+            ts_str = self.timestamp[:19].replace(":", "").replace("-", "")
+
+        # Use short report ID
+        short_id = self.report_id.split("-")[-1] if "-" in self.report_id else self.report_id[:8]
+        filename = f"diagnosis_{short_id}_{ts_str}.md"
+        report_path = reports_dir / filename
+
+        # Generate detailed markdown content
+        content = self.render_detailed_markdown()
+
+        # Write report
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return report_path
 
 
 class SimilarCase(BaseModel):

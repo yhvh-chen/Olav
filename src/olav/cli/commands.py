@@ -1711,6 +1711,31 @@ async def _inspect_run(
     console.print(f"[bold]Running Inspection: {profile}[/bold]")
     console.print()
 
+    # If profile is a local YAML path, run inspection locally instead of via server
+    from pathlib import Path
+    local_path = Path(profile)
+    if local_path.exists() and local_path.suffix in (".yaml", ".yml"):
+        try:
+            from olav.modes.inspection.controller import run_inspection as local_run
+
+            console.print(f"[dim]Detected local inspection file: {local_path} — running locally[/dim]")
+            result = await local_run(local_path, debug=verbose)
+            # Auto-save is handled by local_run; print summary
+            console.print()
+            console.print("[bold green]✅ Local Inspection Complete[/bold green]")
+            console.print(f"   Profile: {result.config_name}")
+            console.print(f"   Devices: {result.total_devices}")
+            console.print(f"   Passed: {result.devices_passed}")
+            console.print(f"   Failed: {result.devices_failed}")
+            if result.check_results and verbose:
+                console.print()
+                console.print(result.to_markdown())
+            return
+        except Exception as e:
+            console.print(f"[red]Local inspection failed: {e}[/red]")
+            raise typer.Exit(1)
+
+    # Otherwise, invoke server-side inspection
     async with OlavThinClient(config, auth_token=auth_token) as client:
         try:
             # Trigger inspection

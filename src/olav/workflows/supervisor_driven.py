@@ -35,6 +35,7 @@ from langgraph.prebuilt import create_react_agent
 
 from olav.core.llm import LLMFactory
 from olav.core.prompt_manager import prompt_manager
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,9 @@ NETWORK_LAYERS = tuple(_OSI_CONFIG.get("layer_order", ["L1", "L2", "L3", "L4"]))
 LAYER_INFO = _OSI_CONFIG.get("layers", {})
 
 # Confidence thresholds
-_THRESHOLDS = _OSI_CONFIG.get("thresholds", {})
-MIN_ACCEPTABLE_CONFIDENCE = _THRESHOLDS.get("min_acceptable_confidence", 0.5)
-SUZIEQ_MAX_CONFIDENCE = _THRESHOLDS.get("suzieq_max_confidence", 0.60)
-REALTIME_CONFIDENCE = _THRESHOLDS.get("realtime_confidence", 0.95)
+MIN_ACCEPTABLE_CONFIDENCE = settings.deepdive_min_confidence
+SUZIEQ_MAX_CONFIDENCE = settings.deepdive_suzieq_max_confidence
+REALTIME_CONFIDENCE = settings.deepdive_realtime_confidence
 
 
 # =============================================================================
@@ -152,6 +152,10 @@ class SupervisorDrivenState(dict):
         similar_cases: Historical cases from KB (Agentic RAG)
         syslog_events: Related syslog events (fault trigger identification)
         priority_layer: Layer suggested by KB/Syslog analysis (priority investigation layer)
+
+        Investigation Tracking:
+        investigation_steps: Step-by-step investigation process log
+        workflow_start_time: Timestamp when workflow started
     """
 
     # Type annotations for LangGraph
@@ -170,6 +174,9 @@ class SupervisorDrivenState(dict):
     similar_cases: list[dict[str, Any]]  # KB search results
     syslog_events: list[dict[str, Any]]  # Syslog search results
     priority_layer: str | None  # Layer suggested by KB/Syslog
+    # Investigation Tracking
+    investigation_steps: list[str]  # Step-by-step log
+    workflow_start_time: str | None  # ISO timestamp
 
 
 def create_initial_state(
@@ -205,6 +212,9 @@ def create_initial_state(
         similar_cases=[],
         syslog_events=[],
         priority_layer=None,
+        # Investigation Tracking
+        investigation_steps=[f"Workflow started: {query}"],
+        workflow_start_time=datetime.now().isoformat(),
     )
 
 
@@ -506,10 +516,16 @@ Investigating **{target_layer}** ({layer_info['name']}) - currently at {current_
 """
 
     # Build return dict with Round 0 context
+    investigation_steps = state.get("investigation_steps", [])
+    step_msg = f"Round {current_round + 1}: Supervisor assigned {target_layer} ({layer_info['name']}) investigation"
+    if priority_layer and target_layer == priority_layer:
+        step_msg += " (priority from KB/Syslog)"
+
     result: dict[str, Any] = {
         "current_task": task_description,
         "current_layer": target_layer,
         "current_round": current_round + 1,
+        "investigation_steps": investigation_steps + [step_msg],
         "messages": [AIMessage(content=msg)],
     }
 
@@ -543,66 +559,49 @@ async def quick_analyzer_node(state: SupervisorDrivenState) -> dict:
     if not current_task or not current_layer:
         return {"messages": [AIMessage(content="No task to execute.")]}
 
-    # Get SuzieQ tools for historical analysis (Quick Analyzer - 60% confidence cap)
-    # Get Nornir tools for real-time verification (CLI/NETCONF - 95% confidence)
+    # 明确要求必须做实时验证
+    realtime_prompt = """
+重要：你必须在历史数据（SuzieQ）分析后，调用 CLI/NETCONF 工具（cli_show 或 netconf_get）对关键结论进行实时验证。只有在实时验证后，置信度才能超过60%。否则请继续深入，直到完成实时验证。
+"""
+    # 拼接到原始任务
+    if realtime_prompt not in current_task:
+        current_task = f"{current_task}\n\n{realtime_prompt}"
+
     from olav.tools.nornir_tool import cli_show, netconf_get
     from olav.tools.suzieq_analyzer_tool import (
         suzieq_health_check,
+        suzieq_schema_search,
+        suzieq_query,
         suzieq_path_trace,
         suzieq_topology_analyze,
     )
-    from olav.tools.suzieq_parquet_tool import suzieq_query, suzieq_schema_search
-
-    # Quick Analyzer Tool Strategy:
-    # - SuzieQ: Macro historical data analysis (60% confidence cap)
-    # - Nornir: Real-time device data verification (95% confidence)
-    # - KB/Syslog: Used by Supervisor in Round 0, not in Quick Analyzer
     tools = [
-        # Tier 1: SuzieQ - Historical data, fast, 60% confidence cap
         suzieq_schema_search,
         suzieq_query,
         suzieq_health_check,
         suzieq_path_trace,
         suzieq_topology_analyze,
-        # Tier 2: Nornir - Real-time data, 95% confidence
-        cli_show,       # CLI show commands for real-time state
-        netconf_get,    # NETCONF get-config for structured data
+        cli_show,
+        netconf_get,
     ]
 
-    # Create ReAct agent for Quick Analyzer
-    # Supervisor workflow needs reasoning for complex diagnostic thinking
     llm = LLMFactory.get_chat_model(reasoning=True)
-
-    # Load Quick Analyzer prompt with flattened layer info
-    layer_info = LAYER_INFO[current_layer]
-    system_prompt = prompt_manager.load_prompt(
-        "workflows/deep_dive",
-        "quick_analyzer",
-        layer=current_layer,
-        layer_name=layer_info.get("name", current_layer),
-        layer_description=layer_info.get("description", ""),
-        layer_suzieq_tables=", ".join(layer_info.get("suzieq_tables", [])),
-    )
-
-    # Run ReAct agent
     react_agent = create_react_agent(llm, tools)
-
     result = await react_agent.ainvoke({
-        "messages": [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=current_task),
-        ]
+        "input": current_task,
+        "messages": state.get("messages", []),
     })
 
-    # Extract findings and confidence from agent response
-    final_message = result["messages"][-1].content if result["messages"] else ""
-
-    # Check if CLI/NETCONF tools were used (allows higher confidence)
+    # 检查是否用过 CLI/NETCONF
     cli_used = any(
         "cli_show" in str(msg) or "netconf_get" in str(msg)
         for msg in result.get("messages", [])
     )
-    max_confidence = 0.95 if cli_used else SUZIEQ_MAX_CONFIDENCE
+    # 置信度上限逻辑
+    max_confidence = REALTIME_CONFIDENCE if cli_used else SUZIEQ_MAX_CONFIDENCE
+
+    # Extract findings and confidence from agent response
+    final_message = result["messages"][-1].content if result["messages"] else ""
 
     # Parse confidence from response (look for percentage)
     import re
@@ -638,9 +637,15 @@ async def quick_analyzer_node(state: SupervisorDrivenState) -> dict:
 {get_coverage_summary(layer_coverage)}
 """
 
+    # Add investigation step
+    investigation_steps = state.get("investigation_steps", [])
+    findings_summary = "; ".join(findings[:3]) if findings else "No issues found"
+    step_msg = f"{current_layer} analyzed: {confidence*100:.0f}% confidence - {findings_summary[:100]}"
+
     return {
         "layer_coverage": layer_coverage,
         "current_task": None,  # Clear task
+        "investigation_steps": investigation_steps + [step_msg],
         "messages": [AIMessage(content=msg)],
     }
 
@@ -788,6 +793,21 @@ RECOMMENDED_ACTION: [Specific remediation step]
     protocols = extract_protocols(combined_text)
     affected_layers_list = extract_layers(layer_findings)
 
+    # Calculate duration
+    workflow_start_time = state.get("workflow_start_time")
+    duration_seconds = 0.0
+    if workflow_start_time:
+        try:
+            start_dt = datetime.fromisoformat(workflow_start_time)
+            duration_seconds = (datetime.now() - start_dt).total_seconds()
+        except Exception:
+            pass
+
+    # Get investigation steps
+    investigation_steps = state.get("investigation_steps", [])
+    investigation_steps.append(f"Root cause identified: {root_cause[:80]}")
+    investigation_steps.append(f"Report generated with {confidence*100:.0f}% confidence")
+
     # Create structured report
     report = DiagnosisReport(
         fault_description=query,
@@ -804,18 +824,28 @@ RECOMMENDED_ACTION: [Specific remediation step]
         tags=tags,
         affected_protocols=protocols,
         affected_layers=affected_layers_list,
+        investigation_process=investigation_steps,
+        duration_seconds=duration_seconds,
     )
 
-    # Generate Markdown report
-    markdown_report = report.render_markdown()
+    # Generate detailed Markdown report (with investigation process)
+    markdown_report = report.render_detailed_markdown()
     report.markdown_content = markdown_report
+
+    # Save to local file
+    try:
+        report_path = report.save()
+        logger.info(f"📁 Report saved to: {report_path}")
+        markdown_report += f"\n\n---\n📁 *Report saved to: `{report_path}`*"
+    except Exception as e:
+        logger.error(f"Failed to save report to file: {e}")
 
     # Index to knowledge base (Agentic RAG)
     try:
         indexed = await kb_index_report(report)
         if indexed:
             logger.info(f"✅ Report {report.report_id} indexed to knowledge base")
-            markdown_report += f"\n\n---\n📚 *Report indexed to knowledge base: `{report.report_id}`*"
+            markdown_report += f"\n📚 *Report indexed to knowledge base: `{report.report_id}`*"
         else:
             logger.warning(f"⚠️ Failed to index report {report.report_id}")
     except Exception as e:
@@ -825,6 +855,7 @@ RECOMMENDED_ACTION: [Specific remediation step]
         "final_report": markdown_report,
         "root_cause_found": True,
         "root_cause": root_cause,
+        "investigation_steps": investigation_steps,
         "messages": [AIMessage(content=markdown_report)],
     }
 

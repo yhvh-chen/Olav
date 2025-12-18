@@ -1,0 +1,156 @@
+# =============================================================================
+# OLAV Network Inspection Configuration
+# =============================================================================
+#
+# Unified inspection configuration file for network health audits.
+# This file defines both log analysis and device health checks.
+#
+# Usage:
+#   olav inspect                    # Run inspection once
+#   olav inspect --daemon           # Run as scheduled daemon
+#
+# =============================================================================
+
+name: network-inspection
+description: "Comprehensive network health audit - log analysis + device checks"
+
+# =============================================================================
+# Schedule Configuration
+# =============================================================================
+schedule:
+  enabled: true
+  # Cron expression: minute hour day month weekday
+  # Examples:
+  #   "0 9 * * *"     - Daily at 09:00
+  #   "0 */4 * * *"   - Every 4 hours
+  #   "0 9 * * 1-5"   - Weekdays at 09:00
+  cron: "0 9 * * *"
+  timezone: "Asia/Shanghai"
+
+# =============================================================================
+# Execution Settings
+# =============================================================================
+execution:
+  timeout_seconds: 900
+  continue_on_failure: true
+  max_parallel_devices: 10
+
+# =============================================================================
+# Stage 1: Log Analysis
+# =============================================================================
+# Search OpenSearch syslog-raw index for fault indicators
+log_analysis:
+  enabled: true
+  index: syslog-raw
+  time_range: "24h"
+  
+  keywords:
+    critical:
+      - "DOWN"
+      - "FAILED"
+      - "ERROR"
+      - "CRITICAL"
+      - "UNREACHABLE"
+      - "NEIGHBOR.*LOST"
+      - "ADJACENCY.*DOWN"
+    warning:
+      - "WARNING"
+      - "THRESHOLD"
+      - "FLAPPING"
+      - "TIMEOUT"
+      - "DEGRADED"
+  
+  aggregation:
+    group_by:
+      - device_ip
+      - severity
+    dedupe_window: "5m"
+    max_events_per_group: 10
+
+# =============================================================================
+# Stage 2: Device Health Checks
+# =============================================================================
+device_checks:
+  enabled: true
+  
+  # Device scope (NetBox filter)
+  devices:
+    netbox_filter:
+      tag: "olav-managed"
+      status: "active"
+  
+  checks:
+    # -------------------------------------------------------------------------
+    # Routing Protocol Checks
+    # -------------------------------------------------------------------------
+    - name: "BGP Neighbor Status"
+      intent: "Check all BGP neighbors are in Established state"
+      severity: critical
+
+    - name: "BGP Prefix Count"
+      intent: "Verify BGP prefix reception count for each neighbor"
+      severity: warning
+
+    - name: "OSPF Neighbor Status"
+      intent: "Check all OSPF neighbors are in Full state"
+      severity: critical
+
+    # -------------------------------------------------------------------------
+    # Interface Checks
+    # -------------------------------------------------------------------------
+    - name: "Interface Status"
+      intent: "Check physical interface operational status, find down interfaces"
+      severity: warning
+
+    - name: "Interface Errors"
+      intent: "Check interfaces for CRC errors, input/output errors"
+      severity: warning
+
+    # -------------------------------------------------------------------------
+    # Device Health Checks
+    # -------------------------------------------------------------------------
+    - name: "Device Reachability"
+      intent: "Verify all devices are online and manageable"
+      severity: critical
+
+    - name: "Device Information"
+      intent: "Collect device model, software version, uptime"
+      severity: info
+
+    # -------------------------------------------------------------------------
+    # Layer 2 Checks
+    # -------------------------------------------------------------------------
+    - name: "LLDP Neighbors"
+      intent: "Check LLDP neighbor discovery, verify physical topology"
+      severity: info
+
+    # -------------------------------------------------------------------------
+    # Routing Table Checks
+    # -------------------------------------------------------------------------
+    - name: "Route Summary"
+      intent: "Summarize route table entries by protocol"
+      severity: info
+
+    - name: "Default Route"
+      intent: "Verify all devices have a default route"
+      severity: warning
+
+# =============================================================================
+# Report Configuration
+# =============================================================================
+output:
+  format: markdown
+  title: "Network Inspection Report"
+  
+  sections:
+    - log_critical_events
+    - log_warning_events
+    - affected_devices
+    - device_check_summary
+    - critical_violations
+    - warning_violations
+    - suggested_commands
+  
+  # Include raw log samples
+  include_samples: true
+  max_samples_per_event: 3
