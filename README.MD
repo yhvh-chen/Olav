@@ -45,6 +45,7 @@ OLAV moves beyond simple RAG by implementing a **Schema-Aware Architecture**:
 - **Funnel Debugging**: Automatically narrows down issues from Macro (network-wide SuzieQ analysis) to Micro (device-level NETCONF diagnostics).
 - **Granular Access Control**: Implements a dual-token system (Master/Session) with role-based permissions to strictly separate administrative registration from operational execution.
 - **Query Guard (Optional)**: LLM-based pre-filter that rejects non-network queries (prompt injection protection). Disabled by default, enable via `ENABLE_GUARD_MODE=true`.
+- **Command Blacklist**: Enforces a hard block on dangerous commands (e.g., `reload`, `format`) defined in `config/command_blacklist.txt`, acting as a final safety net.
 
 ### 🌐 Multi-Vendor Support
 - **No Vendor Lock-in**: Built on open standards (NETCONF/YANG, OpenConfig) and vendor-agnostic drivers.
