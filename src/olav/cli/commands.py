@@ -170,7 +170,7 @@ ServerOption = Annotated[
     ),
 ]
 
-# Mode options: -S (standard) and -E (expert) are mutually exclusive
+# Mode options: -S (standard) and -e (expert) are mutually exclusive
 StandardModeOption = Annotated[
     bool,
     typer.Option(
@@ -182,7 +182,7 @@ StandardModeOption = Annotated[
 ExpertModeOption = Annotated[
     bool,
     typer.Option(
-        "--expert", "-E",
+        "--expert", "-e",
         help="Expert mode: Supervisor-Driven deep dive with L1-L4 layer analysis",
     ),
 ]
