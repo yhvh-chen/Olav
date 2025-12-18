@@ -29,6 +29,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import logging
+import uuid
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -466,9 +467,11 @@ class WorkflowOrchestrator:
             ]
 
             # Save updated checkpoint
+            # CRITICAL: checkpoint_id MUST be a valid UUID format for LangGraph 1.0+
+            # Invalid formats like "checkpoint-{thread_id}" cause binascii.unhexlify errors
             checkpoint = {
                 "v": 1,
-                "id": f"checkpoint-{thread_id}",
+                "id": str(uuid.uuid4()),
                 "ts": None,
                 "channel_values": {
                     "messages": new_messages,
