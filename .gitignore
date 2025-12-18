@@ -92,3 +92,7 @@ docker-compose.dev.yml
 Dockerfile.tests
 ssh_config
 
+# GitHub specific
+.github/
+
+
