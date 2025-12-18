@@ -16,10 +16,17 @@ from olav.core.schema_loader import get_schema_loader
 logger = logging.getLogger(__name__)
 
 
+import os
+
 def _get_parquet_dir() -> Path:
     """Get SuzieQ parquet directory path."""
     # Try environment variable first, then fallback to default
-    parquet_dir = Path("data/suzieq-parquet")
+    env_path = os.getenv("SUZIEQ_PARQUET_DIR")
+    if env_path:
+        parquet_dir = Path(env_path)
+    else:
+        parquet_dir = Path("data/suzieq-parquet")
+        
     if not parquet_dir.exists():
         logger.warning(f"SuzieQ parquet directory not found: {parquet_dir}")
     return parquet_dir
