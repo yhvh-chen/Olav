@@ -180,10 +180,10 @@ StandardModeOption = Annotated[
 ]
 
 ExpertModeOption = Annotated[
-    bool,
+    str | None,
     typer.Option(
         "--expert", "-e",
-        help="Expert mode: Supervisor-Driven deep dive with L1-L4 layer analysis",
+        help="Expert mode: Supervisor-Driven deep dive with L1-L4 layer analysis. Optionally accepts a query string.",
     ),
 ]
 
@@ -249,12 +249,12 @@ InitStatusOption = Annotated[
 ]
 
 
-def _resolve_mode(standard: bool, expert: bool) -> str:
+def _resolve_mode(standard: bool, expert: str | None) -> str:
     """Resolve mode from mutually exclusive flags.
 
     Args:
         standard: -S/--standard flag
-        expert: -E/--expert flag
+        expert: -e/--expert flag (can be bool-like or contain query string)
 
     Returns:
         Mode string: "standard" or "expert"
@@ -262,11 +262,14 @@ def _resolve_mode(standard: bool, expert: bool) -> str:
     Raises:
         typer.BadParameter: If both flags are set
     """
-    if standard and expert:
+    # expert can be a string (query) or None
+    expert_enabled = expert is not None
+    
+    if standard and expert_enabled:
         msg = "Cannot use both --standard and --expert. Choose one."
         raise typer.BadParameter(msg)
 
-    if expert:
+    if expert_enabled:
         return "expert"
 
     # Default to standard
@@ -300,7 +303,7 @@ def main(
     query: QueryOption = None,
     server: ServerOption = None,
     standard: StandardModeOption = False,
-    expert: ExpertModeOption = False,
+    expert: ExpertModeOption = None,
     verbose: VerboseOption = False,
     debug: DebugOption = False,
     json_output: JsonOption = False,
@@ -313,11 +316,12 @@ def main(
     """OLAV (NetAIChatOps).
 
     Run without arguments to launch interactive dashboard.
-    Use -q/--query for single-shot queries.
+    Use -q/--query or -e/--expert with query for single-shot queries.
 
     Examples:
         olav                        # Interactive dashboard
-        olav -q "check BGP"         # Single query
+        olav -q "check BGP"         # Single query (standard mode)
+        olav -e "diagnose OSPF"     # Single query (expert mode)
         olav -q "check BGP" -v      # Verbose with ThinkingTree
         olav -q "check BGP" -D      # With debug timing info
         olav -q "check BGP" -j      # JSON output for scripting
@@ -347,8 +351,12 @@ def main(
         # Resolve mode from flags
         mode = _resolve_mode(standard, expert)
 
-        # query is now a string (from --query/-q option)
+        # query_text priority: -e "query" > -q "query"
+        # If expert contains a query string, use it; otherwise use -q
         query_text = query
+        if expert is not None and expert:
+            # -e was given with a query string
+            query_text = expert
 
         if cli or query_text:
             # Single-shot execution mode using Dashboard batch
