@@ -16,6 +16,7 @@ from nornir.core.task import AggregatedResult, Result
 from nornir_netmiko.tasks import netmiko_send_command
 from pydantic import BaseModel, Field
 
+from config.settings import settings
 from olav.core.database import get_database
 
 
@@ -37,15 +38,21 @@ class NetworkExecutor:
         self,
         nornir_config: str | Path = ".olav/config/nornir/config.yaml",
         blacklist_file: str | Path = ".olav/imports/commands/blacklist.txt",
+        username: str | None = None,
+        password: str | None = None,
     ):
         """Initialize executor.
 
         Args:
             nornir_config: Path to Nornir configuration
             blacklist_file: Path to command blacklist file
+            username: Device username (from .env if not provided)
+            password: Device password (from .env if not provided)
         """
         self.nornir_config = Path(nornir_config)
         self.blacklist_file = Path(blacklist_file)
+        self.username = username or getattr(settings, "device_username", "admin")
+        self.password = password or getattr(settings, "device_password", "")
         self.blacklist = self._load_blacklist()
         self.db = get_database()
 
@@ -102,8 +109,15 @@ class NetworkExecutor:
             nr = InitNornir(config_file=str(self.nornir_config.resolve()))
             host = nr.inventory.hosts.get(device)
 
-            if host and host.platform:
-                return host.platform
+            if host:
+                # Override credentials from .env
+                if self.username:
+                    host.username = self.username
+                if self.password:
+                    host.password = self.password
+                    
+                if host.platform:
+                    return host.platform
 
             return None
         except Exception as e:
@@ -157,6 +171,13 @@ class NetworkExecutor:
         # Execute command
         try:
             nr = InitNornir(config_file=str(self.nornir_config.resolve()))
+
+            # Override credentials from .env for all hosts
+            for host in nr.inventory.hosts.values():
+                if self.username:
+                    host.username = self.username
+                if self.password:
+                    host.password = self.password
 
             # Filter to single device
             nr_filtered = nr.filter(name=device)
@@ -343,3 +364,51 @@ def list_devices(
     except Exception as e:
         import traceback
         return f"Error listing devices: {e}\n\nTraceback:\n{traceback.format_exc()}"
+
+
+@tool
+def get_device_platform(device: str) -> str:
+    """Get the platform type of a specific device.
+
+    This tool retrieves the platform (OS type) for a given device from the Nornir inventory.
+    Use this before searching for platform-specific commands.
+
+    Args:
+        device: Device name (e.g., "R1", "SW1")
+
+    Returns:
+        Platform string (e.g., "cisco_ios", "huawei_vrp") or error message
+
+    Examples:
+        >>> get_device_platform("R1")
+        "Device R1 platform: cisco_ios"
+
+        >>> get_device_platform("SW1")
+        "Device SW1 platform: cisco_ios"
+    """
+    try:
+        from pathlib import Path as PathlibPath
+        from nornir import InitNornir
+
+        config_path = PathlibPath(".olav/config/nornir/config.yaml").resolve()
+        nr = InitNornir(config_file=str(config_path))
+
+        # Override credentials from .env
+        executor = get_executor()
+        for host in nr.inventory.hosts.values():
+            if executor.username:
+                host.username = executor.username
+            if executor.password:
+                host.password = executor.password
+
+        host = nr.inventory.hosts.get(device)
+
+        if not host:
+            return f"Device '{device}' not found in inventory"
+
+        platform = host.platform or "unknown"
+        return f"Device {device} platform: {platform}"
+
+    except Exception as e:
+        import traceback
+        return f"Error getting device platform: {e}\n\nTraceback:\n{traceback.format_exc()}"

@@ -13,7 +13,7 @@ from langchain_core.tools import BaseTool
 from config.settings import settings
 from olav.core.llm import LLMFactory
 from olav.tools.capabilities import api_call, search_capabilities
-from olav.tools.network import list_devices, nornir_execute
+from olav.tools.network import list_devices, nornir_execute, get_device_platform
 from olav.tools.loader import reload_capabilities
 
 
@@ -65,11 +65,18 @@ You are OLAV, an AI assistant for network operations. You help users:
 3. **Learn and Adapt**: Record new knowledge and solutions
 
 ## Your Tools
+- `get_device_platform`: Get the platform (OS type) of a device - USE THIS FIRST
+- `search_capabilities`: Find available commands/APIs for a platform
 - `nornir_execute`: Execute commands on network devices
-- `list_devices`: List available devices
-- `search_capabilities`: Find available commands/APIs
+- `list_devices`: List available devices (when platform is unknown)
 - `api_call`: Call external APIs (NetBox, Zabbix, etc)
 - File tools: read/write skills and knowledge files
+
+## Recommended Query Flow (IMPORTANT)
+1. **Identify Device**: Use `list_devices` or accept device name from user
+2. **Get Platform**: Call `get_device_platform(device_name)` to get OS type (cisco_ios, huawei_vrp, etc)
+3. **Search Commands**: Call `search_capabilities(query, type="command", platform=<platform_from_step2>)` 
+4. **Execute**: Call `nornir_execute(device, command)` with the matched command
 
 ## Safety Rules
 - Read-only commands (show, display, get): Execute automatically (whitelist approved)
@@ -87,6 +94,7 @@ On startup, read:
     # Define tools
     tools: list[BaseTool] = [
         nornir_execute,
+        get_device_platform,
         list_devices,
         search_capabilities,
         api_call,

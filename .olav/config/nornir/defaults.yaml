@@ -1,12 +1,13 @@
 # Nornir Default Connection Parameters
+# Note: Username and password are injected from .env (DEVICE_USERNAME, DEVICE_PASSWORD)
+# Do not hardcode credentials here
 
-username: admin
-password: cisco
 platform: cisco_ios
 port: 22
 
-# Network device credentials
+# Network device credentials (overridden by .env values)
 connection_options:
   netmiko:
     extras:
       device_type: cisco_ios
+
