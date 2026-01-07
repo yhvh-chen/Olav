@@ -1,0 +1,73 @@
+# Huawei VRP Command Whitelist
+# 华为VRP命令白名单
+
+# === Basic Information ===
+display version
+display device
+display current-configuration
+display saved-configuration
+
+# === Interface Commands ===
+display interface
+display interface*
+display ip interface brief
+display ip interface
+
+# === Routing ===
+display ip routing-table
+display ip routing-table*
+display ospf
+display ospf*
+display ospf peer
+display ospf lsdb
+display bgp
+display bgp*
+display bgp peer
+display bgp routing-table
+display ip protocol
+
+# === Switching ===
+display vlan
+display vlan*
+display mac-address
+display mac-address*
+display stp
+display stp*
+display lldp
+display lldp*
+
+# === System Resources ===
+display cpu-usage
+display memory-usage
+display environment
+display device
+
+# === ARP/NDP ===
+display arp
+display arp*
+display ipv6 neighbors
+
+# === Debugging ===
+display logbuffer
+display logbuffer*
+display trapbuffer
+display diagnostic-information
+
+# === Ping/Traceroute ===
+ping
+tracert
+
+# === ACL/NAT ===
+display acl
+display acl*
+display nat session
+display nat statistics
+
+# === Configuration Commands (Require HITL) ===
+!system-view
+!interface
+!ospf
+!bgp
+!vlan
+!save
+!reboot

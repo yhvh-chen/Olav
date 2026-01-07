@@ -1,0 +1,22 @@
+# Nornir Configuration for OLAV v0.8
+
+runner:
+  plugin: threaded
+  options:
+    num_workers: 20
+
+inventory:
+  plugin: SimpleInventory
+  options:
+    host_file: ".olav/config/nornir/hosts.yaml"
+    group_file: ".olav/config/nornir/groups.yaml"
+    defaults_file: ".olav/config/nornir/defaults.yaml"
+
+# Connection parameters (global defaults)
+connection_options:
+  netmiko:
+    extras:
+      timeout: 60          # Connection timeout
+      auth_timeout: 30     # Authentication timeout
+      banner_timeout: 30   # Banner timeout
+      conn_timeout: 30     # TCP connection timeout

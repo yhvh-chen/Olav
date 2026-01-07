@@ -1,0 +1,16 @@
+# Nornir Default Connection Parameters
+defaults:
+  # Default credentials (override in host file)
+  # These are read from environment variables for security
+  username: ${DEVICE_USERNAME:-admin}
+  password: ${DEVICE_PASSWORD:-}
+
+  # Connection settings
+  platform: cisco_ios
+  port: ${NORNIR_SSH_PORT:-22}
+
+  # Network device credentials
+  connection_options:
+    netmiko:
+      extras:
+        device_type: cisco_ios

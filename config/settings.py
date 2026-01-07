@@ -79,14 +79,14 @@ class Settings(BaseSettings):
     # =========================================================================
     # Database Configuration
     # =========================================================================
+    # DuckDB: Capability library (OLAP - analytical queries)
+    #   Stores: CLI commands, APIs, NETCONF capabilities
     duckdb_path: str = str(OLAV_DIR / "capabilities.db")
-
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    postgres_user: str = "olav"
-    postgres_password: str = ""
-    postgres_db: str = "olav"
-    postgres_uri: str = ""
+    
+    # SQLite: Agent session persistence (OLTP - transactional queries)
+    #   Stores: DeepAgents checkpoints, conversation history
+    #   Used in production mode; development uses in-memory storage
+    checkpoint_db_path: str = str(OLAV_DIR / "checkpoints.db")
 
     # =========================================================================
     # Network Device Configuration
@@ -99,21 +99,31 @@ class Settings(BaseSettings):
     device_username: str = "admin"
     device_password: str = ""
     device_enable_password: str = ""
+    device_timeout: int = 30
 
     # =========================================================================
-    # Nornir Configuration
+    # Network Execution Configuration
     # =========================================================================
     nornir_ssh_port: int = 22
-    netconf_port: int = 830
+    
+    # NETCONF support planned for Phase 2+
+    # netconf_port: int = 830  # Uncomment when NETCONF is needed
 
     # =========================================================================
     # Application Settings
     # =========================================================================
+    # Use 'environment' field for runtime context (local/development/production)
+    # Removed 'olav_mode' - this was v0.5 legacy; environment provides clearer semantics
     environment: Literal["local", "development", "production"] = "local"
-    olav_mode: Literal["QuickTest", "Production"] = "QuickTest"
 
     server_host: str = "0.0.0.0"
     server_port: int = 8000
+
+    # Logging
+    log_level: str = "INFO"
+    
+    # Network relevance guard - filters out non-network queries
+    guard_enabled: bool = True
 
     # =========================================================================
     # Security & Authentication
@@ -122,49 +132,28 @@ class Settings(BaseSettings):
     token_max_age_hours: int = 24
     session_token_max_age_hours: int = 168
     olav_api_token: str = ""
-
-    # =========================================================================
-    # Logging
-    # =========================================================================
-    log_level: str = "INFO"
     log_format: Literal["json", "text"] = "text"
 
     # =========================================================================
-    # Optional Services
+    # Optional Services (Removed in v0.8)
     # =========================================================================
-    opensearch_host: str = "localhost"
-    opensearch_port: int = 9200
-    opensearch_username: str = ""
-    opensearch_password: str = ""
-    opensearch_url: str = "http://localhost:9200"
-
-    redis_url: str = ""
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_password: str = ""
+    # OpenSearch, Redis, and other external services are NOT used in v0.8
+    # All caching is done via DuckDB locally
+    # These fields are kept for reference only and will be removed in future
 
     # =========================================================================
     # Development Settings
     # =========================================================================
     use_dynamic_router: bool = True
-    langsmith_api_key: str = ""
+    langsmith_api_key: str = ""  # Optional for debugging
     langsmith_project: str = "olav-v0.8"
     debug: bool = False
 
     # =========================================================================
-    # Computed Properties
+    # Validators (Removed)
     # =========================================================================
-    @field_validator("postgres_uri", mode="before")
-    @classmethod
-    def build_postgres_uri(cls, v: str, info) -> str:
-        """Build postgres_uri from components if not set"""
-        if v:
-            return v
-        data = info.data
-        return (
-            f"postgresql://{data.get('postgres_user')}:{data.get('postgres_password')}"
-            f"@{data.get('postgres_host')}:{data.get('postgres_port')}/{data.get('postgres_db')}"
-        )
+    # postgres_uri validator removed - not needed in v0.8
+    # All database operations use DuckDB via duckdb_path
 
 
 # =============================================================================

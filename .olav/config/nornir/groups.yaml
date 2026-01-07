@@ -1,0 +1,28 @@
+# Nornir Inventory - Device Groups
+groups:
+  core:
+    data:
+      site: datacenter
+      role: core
+
+  distribution:
+    data:
+      role: distribution
+
+  access:
+    data:
+      role: access
+
+  cisco_ios:
+    platform: cisco_ios
+    connection_options:
+      netmiko:
+        extras:
+          device_type: cisco_ios
+
+  huawei_vrp:
+    platform: huawei_vrp
+    connection_options:
+      netmiko:
+        extras:
+          device_type: huawei

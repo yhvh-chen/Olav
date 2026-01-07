@@ -1,0 +1,78 @@
+# Cisco IOS Command Whitelist
+# 每行一条命令，支持通配符
+# # 开头行为注释
+# ! 开头行为需要HITL审批的写命令
+
+# === Basic Information ===
+show version
+show inventory
+show running-config
+show startup-config
+
+# === Interface Commands ===
+show interface*
+show ip interface brief
+show ip interface
+show controllers
+
+# === Routing ===
+show ip route
+show ip route*
+show ip ospf
+show ip ospf*
+show ip ospf neighbor
+show ip ospf database
+show ip bgp
+show ip bgp*
+show ip bgp summary
+show ip bgp neighbors
+show ip protocols
+
+# === Switching ===
+show vlan
+show vlan*
+show mac address-table
+show mac address-table*
+show spanning-tree
+show spanning-tree*
+show lldp
+show lldp*
+
+# === System Resources ===
+show processes cpu
+show processes cpu history
+show memory statistics
+show environment
+show environment all
+
+# === ARP/NDP ===
+show arp
+show arp*
+show ip arp
+show ipv6 neighbors
+
+# === Debugging ===
+show logging
+show logging*
+show debug
+show tech-support
+
+# === Ping/Traceroute ===
+ping
+traceroute
+
+# === ACL/NAT ===
+show access-lists
+show access-lists*
+show ip nat translations
+show ip nat statistics
+
+# === Configuration Commands (Require HITL) ===
+!configure terminal
+!interface
+!router ospf
+!router bgp
+!vlan
+!write memory
+!copy running-config startup-config
+!reload

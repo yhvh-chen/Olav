@@ -1,0 +1,91 @@
+openapi: "3.0.0"
+info:
+  title: NetBox API
+  version: "3.0"
+  description: NetBox Infrastructure Management Platform API
+
+paths:
+  /dcim/devices/:
+    get:
+      summary: Query device list
+      description: Retrieve a list of devices from NetBox
+      x-olav-write: false
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Filter by device name
+        - name: site
+          in: query
+          schema:
+            type: string
+          description: Filter by site slug
+        - name: role
+          in: query
+          schema:
+            type: string
+          description: Filter by device role
+        - name: platform
+          in: query
+          schema:
+            type: string
+          description: Filter by platform
+
+  /dcim/devices/{id}/:
+    get:
+      summary: Get device details
+      description: Retrieve details of a specific device
+      x-olav-write: false
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Device ID
+
+    patch:
+      summary: Update device information
+      description: Partially update device information
+      x-olav-write: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Device ID
+
+  /dcim/interfaces/:
+    get:
+      summary: Query interface list
+      description: Retrieve a list of interfaces
+      x-olav-write: false
+      parameters:
+        - name: device
+          in: query
+          schema:
+            type: integer
+          description: Filter by device ID
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Filter by interface name
+
+  /ipam/ip-addresses/:
+    get:
+      summary: Query IP addresses
+      description: Retrieve IP address information
+      x-olav-write: false
+    post:
+      summary: Create IP address
+      description: Add a new IP address
+      x-olav-write: true
+
+  /ipam/prefixes/:
+    get:
+      summary: Query IP prefixes
+      description: Retrieve IP prefix information
+      x-olav-write: false
