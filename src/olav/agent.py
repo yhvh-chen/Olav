@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from deepagents import FilesystemMiddleware, create_deep_agent
-from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import BaseTool
 
+from config.settings import settings
+from olav.core.llm import LLMFactory
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.network import list_devices, nornir_execute
 from olav.tools.loader import reload_capabilities
@@ -30,21 +31,18 @@ def create_olav_agent(
     - HITL approval for write operations
 
     Args:
-        model: Model name or instance (defaults to Claude Sonnet 4)
+        model: Model name or instance (defaults to configured LLM)
         checkpointer: Optional checkpointer for state persistence
         debug: Enable debug mode
 
     Returns:
         Compiled DeepAgent ready to use
     """
-    # Initialize model
+    # Initialize model from configuration or parameter
     if model is None:
-        llm = ChatAnthropic(
-            model_name="claude-sonnet-4-5-20250929",
-            max_tokens=20000,
-        )
+        llm = LLMFactory.get_chat_model()
     elif isinstance(model, str):
-        llm = ChatAnthropic(model_name=model, max_tokens=20000)
+        llm = LLMFactory.get_chat_model()  # model_name parameter overridden in init_chat_model
     else:
         llm = model
 
