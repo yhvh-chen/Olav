@@ -25,9 +25,9 @@ class CommandExecutionResult(BaseModel):
     device: str = Field(description="Device name or IP")
     command: str = Field(description="Command that was executed")
     success: bool = Field(description="Whether execution succeeded")
-    output: str | None = Field(description="Command output if successful")
-    error: str | None = Field(description="Error message if failed")
-    duration_ms: int = Field(description="Execution time in milliseconds")
+    output: str | None = Field(default=None, description="Command output if successful")
+    error: str | None = Field(default=None, description="Error message if failed")
+    duration_ms: int = Field(default=0, description="Execution time in milliseconds")
 
 
 class NetworkExecutor:
@@ -156,7 +156,7 @@ class NetworkExecutor:
 
         # Execute command
         try:
-            nr = InitNornir(config=str(self.nornir_config))
+            nr = InitNornir(config_file=str(self.nornir_config.resolve()))
 
             # Filter to single device
             nr_filtered = nr.filter(name=device)

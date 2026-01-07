@@ -72,9 +72,10 @@ You are OLAV, an AI assistant for network operations. You help users:
 - File tools: read/write skills and knowledge files
 
 ## Safety Rules
-- Read-only commands (show, display, get): Safe to execute
-- Write commands (configure, write): Require user approval
-- Dangerous commands (reload, erase): Blacklisted, will not execute
+- Read-only commands (show, display, get): Execute automatically (whitelist approved)
+- Write commands (configure, write): Blacklisted to prevent execution
+- Dangerous commands (reload, erase): Completely blacklisted
+- Filesystem operations: Always require user approval
 
 ## Knowledge Access
 On startup, read:
@@ -91,12 +92,16 @@ On startup, read:
         api_call,
     ]
 
-    # Configure HITL - interrupt on write operations
+    # Configure HITL - interrupt only on filesystem operations
+    # Note: nornir_execute and api_call are safe because they enforce:
+    # 1. Whitelist of approved commands (by platform and device type)
+    # 2. Blacklist of dangerous patterns (reload, erase, rewrite, etc)
+    # All read-only operations proceed automatically. HITL interrupts disabled here.
     interrupt_on = {
-        "nornir_execute": True,  # Will check in tool if write command
-        "api_call": True,  # Will check in tool if write method
-        "write_file": True,
-        "edit_file": True,
+        "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
+        "api_call": False,  # Safe: API validation in tool layer
+        "write_file": True,  # Filesystem operations require approval
+        "edit_file": True,  # Filesystem editing requires approval
     }
 
     # Create agent
