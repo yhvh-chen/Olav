@@ -1,31 +1,31 @@
-# 常见故障和解决方案
+# Common Faults and Solutions
 
-## BGP 邻居状态异常
+## BGP Neighbor Status Abnormal
 
-**症状**: BGP 邻居显示 Idle / Active
+**Symptoms**: BGP neighbor shows Idle / Active
 
-**可能原因**:
-1. 网络连接中断
-2. 防火墙阻止 TCP 179 端口
-3. 路由器配置错误
-4. 邻居 IP 地址不可达
+**Possible Causes**:
+1. Network connection interrupted
+2. Firewall blocks TCP port 179
+3. Router configuration error
+4. Neighbor IP address unreachable
 
-**解决步骤**:
-1. Ping 邻居 IP 地址
-2. 检查防火墙规则
-3. 验证 BGP 配置
-4. 查看 BGP 日志
+**Troubleshooting Steps**:
+1. Ping neighbor IP address
+2. Check firewall rules
+3. Verify BGP configuration
+4. View BGP logs
 
-## 接口无法正常通信
+## Interface Cannot Communicate Normally
 
-**症状**: 接口物理层 UP，但 IP 不可达
+**Symptoms**: Interface physical layer UP, but IP unreachable
 
-**可能原因**:
-1. IP 地址配置错误
-2. 子网掩码不匹配
-3. VLAN 配置问题
-4. VLAN Trunk 配置错误
+**Possible Causes**:
+1. IP address configuration error
+2. Subnet mask mismatch
+3. VLAN configuration issue
+4. VLAN Trunk configuration error
 
 ---
 
-持续添加故障案例和解决方案。
+Continuously add fault cases and solutions.

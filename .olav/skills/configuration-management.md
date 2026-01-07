@@ -2,40 +2,40 @@
 id: configuration-management
 intent: config
 complexity: complex
-description: "设备配置管理和变更执行，需要HITL审批"
+description: "Device configuration management and change execution, requires HITL approval"
 examples:
-  - "修改VLAN配置"
-  - "更新BGP路由策略"
-  - "应用安全策略"
+  - "Modify VLAN configuration"
+  - "Update BGP routing policy"
+  - "Apply security policy"
 enabled: true
 ---
 
-# 配置管理技能
+# Configuration Management Skill
 
-## 概述
+## Overview
 
-配置管理技能用于设备配置变更和策略应用。
+Configuration management skill is used for device configuration changes and policy application.
 
-### 应用场景
+### Use Cases
 
-- 应用接口配置
-- 修改路由策略
-- 更新 ACL
-- 配置 BGP 参数
+- Apply interface configuration
+- Modify routing policy
+- Update ACL
+- Configure BGP parameters
 
-### 执行步骤
+### Execution Steps
 
-1. ✅ 验证变更的合理性
-2. ⚠️ **请求人工审批** (HITL)
-3. 应用配置到设备
-4. 验证配置是否生效
-5. 保存配置
+1. ✅ Verify the reasonableness of changes
+2. ⚠️ **Request manual approval** (HITL)
+3. Apply configuration to device
+4. Verify configuration takes effect
+5. Save configuration
 
-### 风险等级
+### Risk Level
 
-**高 - 所有配置变更需人工审批**
+**High - All configuration changes require manual approval**
 
-### 相关命令
+### Related Commands
 
 ```
 configure terminal

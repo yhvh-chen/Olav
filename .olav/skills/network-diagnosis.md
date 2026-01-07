@@ -2,416 +2,416 @@
 id: network-diagnosis
 intent: diagnose
 complexity: complex
-description: "结构化网络故障诊断,按TCP/IP分层逐级排查"
+description: "Structured network fault diagnosis, troubleshoot layer-by-layer using TCP/IP model"
 examples:
-  - "为什么网络不通"
-  - "网络慢,帮我排查"
-  - "某站点无法访问"
+  - "Why is the network not working"
+  - "Network is slow, help me troubleshoot"
+  - "A site cannot be accessed"
 enabled: true
 ---
 
-# Network Diagnosis (结构化网络诊断)
+# Network Diagnosis
 
-## 适用场景
-- 网络连通性故障
-- 性能问题诊断
-- 间歇性故障排查
-- 端到端路径分析
+## Applicable Scenarios
+- Network connectivity faults
+- Performance problem diagnosis
+- Intermittent fault troubleshooting
+- End-to-end path analysis
 
-## 识别标志
-用户问题包含: "不通"、"无法访问"、"慢"、"丢包"、"超时"、"时断时续"
+## Identification Signals
+User questions contain: "not working", "cannot access", "slow", "packet loss", "timeout", "intermittent"
 
-## 执行策略
+## Execution Strategy
 
-### 阶段1: 问题定义 (5分钟)
-**目标**: 明确问题现象和范围
+### Phase 1: Problem Definition (5 minutes)
+**Goal**: Clarify problem symptoms and scope
 
-1. **收集基本信息**
+1. **Collect Basic Information**
    ```bash
-   - 源地址/设备: ?
-   - 目标地址/设备: ?
-   - 问题现象: (不通/慢/间歇性)
-   - 持续时间: ?
-   - 影响范围: (单用户/全站点/特定业务)
-   - 最近变更: (配置/设备/链路)
+   - Source address/device: ?
+   - Target address/device: ?
+   - Problem symptoms: (not working/slow/intermittent)
+   - Duration: ?
+   - Scope: (single user/full site/specific application)
+   - Recent changes: (config/device/link)
    ```
 
-2. **快速验证**
+2. **Quick Verification**
    ```bash
-   # 从不同测试点验证
-   ping <目标> -c 10
+   # Verify from multiple test points
+   ping <target> -c 10
 
-   # 记录结果
-   - 丢包率: ?
-   - 延迟: ?
-   - 抖动: ?
+   # Record results
+   - Packet loss: ?
+   - Latency: ?
+   - Jitter: ?
    ```
 
-### 阶段2: 宏观分析 (10分钟)
-**目标**: 定位故障域和影响范围
+### Phase 2: Macro Analysis (10 minutes)
+**Goal**: Locate fault domain and impact scope
 
-1. **路径追踪**
+1. **Path Tracing**
    ```bash
-   # Traceroute定位问题节点
-   traceroute <目标>
+   # Use traceroute to locate problem node
+   traceroute <target>
 
-   # 分析:
-   # - 哪一跳开始丢包/超时
-   # - 路径是否符合预期
-   # - 是否有异常路由
+   # Analysis:
+   # - Which hop starts losing packets/timing out
+   # - Is path as expected
+   # - Any abnormal routes
    ```
 
-2. **拓扑检查**
+2. **Topology Check**
    ```bash
-   # 检查关键节点状态
-   show ip ospf neighbor     # OSPF邻居
-   show ip bgp summary       # BGP邻居
-   show lldp neighbors       # 二层拓扑
+   # Check critical nodes
+   show ip ospf neighbor     # OSPF neighbors
+   show ip bgp summary       # BGP neighbors
+   show lldp neighbors       # Layer 2 topology
 
-   # 分析:
-   # - 邻居关系是否正常
-   # - 是否有邻居down
-   # - 拓扑是否有变化
+   # Analysis:
+   # - Are neighbor relationships normal
+   # - Any neighbors down
+   # - Any topology changes
    ```
 
-3. **影响范围评估**
+3. **Impact Scope Assessment**
    ```bash
-   # 批量ping测试
-   # - 同一网段其他主机
-   # - 不同网段主机
-   # - 外部网络
+   # Batch ping test
+   # - Other hosts in same subnet
+   # - Hosts in different subnets
+   # - External networks
 
-   # 确定影响范围:
-   # - 单主机 (本地问题)
-   # - 单子网 (网关/二层问题)
-   # - 多子网 (路由/三层问题)
-   # - 全网络 (核心/出口问题)
+   # Determine impact scope:
+   # - Single host (local issue)
+   # - Single subnet (gateway/layer 2 issue)
+   # - Multiple subnets (routing/layer 3 issue)
+   # - Network-wide (core/exit issue)
    ```
 
-**输出**: 宏观分析报告
+**Output**: Macro analysis report
 ```
-## 宏观分析结果
-- 故障域: [具体位置]
-- 影响范围: [影响描述]
-- 可疑节点: [设备/接口列表]
-- 初步判断: [物理层/二层/三层问题]
+## Macro Analysis Results
+- Fault domain: [specific location]
+- Impact scope: [impact description]
+- Suspected nodes: [device/interface list]
+- Preliminary assessment: [physical/layer 2/layer 3 issue]
 ```
 
-### 阶段3: 微观分析 (15-30分钟)
-**目标**: 在故障域内逐层排查,定位根因
+### Phase 3: Micro Analysis (15-30 minutes)
+**Goal**: Layer-by-layer troubleshooting within fault domain, identify root cause
 
-#### TCP/IP 分层排查框架
+#### TCP/IP Layer-by-Layer Troubleshooting Framework
 
-**Layer 1: 物理层 (5分钟)**
+**Layer 1: Physical Layer (5 minutes)**
 ```bash
-# 检查项:
+# Check items:
 show interfaces status
 show interfaces counters errors
 show interfaces transceiver detail
 
-# 关注指标:
-✓ 接口状态: up/up
-✓ 错误计数: CRC, input errors, output errors
-✓ 光功率: RX/TX 在正常范围
-✓ 流量: 输入/输出速率正常
+# Focus metrics:
+✓ Interface status: up/up
+✓ Error counts: CRC, input errors, output errors
+✓ Optical power: RX/TX in normal range
+✓ Traffic: input/output rate normal
 
-# 常见问题:
-✗ 接口 down/down
-✗ CRC错误增长
-✗ 光功率异常
-✗ 大量 runts/giants
+# Common issues:
+✗ Interface down/down
+✗ CRC errors increasing
+✗ Optical power abnormal
+✗ Many runts/giants
 ```
 
-**Layer 2: 数据链路层 (5分钟)**
+**Layer 2: Data Link Layer (5 minutes)**
 ```bash
-# 检查项:
+# Check items:
 show vlan brief
 show mac address-table
 show spanning-tree summary
 show lldp neighbors detail
 
-# 关注指标:
-✓ VLAN状态: active
-✓ MAC表: 已学习相关MAC
-✓ STP状态: forwarding,无环路
-✓ LLDP: 邻居发现正常
+# Focus metrics:
+✓ VLAN status: active
+✓ MAC table: relevant MACs learned
+✓ STP status: forwarding, no loops
+✓ LLDP: neighbor discovery normal
 
-# 常见问题:
-✗ VLAN不匹配
-✗ MAC表未学习
-✗ STP阻塞
-✗ 二层环路
+# Common issues:
+✗ VLAN mismatch
+✗ MAC not learned
+✗ STP blocked
+✗ Layer 2 loop
 ```
 
-**Layer 3: 网络层 (10分钟)**
+**Layer 3: Network Layer (10 minutes)**
 ```bash
-# 检查项:
+# Check items:
 show ip interface brief
-show ip route <目标>
+show ip route <target>
 show arp
 show ip ospf neighbor
 show ip bgp summary
 
-# 关注指标:
-✓ 接口IP: 配置正确,状态up
-✓ 路由表: 存在到达目标的路径
-✓ ARP: 已解析目标MAC
-✓ 路由协议: 邻居正常,路由收敛
+# Focus metrics:
+✓ Interface IP: configured correctly, status up
+✓ Routing table: path to target exists
+✓ ARP: target MAC resolved
+✓ Routing protocol: neighbors normal, routes converged
 
-# 常见问题:
-✗ IP地址配置错误
-✗ 路由缺失
-✗ ARP无法解析
-✗ 路由协议邻居down
-✗ 路由震荡
+# Common issues:
+✗ IP configuration error
+✗ Missing route
+✗ ARP cannot resolve
+✗ Routing protocol neighbor down
+✗ Route flapping
 ```
 
-**Layer 4: 传输层 (5分钟)**
+**Layer 4: Transport Layer (5 minutes)**
 ```bash
-# 检查项:
+# Check items:
 show access-lists
 show ip nat translations
 show control-plane
 show running-config | include service
 
-# 关注指标:
-✓ ACL: 无阻断规则
-✓ NAT: 转换正常
-✓ 端口: 服务端口可达
+# Focus metrics:
+✓ ACL: no blocking rules
+✓ NAT: translation normal
+✓ Port: service port reachable
 
-# 常见问题:
-✗ ACL阻断
-✗ NAT配置错误
-✗ 端口过滤
+# Common issues:
+✗ ACL blocking
+✗ NAT misconfiguration
+✗ Port filtering
 ```
 
-**Layer 5: 应用层 (可选,根据业务)**
+**Layer 5: Application Layer (optional, depends on business)**
 ```bash
-# 检查项:
+# Check items:
 show ip dns server
 show running-config | include service
-# 应用特定检查
+# Business-specific checks
 
-# 常见问题:
-✗ DNS解析失败
-✗ 服务未启动
+# Common issues:
+✗ DNS resolution failure
+✗ Service not running
 ```
 
-### 阶段4: 根因定位 (5分钟)
-**综合分析,确定根本原因**
+### Phase 4: Root Cause Identification (5 minutes)
+**Synthesize analysis, determine root cause**
 
-1. **排除法**
+1. **Elimination Method**
    ```
-   ✓ 物理层正常
-   ✓ 二层正常
-   ✗ 三层路由缺失
-   → 根因: 路由配置错误/未发布
-   ```
-
-2. **关联分析**
-   ```
-   - 接口CRC错误 + 光功率低
-   → 根因: 光模块老化
-
-   - OSPF邻居down + 认证配置错误
-   → 根因: OSPF认证密码不匹配
-
-   - ACL阻断 + 特定流量不通
-   → 根因: ACL规则配置错误
+   ✓ Physical layer normal
+   ✓ Layer 2 normal
+   ✗ Layer 3 missing route
+   → Root cause: Route configuration error/not published
    ```
 
-3. **时间线分析**
+2. **Correlation Analysis**
    ```
-   - 故障开始时间
-   - 最近配置变更
-   - 设备重启/替换
-   → 找到触发事件
+   - Interface CRC errors + low optical power
+   → Root cause: Optical module aging
+
+   - OSPF neighbor down + authentication config error
+   → Root cause: OSPF authentication password mismatch
+
+   - ACL blocking + specific traffic not working
+   → Root cause: ACL rule misconfiguration
    ```
 
-### 阶段5: 解决方案与验证 (10分钟)
-
-**制定解决方案**
-1. **临时缓解** (如需要)
+3. **Timeline Analysis**
    ```
-   - 切换到备用链路
-   - 调整路由策略
-   - 临时旁路故障点
+   - Fault start time
+   - Recent config changes
+   - Device reboot/replacement
+   → Find triggering event
    ```
 
-2. **永久修复**
+### Phase 5: Solution and Verification (10 minutes)
+
+**Develop Solution**
+1. **Temporary Mitigation** (if needed)
    ```
-   - 修正配置错误
-   - 更换故障硬件
-   - 优化网络设计
-   - 添加监控告警
+   - Switch to backup link
+   - Adjust routing policy
+   - Temporarily bypass faulty point
    ```
 
-**验证步骤**
+2. **Permanent Fix**
+   ```
+   - Correct configuration error
+   - Replace faulty hardware
+   - Optimize network design
+   - Add monitoring alerts
+   ```
+
+**Verification Steps**
 ```bash
-# 1. 验证配置变更
-show running-config | section <相关配置>
+# 1. Verify config changes
+show running-config | section <relevant-config>
 
-# 2. 验证状态恢复
-show <相关状态命令>
+# 2. Verify status recovery
+show <relevant-status-command>
 
-# 3. 业务测试
-ping <目标> -c 100
-traceroute <目标>
+# 3. Business test
+ping <target> -c 100
+traceroute <target>
 
-# 4. 持续监控
-# 观察10-30分钟确认稳定
+# 4. Continuous monitoring
+# Monitor for 10-30 minutes to confirm stability
 ```
 
-## 常见故障场景与排查路径
+## Common Fault Scenarios and Troubleshooting Paths
 
-### 场景1: 单用户无法访问网络
+### Scenario 1: Single User Cannot Access Network
 ```
-排查路径:
-1. ping 本地网关 → 检查本地连接
-2. ping 公网IP → 检查路由
-3. 检查VLAN/MAC → 检查二层
-4. 检查ACL/NAT → 检查策略
-```
-
-### 场景2: 全子网无法访问
-```
-排查路径:
-1. 检查网关设备 → 接入层/汇聚层
-2. 检查VLAN配置 → SVI状态
-3. 检查上行链路 → 核心层
-4. 检查路由发布 → 路由协议
+Troubleshooting Path:
+1. ping local gateway → check local connection
+2. ping public IP → check routing
+3. check VLAN/MAC → check layer 2
+4. check ACL/NAT → check policies
 ```
 
-### 场景3: 网络慢
+### Scenario 2: Full Subnet Cannot Access
 ```
-排查路径:
-1. traceroute定位慢的节点
-2. 检查该节点接口错误/利用率
-3. 检查QoS配置
-4. 检查路径选择
-```
-
-### 场景4: 间歇性故障
-```
-排查路径:
-1. 检查接口错误计数增长趋势
-2. 检查路由协议稳定性
-3. 检查STP状态变化
-4. 检查链路质量
+Troubleshooting Path:
+1. check gateway device → access/distribution layer
+2. check VLAN config → SVI status
+3. check uplink → core layer
+4. check route publishing → routing protocol
 ```
 
-### 场景5: 特定应用不通
+### Scenario 3: Slow Network
 ```
-排查路径:
-1. 测试基本连通性 (ping)
-2. 测试端口可达性 (telnet <ip> <port>)
-3. 检查ACL策略
-4. 检查应用层配置
+Troubleshooting Path:
+1. traceroute to locate slow node
+2. check error counters/utilization of that node
+3. check QoS configuration
+4. check path selection
 ```
 
-## 输出格式
+### Scenario 4: Intermittent Faults
+```
+Troubleshooting Path:
+1. check interface error counter growth trend
+2. check routing protocol stability
+3. check STP status changes
+4. check link quality
+```
 
-### 诊断报告模板
+### Scenario 5: Specific Application Not Working
+```
+Troubleshooting Path:
+1. test basic connectivity (ping)
+2. test port reachability (telnet <ip> <port>)
+3. check ACL policy
+4. check application layer config
+```
+
+## Output Format
+
+### Diagnosis Report Template
 ```markdown
-## 网络故障诊断报告
+## Network Fault Diagnosis Report
 
-### 问题描述
-[用户描述的问题]
+### Problem Description
+[User's description of the problem]
 
-### 宏观分析
-**路径追踪**: [traceroute结果]
-**故障域**: [确定的故障位置]
-**影响范围**: [影响描述]
+### Macro Analysis
+**Path Tracing**: [traceroute result]
+**Fault Domain**: [identified fault location]
+**Impact Scope**: [impact description]
 
-### 微观分析
-**物理层**: ✅/❌ [发现]
-**二层**: ✅/❌ [发现]
-**三层**: ✅/❌ [发现]
-**四层**: ✅/❌ [发现]
+### Micro Analysis
+**Physical Layer**: ✅/❌ [findings]
+**Layer 2**: ✅/❌ [findings]
+**Layer 3**: ✅/❌ [findings]
+**Layer 4**: ✅/❌ [findings]
 
-### 根因
-[确定的根本原因]
+### Root Cause
+[Identified root cause]
 
-### 解决方案
-1. 临时措施: [如有]
-2. 永久修复: [具体步骤]
+### Solution
+1. Temporary measures: [if any]
+2. Permanent fix: [specific steps]
 
-### 验证结果
-✅/❌ [验证结果]
+### Verification Results
+✅/❌ [verification result]
 ```
 
-## 最佳实践
+## Best Practices
 
-### 1. 系统化排查
-- 严格按照分层顺序
-- 每层检查完整后再进入下一层
-- 记录所有检查结果
+### 1. Systematic Troubleshooting
+- Follow layer order strictly
+- Complete one layer before moving to next
+- Record all check results
 
-### 2. 并行检查
-- 多个设备可并行检查
-- 使用batch_query提高效率
-- 不相关检查项可并行
+### 2. Parallel Checks
+- Multiple devices can be checked in parallel
+- Use batch_query for efficiency
+- Unrelated checks can run in parallel
 
-### 3. 对比分析
-- 与正常设备/链路对比
-- 与历史数据对比
-- 与配置基线对比
+### 3. Comparative Analysis
+- Compare with normal devices/links
+- Compare with historical data
+- Compare with configuration baseline
 
-### 4. 变更控制
-- 诊断时避免做配置变更
-- 确认根因后再修复
-- 修复后要有验证
-- 记录所有变更
+### 4. Change Control
+- Avoid config changes during diagnosis
+- Make changes after confirming root cause
+- Verify after fixing
+- Record all changes
 
-### 5. 文档记录
-- 诊断过程要记录
-- 根因要记录
-- 解决方案要记录
-- 保存到knowledge/solutions/
+### 5. Documentation
+- Record diagnosis process
+- Record root cause
+- Record solution
+- Save to knowledge/solutions/
 
-## 工具使用优先级
+## Tool Usage Priority
 
-### 优先使用
-1. `smart_query(device, intent)` - 快速获取信息
-2. `batch_query(devices, intent)` - 批量检查
-3. `list_devices()` - 了解环境
+### Prefer Using
+1. `smart_query(device, intent)` - Quick information gathering
+2. `batch_query(devices, intent)` - Batch checking
+3. `list_devices()` - Understand environment
 
-### 按需使用
-4. `search_capabilities(query, platform)` - 查找特定命令
-5. `nornir_execute(device, command)` - 执行特定命令
+### Use as Needed
+4. `search_capabilities(query, platform)` - Find specific commands
+5. `nornir_execute(device, command)` - Execute specific commands
 
-### 辅助工具
-- `ping`, `traceroute` - 连通性测试
-- `show` 命令 - 状态检查
-- `debug` 命令 - 深度调试 (谨慎使用)
+### Supporting Tools
+- `ping`, `traceroute` - Connectivity testing
+- `show` commands - Status checking
+- `debug` commands - Deep debugging (use carefully)
 
-## 注意事项
+## Important Notes
 
-### 安全第一
-- 只执行只读命令诊断
-- 不做配置变更 (除非用户明确要求)
-- 不执行危险命令 (reload等)
+### Safety First
+- Only execute read-only commands for diagnosis
+- No config changes (unless explicitly requested)
+- No dangerous commands (reload, etc.)
 
-### 效率优先
-- 优先使用批量工具
-- 避免重复检查
-- 快速定位故障域
+### Efficiency Priority
+- Prefer batch tools
+- Avoid duplicate checks
+- Quickly locate fault domain
 
-### 用户沟通
-- 及时报告进展
-- 解释技术术语
-- 给出明确建议
-- 提供验证方法
+### User Communication
+- Report progress promptly
+- Explain technical terms
+- Give clear recommendations
+- Provide verification methods
 
-## 学习行为
+## Learning Behavior
 
-成功诊断后:
-1. **保存案例**: `write_file .olav/knowledge/solutions/<问题>.md`
-2. **更新技能**: 如发现新的排查模式,更新 `skills/network-diagnosis.md`
-3. **更新别名**: 如使用了新设备别名,更新 `knowledge/aliases.md`
-4. **记录标签**: 便于后续检索
+After successful diagnosis:
+1. **Save case**: `write_file .olav/knowledge/solutions/<problem>.md`
+2. **Update skill**: If discovering new patterns, update `skills/network-diagnosis.md`
+3. **Update aliases**: If using new device aliases, update `knowledge/aliases.md`
+4. **Record tags**: For later retrieval
 
-## 相关技能
-- `quick-query.md` - 简单查询
-- `deep-analysis.md` - 深度分析(使用macro/micro子代理)
-- `device-inspection.md` - 设备巡检
+## Related Skills
+- `quick-query.md` - Simple queries
+- `deep-analysis.md` - Deep analysis (using macro/micro subagents)
+- `device-inspection.md` - Device inspection

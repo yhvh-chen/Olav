@@ -1,103 +1,103 @@
-# 网络命名约定 (Network Conventions)
+# Network Naming Conventions
 
-本文档定义了网络设备的命名规范、IP规划、VLAN分配等约定，帮助Agent理解网络结构。
+This document defines naming standards for network devices, IP planning, VLAN allocation, etc., to help Agent understand network structure.
 
-## 设备命名规范
+## Device Naming Standards
 
-### 交换机命名
-- `CS-<城市>-<编号>`: 核心交换机 (Core Switch)
-  - 示例: CS-SH-01, CS-BJ-01
-- `DS-<城市>-<楼层>-<编号>`: 汇聚交换机 (Distribution Switch)
-  - 示例: DS-SH-1F-01, DS-BJ-2F-01
-- `AS-<城市>-<楼层>-<编号>`: 接入交换机 (Access Switch)
-  - 示例: AS-SH-1F-01, AS-BJ-3F-01
+### Switch Naming
+- `CS-<city>-<number>`: Core Switch
+  - Example: CS-SH-01, CS-BJ-01
+- `DS-<city>-<floor>-<number>`: Distribution Switch
+  - Example: DS-SH-1F-01, DS-BJ-2F-01
+- `AS-<city>-<floor>-<number>`: Access Switch
+  - Example: AS-SH-1F-01, AS-BJ-3F-01
 
-### 路由器命名
-- `R-<城市>-<编号>`: 路由器
-  - 示例: R-SH-01, R-BJ-01
-- `Edge-<城市>-<编号>`: 边缘路由器
-  - 示例: Edge-SH-01
+### Router Naming
+- `R-<city>-<number>`: Router
+  - Example: R-SH-01, R-BJ-01
+- `Edge-<city>-<number>`: Edge Router
+  - Example: Edge-SH-01
 
-### 防火墙命名
-- `FW-<位置>-<编号>`: 防火墙
-  - 示例: FW-DMZ-01, FW-EDGE-01
+### Firewall Naming
+- `FW-<location>-<number>`: Firewall
+  - Example: FW-DMZ-01, FW-EDGE-01
 
-## IP 地址规划
+## IP Address Planning
 
-### 管理网段
-| 用途 | 网段 | 网关 | 说明 |
-|------|------|------|------|
-| 设备管理 | 10.255.0.0/24 | 10.255.0.1 | 所有设备管理IP |
-| OOB管理 | 192.168.100.0/24 | 192.168.100.1 | 带外管理 |
+### Management Subnet
+| Purpose | Subnet | Gateway | Description |
+|---------|--------|---------|-------------|
+| Device Management | 10.255.0.0/24 | 10.255.0.1 | All device management IPs |
+| OOB Management | 192.168.100.0/24 | 192.168.100.1 | Out-of-band management |
 
-### 业务网段
-| 位置 | 网段 | 用途 |
-|------|------|------|
-| 总部 | 10.1.0.0/16 | 总部办公和生产 |
-| 上海分部 | 10.2.0.0/16 | 上海分部 |
-| 北京分部 | 10.3.0.0/16 | 北京分部 |
-| 数据中心 | 10.10.0.0/16 | 数据中心服务器 |
+### Business Subnet
+| Location | Subnet | Purpose |
+|----------|--------|---------|
+| Headquarters | 10.1.0.0/16 | Headquarters office and production |
+| Shanghai Branch | 10.2.0.0/16 | Shanghai branch |
+| Beijing Branch | 10.3.0.0/16 | Beijing branch |
+| Data Center | 10.10.0.0/16 | Data center servers |
 
-### 互联网段
-| 类型 | 网段 | 说明 |
-|------|------|------|
-| 核心互联 | 10.254.0.0/24 | 核心设备互联 |
-| 汇聚互联 | 10.254.1.0/24 | 汇聚设备互联 |
-| 接入互联 | 10.254.2.0/24 | 接入上行 |
+### Interconnect Subnet
+| Type | Subnet | Description |
+|------|--------|-------------|
+| Core Interconnect | 10.254.0.0/24 | Core device interconnect |
+| Distribution Interconnect | 10.254.1.0/24 | Distribution device interconnect |
+| Access Uplink | 10.254.2.0/24 | Access uplink |
 
-## VLAN 规划
+## VLAN Planning
 
-| VLAN范围 | 用途 | 说明 |
-|----------|------|------|
-| 1 | 管理 | 设备管理VLAN |
-| 2-99 | 保留 | 保留VLAN |
-| 100-199 | 办公区 | 办公网络 |
-| 200-299 | 生产区 | 生产网络 |
-| 300-399 | DMZ | DMZ区域 |
-| 400-499 | 访客 | 访客网络 |
-| 500-599 | IoT | 物联网设备 |
-| 900-999 | 互联 | 设备互联VLAN |
+| VLAN Range | Purpose | Description |
+|------------|---------|-------------|
+| 1 | Management | Device management VLAN |
+| 2-99 | Reserved | Reserved VLANs |
+| 100-199 | Office | Office networks |
+| 200-299 | Production | Production networks |
+| 300-399 | DMZ | DMZ area |
+| 400-499 | Guest | Guest networks |
+| 500-599 | IoT | IoT devices |
+| 900-999 | Interconnect | Device interconnect VLANs |
 
-### 常用VLAN
-| VLAN | 名称 | 用途 |
-|------|------|------|
-| 1 | Management | 设备管理 |
-| 100 | Office-Default | 办公网默认 |
-| 101 | Office-Finance | 财务部 |
-| 102 | Office-Engineering | 工程部 |
-| 200 | Production-App | 应用服务器 |
-| 201 | Production-DB | 数据库服务器 |
-| 300 | DMZ-Public | DMZ公开区 |
-| 301 | DMZ-Private | DMZ私密区 |
+### Common VLANs
+| VLAN | Name | Purpose |
+|------|------|---------|
+| 1 | Management | Device management |
+| 100 | Office-Default | Office network default |
+| 101 | Office-Finance | Finance department |
+| 102 | Office-Engineering | Engineering department |
+| 200 | Production-App | Application servers |
+| 201 | Production-DB | Database servers |
+| 300 | DMZ-Public | DMZ public area |
+| 301 | DMZ-Private | DMZ private area |
 
-## 接口命名约定
+## Interface Naming Convention
 
-### 以太网接口
+### Ethernet Interfaces
 - `GigabitEthernet0/0/1`: Gi0/0/1
 - `TenGigabitEthernet0/1/1`: Te0/1/1
 - `FortyGigE0/2/1`: Fo0/2/1
 
-### 逻辑接口
+### Logical Interfaces
 - `Loopback0`: Lo0
 - `Vlan10`: Vlan10
 - `Port-channel1`: Po1
 
-### 专线接口
+### Dedicated Line Interfaces
 - `Serial0/0/0:0`: S0/0/0:0
 - `POS0/1/0`: POS0/1/0
 
-## 路由协议约定
+## Routing Protocol Convention
 
 ### OSPF
-- 进程ID: 1
-- Area 0: 骨干区域
-- Area 1-10: 普通区域
-- Router ID: 使用Loopback0地址
+- Process ID: 1
+- Area 0: Backbone area
+- Area 1-10: Normal areas
+- Router ID: Use Loopback0 address
 
 ### BGP
-- AS号: 65000 (总部), 65001 (上海), 65002 (北京)
-- Router ID: 使用Loopback0地址
-- Peer组: internal-peers, external-peers
+- AS Number: 65000 (Headquarters), 65001 (Shanghai), 65002 (Beijing)
+- Router ID: Use Loopback0 address
+- Peer Groups: internal-peers, external-peers
 
 ## 安全约定
 

@@ -2,47 +2,47 @@
 id: device-inspection
 intent: inspect
 complexity: medium
-description: "设备系统健康检查，按模板生成结构化报告"
+description: "Device system health check, generate structured reports according to template"
 examples:
-  - "巡检R1的系统状态"
-  - "设备健康检查报告"
-  - "上线前设备检查"
+  - "Inspect R1 system status"
+  - "Device health check report"
+  - "Pre-deployment device check"
 enabled: true
 ---
 
-# Device Inspection (设备巡检)
+# Device Inspection
 
-## 适用场景
-- 定期健康检查
-- 上线前检查
-- 故障后复查
-- 变更前后对比
+## Applicable Scenarios
+- Regular health checks
+- Pre-deployment checks
+- Post-fault verification
+- Change before/after comparison
 
-## 识别标志
-用户问题包含: "巡检"、"检查"、"健康检查"、"baseline"
+## Identification Signals
+User questions contain: "inspect", "check", "health check", "baseline"
 
-## 执行策略
-1. **使用 write_todos 列出检查项**
-2. 按模板逐项执行
-3. 生成结构化报告
-4. 标记异常项
+## Execution Strategy
+1. **Use write_todos to list check items**
+2. Execute step by step according to template
+3. Generate structured report
+4. Mark anomalies
 
-## 巡检模板
+## Inspection Template
 
-### 基础信息
-- [ ] `show version` (运行时间、版本、型号)
-- [ ] `show inventory` (硬件信息、模块)
-- [ ] `show license` (许可证状态)
+### Basic Information
+- [ ] `show version` (uptime, version, model)
+- [ ] `show inventory` (hardware info, modules)
+- [ ] `show license` (license status)
 
-### 系统健康
-- [ ] `show processes cpu history` (CPU 趋势)
-- [ ] `show memory statistics` (内存使用)
-- [ ] `show environment all` (温度、电源、风扇)
+### System Health
+- [ ] `show processes cpu history` (CPU trend)
+- [ ] `show memory statistics` (memory usage)
+- [ ] `show environment all` (temperature, power, fans)
 
-### 接口状态
-- [ ] `show interfaces summary` (端口状态汇总)
-- [ ] `show interfaces counters errors` (错误计数)
-- [ ] `show interfaces status` (详细状态)
+### Interface Status
+- [ ] `show interfaces summary` (port status summary)
+- [ ] `show interfaces counters errors` (error counts)
+- [ ] `show interfaces status` (detailed status)
 
 ### 路由状态
 - [ ] `show ip route summary` (路由汇总)

@@ -1,103 +1,103 @@
-# 案例: OSPF 邻居震荡导致路由不稳定
+# Case: OSPF Neighbor Flapping Causing Route Instability
 
-> **创建时间**: 2026-01-07
-> **故障类型**: 路由协议故障
-> **影响范围**: 网络部分区域路由可达性问题
+> **Created**: 2026-01-07
+> **Fault Type**: Routing Protocol Fault
+> **Impact Scope**: Network area routing reachability issue
 
-## 问题描述
+## Problem Description
 
-网络监控系统发现某区域OSPF邻居关系反复建立和断开,导致路由表频繁变化,部分业务时断时续。
-- **症状**: OSPF邻居状态在 Full <-> Init 之间反复切换
-- **影响**: 路由表震荡,流量路径频繁切换
-- **持续时间**: 4小时
+Network monitoring detected OSPF neighbors repeatedly establishing and breaking, causing routing table changes, some services intermittent.
+- **Symptoms**: OSPF neighbor state repeatedly switching between Full <-> Init
+- **Impact**: Route table flapping, traffic paths frequently changing
+- **Duration**: 4 hours
 
-## 排查过程
+## Troubleshooting Process
 
-### 1. 初步诊断 (宏观分析)
+### 1. Initial Diagnosis (Macro Analysis)
 ```bash
-# 检查OSPF邻居状态
+# Check OSPF neighbor status
 show ip ospf neighbor
 
-# 发现:
+# Finding:
 # Neighbor ID: 10.2.1.1
-# State: FULL (30秒前) -> INIT (当前) -> FULL (反复)
-# Dead time: 不稳定
+# State: FULL (30 seconds ago) -> INIT (current) -> FULL (repeating)
+# Dead time: unstable
 
-# 检查OSPF接口状态
+# Check OSPF interface status
 show ip ospf interface brief
-# 发现: GigabitEthernet0/1 状态频繁变化
+# Finding: GigabitEthernet0/1 state frequently changing
 ```
 
-**结论**: OSPF邻居关系不稳定,需要进一步排查
+**Conclusion**: OSPF neighbor relationship unstable, requires further investigation
 
-### 2. 检查网络层连通性 (微观分析)
+### 2. Check Network Layer Connectivity (Micro Analysis)
 ```bash
-# 测试三层连通性
+# Test layer 3 connectivity
 ping 10.2.1.1 -c 100
-# 结果: 丢包率 2%, 偶尔超时
+# Result: 2% packet loss, occasional timeouts
 
-# 检查接口状态
+# Check interface status
 show interfaces GigabitEthernet0/1
-# 发现: 接口状态稳定, up/up
+# Finding: Interface status stable, up/up
 
-# 检查MTU设置
+# Check MTU settings
 show interfaces GigabitEthernet0/1 | include MTU
-# 发现: MTU 1500 (正常)
+# Finding: MTU 1500 (normal)
 ```
 
-**初步判断**: 物理层正常,问题可能在OSPF配置或网络层
+**Initial Assessment**: Physical layer normal, issue may be in OSPF config or layer 3
 
-### 3. 深度检查OSPF配置
+### 3. Deep OSPF Configuration Check
 ```bash
-# 检查OSPF配置
+# Check OSPF configuration
 show running-config | section router ospf
 
-# 发现问题:
+# Finding problems:
 # interface GigabitEthernet0/1
 #  ip ospf hello-interval 5
 #  ip ospf dead-interval 20
 
-# 检查对端配置 (通过登录对端设备)
-# interface对端
-#  ip ospf hello-interval 10  # 不匹配!
-#  ip ospf dead-interval 40   # 不匹配!
+# Check remote side configuration (by logging into remote device)
+# interface remote side
+#  ip ospf hello-interval 10  # Mismatch!
+#  ip ospf dead-interval 40   # Mismatch!
 ```
 
-**根因定位**: OSPF Hello/Dead timer 不匹配
+**Root Cause Located**: OSPF Hello/Dead timer mismatch
 
-### 4. 验证根因
+### 4. Verify Root Cause
 ```bash
-# 查看OSPF日志
+# Check OSPF logs
 show logging | include OSPF
-# 发现:
+# Finding:
 # %OSPF-5-ADJCHG: Process 1, Nbr 10.2.1.1 on GigabitEthernet0/1 from FULL to INIT
-# (反复出现)
+# (repeating)
 
-# 实时监控OSPF事件
+# Real-time monitor OSPF events
 debug ip ospf adj
-# 观察: Hello timer不匹配导致邻居无法保持FULL状态
+# Observation: Hello timer mismatch prevents neighbors from maintaining FULL state
 ```
 
-## 根因
+## Root Cause
 
-**OSPF Hello/Dead interval 配置不一致**
+**OSPF Hello/Dead Interval Configuration Mismatch**
 
-- **本端**: Hello 5s, Dead 20s
-- **对端**: Hello 10s, Dead 40s
-- **OSPF要求**: 同一网段内所有路由器的OSPF timer必须一致
+- **Local**: Hello 5s, Dead 20s
+- **Remote**: Hello 10s, Dead 40s
+- **OSPF Requirement**: All routers on same segment must have identical OSPF timers
 
-**影响**: 邻居无法保持稳定关系,反复进入INIT->FULL->INIT循环
+**Impact**: Neighbors cannot maintain stable relationship, repeatedly cycle Init->Full->Init
 
-## 解决方案
+## Solution
 
-### 立即修复 (推荐在维护窗口)
+### Immediate Fix (Recommended during maintenance window)
 ```bash
-# 方案1: 统一为标准值 (推荐)
+# Option 1: Standardize to standard values (recommended)
 interface GigabitEthernet0/1
  ip ospf hello-interval 10
  ip ospf dead-interval 40
 
-# 方案2: 统一为快速收敛值 (适用于特殊场景)
+# Option 2: Standardize to fast convergence values (for special cases)
 interface GigabitEthernet0/1
  ip ospf hello-interval 5
  ip ospf dead-interval 20

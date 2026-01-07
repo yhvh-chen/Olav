@@ -1,0 +1,18 @@
+{
+  "diagnosis": {
+    "requireApprovalForMicroAnalysis": true,
+    "autoApproveIfConfidenceBelow": 0.5
+  },
+  "execution": {
+    "useTextFSM": true,
+    "textFSMFallbackToRaw": true,
+    "enableTokenStatistics": true
+  },
+  "learning": {
+    "autoSaveSolutions": false,
+    "autoLearnAliases": false
+  },
+  "subagents": {
+    "enabled": true
+  }
+}

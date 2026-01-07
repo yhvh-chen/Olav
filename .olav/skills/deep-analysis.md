@@ -2,196 +2,196 @@
 id: deep-analysis
 intent: diagnose
 complexity: complex
-description: "复杂故障分析，需要多步诊断和子任务分解"
+description: "Complex fault analysis requiring multi-step diagnostics and subtask decomposition"
 examples:
-  - "网络故障完整根因分析"
-  - "跨域连通性问题排查"
-  - "端到端路径分析"
+  - "Complete root cause analysis of network failures"
+  - "Cross-domain connectivity troubleshooting"
+  - "End-to-end path analysis"
 enabled: true
 ---
 
-# Deep Analysis (深度分析)
+# Deep Analysis
 
-## 适用场景
-- 网络故障排查
-- 性能问题分析
-- 路径追踪
-- 根因定位
+## Applicable Scenarios
+- Network fault troubleshooting
+- Performance problem analysis
+- Path tracing
+- Root cause identification
 
-## 识别标志
-用户问题包含: "为什么"、"排查"、"分析"、"故障"、"不通"、"无法访问"、"慢"
+## Identification Signals
+User questions contain: "why", "troubleshoot", "analyze", "fault", "not working", "cannot access", "slow"
 
-## 执行策略
-1. **使用 write_todos 分解问题**
-2. 判断问题类型，选择分析方向
-3. 委派给合适的 Subagent
-4. 综合分析，给出结论和建议
+## Execution Strategy
+1. **Use write_todos to decompose problems**
+2. Identify problem type and choose analysis direction
+3. Delegate to appropriate Subagent
+4. Synthesize analysis and provide conclusions and recommendations
 
-## Subagent 委派策略 (Phase 3)
+## Subagent Delegation Strategy (Phase 3)
 
-### 如何使用 Subagent
+### How to Use Subagents
 
-OLAV 现在支持专业的 Subagent 来处理复杂分析任务。使用 `task` 工具委派任务:
+OLAV now supports specialized Subagents for complex analysis tasks. Use the `task` tool to delegate:
 
 ```
 task(subagent_type="macro-analyzer", task_description="...")
 task(subagent_type="micro-analyzer", task_description="...")
 ```
 
-### macro-analyzer (宏观分析子代理)
+### macro-analyzer (Macro Analysis Agent)
 
-**何时使用**:
-- "哪个节点出了问题"
-- "路径上哪里丢包"
-- "影响范围有多大"
-- 需要查看拓扑关系
-- 端到端连通性问题
-- 多设备故障
-- 路由路径分析
-- BGP/OSPF 邻居问题
+**When to Use**:
+- "Which node is the problem"
+- "Where is packet loss on the path"
+- "How large is the fault scope"
+- Need to view topology relationships
+- End-to-end connectivity issues
+- Multi-device failures
+- Routing path analysis
+- BGP/OSPF neighbor problems
 
-**委派方式**:
+**Delegation Method**:
 ```
 task(subagent_type="macro-analyzer",
-     task_description="分析从R1到R3的路径,定位哪个节点导致丢包。请:
-     1. 执行traceroute追踪路径
-     2. 检查BGP/OSPF邻居状态
-     3. 确定故障域和影响范围
-     返回: 故障节点位置、影响范围描述")
+     task_description="Analyze the path from R1 to R3, locate which node causes packet loss. Please:
+     1. Execute traceroute to trace the path
+     2. Check BGP/OSPF neighbor status
+     3. Determine fault domain and impact scope
+     Return: Fault node location, impact scope description")
 ```
 
-**子代理能力**:
-- 网络拓扑分析 (LLDP/CDP/BGP)
-- 数据路径追踪 (traceroute, 路由表)
-- 端到端连通性检查
-- 故障域识别
+**Subagent Capabilities**:
+- Network topology analysis (LLDP/CDP/BGP)
+- Data path tracing (traceroute, routing table)
+- End-to-end connectivity checks
+- Fault domain identification
 
-### micro-analyzer (微观分析子代理)
+### micro-analyzer (Micro Analysis Agent)
 
-**何时使用**:
-- "为什么这个端口不通"
-- "接口有错误"
-- 需要逐层排查具体设备
-- 单端口故障
-- 接口错误计数高
-- VLAN 问题
-- ARP/MAC 问题
+**When to Use**:
+- "Why is this port not working"
+- "Interface has errors"
+- Need to troubleshoot specific device layer-by-layer
+- Single port failure
+- High interface error counts
+- VLAN issues
+- ARP/MAC problems
 
-**委派方式**:
+**Delegation Method**:
 ```
 task(subagent_type="micro-analyzer",
-     task_description="对R1的Gi0/1接口进行TCP/IP逐层排查:
-     1. 物理层: 检查接口状态、CRC错误、光功率
-     2. 数据链路层: 检查VLAN、MAC表、STP
-     3. 网络层: 检查IP配置、路由、ARP
-     逐层分析并返回每层的检查结果")
+     task_description="Perform TCP/IP layer-by-layer troubleshooting for R1's Gi0/1:
+     1. Physical layer: Check interface status, CRC errors, optical power
+     2. Data link layer: Check VLAN, MAC table, STP
+     3. Network layer: Check IP configuration, routing, ARP
+     Analyze layer by layer and return results for each layer")
 ```
 
-**子代理能力**:
-- TCP/IP 分层排错 (从物理层到应用层)
-- 具体设备深度诊断
-- 接口级问题定位
-- 配置检查和验证
+**Subagent Capabilities**:
+- TCP/IP layer-by-layer troubleshooting (physical to application layer)
+- Deep device diagnostics
+- Interface-level problem identification
+- Configuration checks and validation
 
-### 组合使用策略 (推荐)
+### Combined Usage Strategy (Recommended)
 
-**两阶段分析法**:
-1. **阶段1: 委派 macro-analyzer**
-   - 目标: 确定故障域
-   - 输出: 问题设备/接口列表
+**Two-Stage Analysis Method**:
+1. **Stage 1: Delegate macro-analyzer**
+   - Goal: Determine fault domain
+   - Output: Problem device/interface list
 
-2. **阶段2: 委派 micro-analyzer**
-   - 目标: 定位具体根因
-   - 输出: 逐层检查结果
+2. **Stage 2: Delegate micro-analyzer**
+   - Goal: Locate specific root cause
+   - Output: Layer-by-layer check results
 
-**示例**:
+**Example**:
 ```
-# 用户: "R1到R3的网络很慢"
+# User: "R1 to R3 network is slow"
 
-# Agent 响应:
-# 1. 先用宏观分析定位问题
-task("macro-analyzer", "检查R1-R3路径,找出慢的节点")
+# Agent Response:
+# 1. Use macro analysis to locate problem
+task("macro-analyzer", "Check R1-R3 path, find which node is slow")
 
-# 2. 根据宏观分析结果,用微观分析深入
-task("micro-analyzer", "对[R2]进行TCP/IP逐层排查,找出网络慢的原因")
+# 2. Based on macro analysis, use micro analysis to dig deeper
+task("micro-analyzer", "Perform TCP/IP layer-by-layer troubleshooting on [R2], find why network is slow")
 
-# 3. 综合两个子代理的结果,生成报告
+# 3. Synthesize subagent results and generate report
 ```
 
-## TCP/IP 逐层排错框架 (微观)
+## TCP/IP Layer-by-Layer Troubleshooting Framework (Micro)
 
-### 1. 物理层
-**症状**: 完全无法通信，链路down
-**检查**:
+### 1. Physical Layer
+**Symptoms**: Complete communication failure, link down
+**Check**:
 ```bash
-show interfaces status          # 端口状态
-show interfaces transceiver     # 光模块信息
-show interfaces counters errors # 错误计数
+show interfaces status          # Port status
+show interfaces transceiver     # Optical module info
+show interfaces counters errors # Error counts
 ```
-**常见问题**: 光模块故障、光衰过大、线缆损坏、CRC错误
+**Common Issues**: Optical module failure, high optical power loss, cable damage, CRC errors
 
-### 2. 数据链路层
-**症状**: 链路up但无法ping通
-**检查**:
+### 2. Data Link Layer
+**Symptoms**: Link up but cannot ping
+**Check**:
 ```bash
-show vlan brief                 # VLAN状态
-show mac address-table          # MAC表
-show spanning-tree              # STP状态
-show lldp neighbors             # 邻居发现
+show vlan brief                 # VLAN status
+show mac address-table          # MAC table
+show spanning-tree              # STP status
+show lldp neighbors             # Neighbor discovery
 ```
-**常见问题**: VLAN不匹配、STP阻塞、MAC表未学习
+**Common Issues**: VLAN mismatch, STP blocked, MAC not learned
 
-### 3. 网络层
-**症状**: 无法跨网段通信
-**检查**:
+### 3. Network Layer
+**Symptoms**: Cannot communicate across subnets
+**Check**:
 ```bash
-show ip interface brief         # IP状态
-show ip route                   # 路由表
-show arp                        # ARP表
-show ip ospf neighbor           # OSPF邻居
-show ip bgp summary             # BGP邻居
+show ip interface brief         # IP status
+show ip route                   # Routing table
+show arp                        # ARP table
+show ip ospf neighbor           # OSPF neighbors
+show ip bgp summary             # BGP neighbors
 ```
-**常见问题**: 路由缺失、ARP未解析、路由协议未建立
+**Common Issues**: Missing route, ARP unresolved, routing protocol not established
 
-### 4. 传输层
-**症状**: 部分应用不通
-**检查**:
+### 4. Transport Layer
+**Symptoms**: Some applications not working
+**Check**:
 ```bash
-show access-lists               # ACL规则
-show ip nat translations        # NAT表
-show control-plane              # CoPP配置
+show access-lists               # ACL rules
+show ip nat translations        # NAT table
+show control-plane              # CoPP configuration
 ```
-**常见问题**: ACL阻断、NAT配置错误、端口过滤
+**Common Issues**: ACL blocking, NAT misconfiguration, port filtering
 
-### 5. 应用层
-**症状**: 特定应用故障
-**检查**:
+### 5. Application Layer
+**Symptoms**: Specific application failure
+**Check**:
 ```bash
-show ip dns server              # DNS配置
-show running-config | include service # 应用服务
+show ip dns server              # DNS configuration
+show running-config | include service # Application services
 ```
-**常见问题**: DNS解析失败、服务未启用
+**Common Issues**: DNS resolution failure, service not enabled
 
-## 典型故障场景
+## Typical Fault Scenarios
 
-### 场景1: 网络慢
-1. macro-analyzer: traceroute 定位慢的节点
-2. micro-analyzer: 检查该节点接口错误、CPU、队列
+### Scenario 1: Slow Network
+1. macro-analyzer: traceroute to locate slow node
+2. micro-analyzer: Check node interface errors, CPU, queues
 
-### 场景2: 无法访问服务器
-1. macro-analyzer: 检查端到端路径
-2. micro-analyzer: 从服务器开始逐层向源排查
+### Scenario 2: Cannot Access Server
+1. macro-analyzer: Check end-to-end path
+2. micro-analyzer: Start from server and troubleshoot toward source
 
-### 场景3: 路由震荡
-1. macro-analyzer: 检查所有BGP/OSPF邻居
-2. micro-analyzer: 检查问题邻居的接口、路由配置
+### Scenario 3: Route Flapping
+1. macro-analyzer: Check all BGP/OSPF neighbors
+2. micro-analyzer: Check problem neighbor's interface and route configuration
 
-### 场景4: 广播风暴
-1. macro-analyzer: 确定风暴范围
-2. micro-analyzer: 找到环路端口，检查STP
+### Scenario 4: Broadcast Storm
+1. macro-analyzer: Determine storm scope
+2. micro-analyzer: Find loop port, check STP
 
-## 输出格式
-使用结构化报告:
+## Output Format
+Use structured report:
 ```
 ## 故障分析报告
 

@@ -1,103 +1,103 @@
-# 案例: BGP 邻居建立失败 - ASN 配置错误
+# Case: BGP Neighbor Establishment Failure - ASN Configuration Error
 
-> **创建时间**: 2026-01-07
-> **故障类型**: 路由协议故障
-> **影响范围**: 外部网络连接中断
+> **Created**: 2026-01-07
+> **Fault Type**: Routing Protocol Fault
+> **Impact Scope**: External network connectivity interrupted
 
-## 问题描述
+## Problem Description
 
-新上线站点与运营商BGP连接无法建立,导致外部路由无法学习,该站点与外部网络通信中断。
-- **症状**: BGP邻居状态持续停留在 Idle/Connect
-- **影响**: 无法与运营商交换路由,外部业务中断
-- **持续时间**: 新站点上线后持续存在
+New site's BGP connection with ISP failed to establish, preventing external route learning, resulting in communication interruption between the site and external network.
+- **Symptoms**: BGP neighbor state remains in Idle/Connect
+- **Impact**: Cannot exchange routes with ISP, external business interrupted
+- **Duration**: Continuous since site deployment
 
-## 排查过程
+## Troubleshooting Process
 
-### 1. 初步诊断 (宏观分析)
+### 1. Initial Diagnosis (Macro Analysis)
 ```bash
-# 检查BGP邻居状态
+# Check BGP neighbor status
 show ip bgp summary
 
-# 发现:
+# Finding:
 # Neighbor        V    AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
 # 203.0.113.2     4   65001      0       3        0    0    0 never    Idle
 #
-# 状态: Idle (从未达到 Established)
+# Status: Idle (never reached Established)
 
-# 检查BGP配置
+# Check BGP configuration
 show running-config | section router bgp
 
-# 配置:
+# Configuration:
 # router bgp 65002
 #  neighbor 203.0.113.2 remote-as 65001
 #  neighbor 203.0.113.2 description ISP-Primary
 ```
 
-**初步分析**: BGP配置存在,但邻居无法建立
+**Initial Analysis**: BGP configured but neighbor cannot establish
 
-### 2. 检查网络层连通性
+### 2. Check Network Layer Connectivity
 ```bash
-# 测试三层连通性
+# Test layer 3 connectivity
 ping 203.0.113.2 -c 10
-# 结果: 100% 可达,延迟正常
+# Result: 100% reachable, normal latency
 
-# 测试TCP端口179 (BGP端口)
+# Test TCP port 179 (BGP port)
 telnet 203.0.113.2 179
-# 结果: Trying 203.0.113.2... Connected
-# 端口可达,BGP未建立说明配置问题
+# Result: Trying 203.0.113.2... Connected
+# Port reachable, BGP not established suggests config issue
 ```
 
-**判断**: 网络层正常,问题在BGP配置
+**Assessment**: Network layer normal, problem is in BGP configuration
 
-### 3. 检查BGP详细配置
+### 3. Check BGP Detailed Configuration
 ```bash
-# 检查本端BGP配置
+# Check local BGP configuration
 show ip bgp neighbors 203.0.113.2
 
-# 关键信息:
+# Key Info:
 # BGP state = Idle
 # BGP version = 4, remote router ID 0.0.0.0
 #  Last read 00:00:00, Last write 00:00:00
 #  Hold time is 180, keepalive interval is 60 seconds
 
-# 检查BGP日志
+# Check BGP logs
 show logging | include BGP
-# 发现:
+# Finding:
 # %BGP-3-NOTIFICATION: received from neighbor 203.0.113.2
 #  (Bad Peer AS)
 ```
 
-**根因线索**: "Bad Peer AS" - 对端拒绝了我的AS号
+**Root Cause Clue**: "Bad Peer AS" - remote rejected my AS number
 
-### 4. 验证ASN配置
+### 4. Verify ASN Configuration
 ```bash
-# 与运营商确认正确的ASN
-# 运营商告知: 客户端应使用 ASN 65003,不是 65002
+# Confirm correct ASN with ISP
+# ISP informed: Customer should use ASN 65003, not 65002
 
-# 检查合同文档
-# 发现: 运营商分配的ASN确实是 65003
+# Check contract documents
+# Finding: ISP indeed assigned ASN 65003
 
-# 根因确认: 本端ASN配置错误!
+# Root cause confirmed: Local BGP ASN misconfigured!
 ```
 
-## 根因
+## Root Cause
 
-**本端BGP ASN配置错误**
+**Local BGP ASN Configuration Error**
 
-- **错误配置**: `router bgp 65002`
-- **正确配置**: `router bgp 65003`
-- **原因**: 运营商分配的ASN是 65003,但配置时误用了旧的ASN 65002
+- **Incorrect Configuration**: `router bgp 65002`
+- **Correct Configuration**: `router bgp 65003`
+- **Reason**: ISP assigned ASN 65003, but configured with old ASN 65002
 
-**影响**: 对端运营商收到错误ASN的BGP OPEN消息,拒绝建立连接,返回"Bad Peer AS"错误
+**Impact**: ISP receives wrong ASN in BGP OPEN message, refuses connection, returns "Bad Peer AS" error
 
-## 解决方案
+## Solution
 
-### 立即修复
+### Immediate Fix
 ```bash
-# 1. 进入配置模式
+# 1. Enter configuration mode
 configure terminal
 
-# 2. 删除错误的BGP配置
+# 2. Delete incorrect BGP configuration
 no router bgp 65002
 
 # 3. 重新配置正确的BGP

@@ -1,102 +1,102 @@
-# 案例: CRC 错误导致网络抖动
+# Case: CRC Errors Causing Network Jitter
 
-> **创建时间**: 2026-01-07
-> **故障类型**: 物理层故障
-> **影响范围**: 单链路性能下降
+> **Created**: 2026-01-07
+> **Fault Type**: Physical Layer Fault
+> **Impact Scope**: Single link performance degradation
 
-## 问题描述
+## Problem Description
 
-用户反映某条专线网络时断时续,ping 测试丢包严重,业务访问不稳定。
-- **症状**: 间歇性丢包,带宽利用率低
-- **影响**: 关键业务无法正常使用
-- **持续时间**: 2天
+Users reported intermittent network issues on a dedicated line, serious packet loss in ping tests, unstable business access.
+- **Symptoms**: Intermittent packet loss, large bandwidth latency jitter
+- **Impact**: Critical business cannot function normally
+- **Duration**: 2 days
 
-## 排查过程
+## Troubleshooting Process
 
-### 1. 初步诊断 (宏观分析)
+### 1. Initial Diagnosis (Macro Analysis)
 ```bash
-# 检查端到端路径
+# Check end-to-end path
 ping 10.2.1.1 -c 100
-# 结果: 丢包率 15%, 延迟抖动大
+# Result: 15% packet loss, large latency jitter
 
-# traceroute 定位问题节点
+# Traceroute to locate problem node
 traceroute 10.2.1.1
-# 结果: 第2跳（出口路由器）后开始丢包
+# Result: Packet loss begins after second hop (exit router)
 ```
 
-**结论**: 问题定位在出口路由器到运营商之间
+**Conclusion**: Problem located between exit router and ISP
 
-### 2. 接口检查 (微观分析 - 物理层)
+### 2. Interface Check (Micro Analysis - Physical Layer)
 ```bash
-# 检查接口状态
+# Check interface status
 show interfaces GigabitEthernet0/0/1
 
-# 关键发现:
+# Key Findings:
 # - Interface is up, line protocol is up
-# - CRC errors: 12,345 (持续增长中)
+# - CRC errors: 12,345 (continuously increasing)
 # - Input errors: 12,350
 # - Runts: 0, Giants: 0
 
-# 检查光模块信息
+# Check optical module information
 show interfaces transceiver detail Gi0/0/1
 
-# 关键发现:
-# - RX power: -18.5 dBm (偏低,正常范围 -3 to -15 dBm)
-# - TX power: -2.1 dBm (正常)
-# - Temperature: 42°C (正常)
+# Key Findings:
+# - RX power: -18.5 dBm (low, normal range -3 to -15 dBm)
+# - TX power: -2.1 dBm (normal)
+# - Temperature: 42°C (normal)
 ```
 
-**根因定位**: 接收光功率过低,导致CRC错误增长
+**Root Cause Located**: Receive optical power too low, causing CRC error increase
 
-### 3. 进一步验证
+### 3. Further Verification
 ```bash
-# 检查错误增长趋势
+# Check error growth trend
 show interfaces counters Gi0/0/1 | include CRC
-# 30秒后再次检查
+# Check again 30 seconds later
 show interfaces counters Gi0/0/1 | include CRC
-# CRC增长 +10 (持续增长)
+# CRC increased +10 (continuous growth)
 
-# 检查光模块型号
+# Check optical module model
 show inventory
-# 发现: 光模块使用3年,接近寿命极限
+# Finding: Optical module used 3 years, near end-of-life
 ```
 
-## 根因
+## Root Cause
 
-**光模块老化,接收灵敏度下降,导致CRC错误增长**
+**Optical Module Aging, Receive Sensitivity Degradation, Causing CRC Error Increase**
 
-- **物理原因**: 光模块激光器老化,发射功率稳定但接收灵敏度下降
-- **环境因素**: 可能存在光链路污损或连接器氧化
-- **影响链路**: GigabitEthernet0/0/1 (出口专线)
+- **Physical Reason**: Optical module laser aging, stable TX power but decreased RX sensitivity
+- **Environmental Factor**: Possible fiber link contamination or connector oxidation
+- **Affected Link**: GigabitEthernet0/0/1 (exit dedicated line)
 
-## 解决方案
+## Solution
 
-### 立即措施
+### Immediate Measures
 ```bash
-# 1. 临时: 降低接口速率至1G (如果当前是10G)
+# 1. Temporary: Reduce interface speed to 1G (if currently 10G)
 interface GigabitEthernet0/0/1
  speed 1000
  negotiation auto
 
-# 2. 或者: 启用前向纠错 (如果光模块支持)
+# 2. Or: Enable forward error correction (if optical module supports)
 interface GigabitEthernet0/0/1
  fec mode rs
 ```
 
-### 永久修复
-1. **更换光模块** (优先级: 高)
-   - 型号: SFP-10G-LR (匹配链路距离)
-   - 品牌: 原厂或认证第三方
-   - 预期: 恢复正常接收功率 (-3 to -15 dBm)
+### Permanent Fix
+1. **Replace Optical Module** (Priority: High)
+   - Model: SFP-10G-LR (match link distance)
+   - Brand: OEM or certified third-party
+   - Expected: Restore normal RX power (-3 to -15 dBm)
 
-2. **检查光纤链路** (同步进行)
-   - 清洁光纤连接器
-   - 检查光衰是否在正常范围
-   - 测试光纤完整性
+2. **Check Fiber Link** (Simultaneously)
+   - Clean fiber connectors
+   - Check if optical loss is in normal range
+   - Test fiber integrity
 
-3. **监控验证** (更换后)
+3. **Monitor Verification** (After replacement)
    ```bash
-   # 持续监控24小时
+   # Continuous monitoring for 24 hours
    show interfaces counters Gi0/0/1 | include CRC
    # CRC错误应不再增长
 
