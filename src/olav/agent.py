@@ -14,6 +14,7 @@ from config.settings import settings
 from olav.core.llm import LLMFactory
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.network import list_devices, nornir_execute, get_device_platform
+from olav.tools.smart_query import smart_query, batch_query
 from olav.tools.loader import reload_capabilities
 
 
@@ -51,53 +52,49 @@ def create_olav_agent(
     if olav_md_path.exists():
         system_prompt = olav_md_path.read_text(encoding="utf-8")
     else:
-        system_prompt = """# OLAV - Network AI Operations Assistant
+        # P1: Optimized compact system prompt (~500 tokens vs ~3000)
+        system_prompt = """# OLAV - Network AI Assistant
 
-You are OLAV, an AI assistant for network operations. You help users:
-- Query network device status
-- Analyze network issues
-- Perform device inspections
-- Execute commands safely (with approval for write operations)
+You are OLAV, an AI for network operations. Execute queries efficiently.
 
-## Core Principles
-1. **Safety First**: Only execute whitelisted commands
-2. **Understand Before Acting**: Use write_todos for complex tasks
-3. **Learn and Adapt**: Record new knowledge and solutions
+## Primary Tools (USE THESE FIRST)
+- `smart_query(device, intent)` - Query a device. Auto-selects best command.
+  Examples: smart_query("R1", "interface"), smart_query("SW1", "mac")
+- `batch_query(devices, intent)` - Query multiple devices. Use "all" for all devices.
+  Examples: batch_query("R1,R2", "bgp"), batch_query("all", "version")
+- `list_devices()` - Show all available devices
 
-## Your Tools
-- `get_device_platform`: Get the platform (OS type) of a device - USE THIS FIRST
-- `search_capabilities`: Find available commands/APIs for a platform
-- `nornir_execute`: Execute commands on network devices
-- `list_devices`: List available devices (when platform is unknown)
-- `api_call`: Call external APIs (NetBox, Zabbix, etc)
-- File tools: read/write skills and knowledge files
+## Secondary Tools (Only if needed)
+- `search_capabilities(query, platform)` - Find specific commands
+- `nornir_execute(device, command)` - Run a specific command
+- `api_call(system, method, endpoint)` - Call external APIs
 
-## Recommended Query Flow (IMPORTANT)
-1. **Identify Device**: Use `list_devices` or accept device name from user
-2. **Get Platform**: Call `get_device_platform(device_name)` to get OS type (cisco_ios, huawei_vrp, etc)
-3. **Search Commands**: Call `search_capabilities(query, type="command", platform=<platform_from_step2>)` 
-4. **Execute**: Call `nornir_execute(device, command)` with the matched command
+## Quick Reference
+| Intent | Example Query | Auto Command |
+|--------|--------------|--------------|
+| interface | smart_query("R1", "interface") | show ip interface brief |
+| bgp | smart_query("R1", "bgp") | show ip bgp summary |
+| ospf | smart_query("R1", "ospf") | show ip ospf neighbor |
+| route | smart_query("R1", "route") | show ip route |
+| mac | smart_query("SW1", "mac") | show mac address-table |
+| vlan | smart_query("SW1", "vlan") | show vlan brief |
+| version | smart_query("R1", "version") | show version |
 
-## Safety Rules
-- Read-only commands (show, display, get): Execute automatically (whitelist approved)
-- Write commands (configure, write): Blacklisted to prevent execution
-- Dangerous commands (reload, erase): Completely blacklisted
-- Filesystem operations: Always require user approval
-
-## Knowledge Access
-On startup, read:
-- `.olav/skills/*.md` - How to perform different tasks
-- `.olav/knowledge/aliases.md` - Device name mappings
-- `.olav/knowledge/conventions.md` - Network conventions
+## Rules
+- All commands are pre-approved (whitelist). Execute directly.
+- Dangerous commands are blocked (blacklist). 
+- For file writes, ask for approval.
 """
 
-    # Define tools
+    # Define tools - smart_query and batch_query are primary (P0 optimization)
+    # Secondary tools kept for edge cases
     tools: list[BaseTool] = [
-        nornir_execute,
-        get_device_platform,
-        list_devices,
-        search_capabilities,
-        api_call,
+        smart_query,      # P0: Primary tool - combines platform detection + command selection + execution
+        batch_query,      # P0: Batch queries across multiple devices
+        list_devices,     # Secondary: List available devices
+        search_capabilities,  # Secondary: Manual command search
+        nornir_execute,   # Secondary: Direct command execution
+        api_call,         # Secondary: API calls
     ]
 
     # Configure HITL - interrupt only on filesystem operations
@@ -106,6 +103,8 @@ On startup, read:
     # 2. Blacklist of dangerous patterns (reload, erase, rewrite, etc)
     # All read-only operations proceed automatically. HITL interrupts disabled here.
     interrupt_on = {
+        "smart_query": False,   # Safe: uses whitelist internally
+        "batch_query": False,   # Safe: uses whitelist internally
         "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
         "api_call": False,  # Safe: API validation in tool layer
         "write_file": True,  # Filesystem operations require approval
