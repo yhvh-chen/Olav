@@ -6,7 +6,7 @@
   },
   "llm": {
     "provider": "openai",
-    "model": "gpt-4-turbo",
+    "model": "x-ai/grok-4.1-fast",
     "temperature": 0.1,
     "max_tokens": 4096
   },

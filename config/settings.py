@@ -1,11 +1,18 @@
 """
 OLAV v0.8 Configuration Settings
 
+Three-layer configuration architecture (per DESIGN_V0.8.md §11.6):
+- Layer 1: .env (sensitive + connection) - human-maintained, never commit to git
+- Layer 2: .olav/settings.json (behavior + preferences) - user-editable, agent-readable
+- Layer 3: This file (loader + defaults) - code implementation
+
 Uses Pydantic Settings to load configuration from:
-1. Environment variables (.env file)
-2. Default values defined in this file
+1. Environment variables (.env file) - Layer 1
+2. .olav/settings.json - Layer 2
+3. Default values defined in this file - Layer 3
 """
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -48,7 +55,13 @@ if not os.getenv('OLAV_MODE'):
 # =============================================================================
 
 class Settings(BaseSettings):
-    """OLAV Configuration Settings"""
+    """OLAV Configuration Settings
+    
+    Supports three-layer configuration:
+    - Environment variables (highest priority)
+    - .olav/settings.json (Layer 2)
+    - Default values (lowest priority)
+    """
 
     model_config = SettingsConfigDict(
         # Don't use env_file since load_dotenv is called at module level
@@ -124,6 +137,19 @@ class Settings(BaseSettings):
     
     # Network relevance guard - filters out non-network queries
     guard_enabled: bool = True
+    
+    # =========================================================================
+    # Skill Routing Configuration (from .olav/settings.json)
+    # =========================================================================
+    routing_confidence_threshold: float = 0.6
+    routing_fallback_skill: str = "quick-query"
+    
+    # =========================================================================
+    # Diagnosis Configuration (from .olav/settings.json)
+    # =========================================================================
+    diagnosis_macro_max_confidence: float = 0.7
+    diagnosis_micro_target_confidence: float = 0.9
+    diagnosis_max_iterations: int = 5
 
     # =========================================================================
     # Security & Authentication
@@ -133,6 +159,11 @@ class Settings(BaseSettings):
     session_token_max_age_hours: int = 168
     olav_api_token: str = ""
     log_format: Literal["json", "text"] = "text"
+    
+    # HITL Configuration
+    hitl_require_approval_for_write: bool = True
+    hitl_require_approval_for_skill_update: bool = True
+    hitl_approval_timeout_seconds: int = 300
 
     # =========================================================================
     # Optional Services (Removed in v0.8)
@@ -154,6 +185,78 @@ class Settings(BaseSettings):
     # =========================================================================
     # postgres_uri validator removed - not needed in v0.8
     # All database operations use DuckDB via duckdb_path
+    
+    def __init__(self, **kwargs):
+        """Initialize settings and apply .olav/settings.json overrides."""
+        super().__init__(**kwargs)
+        self._apply_olav_settings()
+    
+    def _apply_olav_settings(self) -> None:
+        """Layer 2: Load and apply settings from .olav/settings.json."""
+        settings_path = OLAV_DIR / "settings.json"
+        if not settings_path.exists():
+            return
+        
+        try:
+            olav_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            
+            # Map JSON paths to Python attributes
+            mapping = {
+                # LLM settings
+                ("llm", "provider"): "llm_provider",
+                ("llm", "model"): "llm_model_name",
+                ("llm", "temperature"): "llm_temperature",
+                ("llm", "max_tokens"): "llm_max_tokens",
+                # Guard settings
+                ("guard", "enabled"): "guard_enabled",
+                # Routing settings  
+                ("routing", "confidenceThreshold"): "routing_confidence_threshold",
+                ("routing", "fallbackSkill"): "routing_fallback_skill",
+                # Diagnosis settings
+                ("diagnosis", "macroMaxConfidence"): "diagnosis_macro_max_confidence",
+                ("diagnosis", "microTargetConfidence"): "diagnosis_micro_target_confidence",
+                ("diagnosis", "maxDiagnosisIterations"): "diagnosis_max_iterations",
+                # HITL settings
+                ("hitl", "requireApprovalForWrite"): "hitl_require_approval_for_write",
+                ("hitl", "requireApprovalForSkillUpdate"): "hitl_require_approval_for_skill_update",
+                ("hitl", "approvalTimeoutSeconds"): "hitl_approval_timeout_seconds",
+                # Logging
+                ("logging", "level"): "log_level",
+            }
+            
+            # Get environment variable names for checking if explicitly set
+            env_var_map = {
+                "llm_provider": "LLM_PROVIDER",
+                "llm_model_name": "LLM_MODEL_NAME",
+                "llm_temperature": "LLM_TEMPERATURE",
+                "llm_max_tokens": "LLM_MAX_TOKENS",
+                "guard_enabled": "GUARD_ENABLED",
+                "log_level": "LOG_LEVEL",
+            }
+            
+            for json_path, attr_name in mapping.items():
+                value = self._get_nested(olav_settings, json_path)
+                if value is not None:
+                    # Only override if NOT already set by environment variable
+                    # Environment variables take priority over settings.json
+                    env_var = env_var_map.get(attr_name)
+                    if env_var and os.getenv(env_var):
+                        # Environment variable is set, skip settings.json override
+                        continue
+                    setattr(self, attr_name, value)
+                    
+        except (json.JSONDecodeError, OSError) as e:
+            # Silently ignore invalid settings.json - use defaults
+            pass
+    
+    def _get_nested(self, d: dict, path: tuple) -> any:
+        """Get nested value from dict using tuple path like ('llm', 'model')."""
+        for key in path:
+            if isinstance(d, dict) and key in d:
+                d = d[key]
+            else:
+                return None
+        return d
 
 
 # =============================================================================

@@ -27,36 +27,96 @@ enabled: true
 3. 委派给合适的 Subagent
 4. 综合分析，给出结论和建议
 
-## Subagent 选择
+## Subagent 委派策略 (Phase 3)
 
-### macro-analyzer (宏观分析)
-适用于:
+### 如何使用 Subagent
+
+OLAV 现在支持专业的 Subagent 来处理复杂分析任务。使用 `task` 工具委派任务:
+
+```
+task(subagent_type="macro-analyzer", task_description="...")
+task(subagent_type="micro-analyzer", task_description="...")
+```
+
+### macro-analyzer (宏观分析子代理)
+
+**何时使用**:
 - "哪个节点出了问题"
 - "路径上哪里丢包"
 - "影响范围有多大"
 - 需要查看拓扑关系
-
-**使用场景**:
 - 端到端连通性问题
 - 多设备故障
 - 路由路径分析
 - BGP/OSPF 邻居问题
 
-### micro-analyzer (微观分析)
-适用于:
+**委派方式**:
+```
+task(subagent_type="macro-analyzer",
+     task_description="分析从R1到R3的路径,定位哪个节点导致丢包。请:
+     1. 执行traceroute追踪路径
+     2. 检查BGP/OSPF邻居状态
+     3. 确定故障域和影响范围
+     返回: 故障节点位置、影响范围描述")
+```
+
+**子代理能力**:
+- 网络拓扑分析 (LLDP/CDP/BGP)
+- 数据路径追踪 (traceroute, 路由表)
+- 端到端连通性检查
+- 故障域识别
+
+### micro-analyzer (微观分析子代理)
+
+**何时使用**:
 - "为什么这个端口不通"
 - "接口有错误"
 - 需要逐层排查具体设备
-
-**使用场景**:
 - 单端口故障
 - 接口错误计数高
 - VLAN 问题
 - ARP/MAC 问题
 
-### 组合使用
-1. 先用 **macro-analyzer** 确定故障域
-2. 再用 **micro-analyzer** 定位具体原因
+**委派方式**:
+```
+task(subagent_type="micro-analyzer",
+     task_description="对R1的Gi0/1接口进行TCP/IP逐层排查:
+     1. 物理层: 检查接口状态、CRC错误、光功率
+     2. 数据链路层: 检查VLAN、MAC表、STP
+     3. 网络层: 检查IP配置、路由、ARP
+     逐层分析并返回每层的检查结果")
+```
+
+**子代理能力**:
+- TCP/IP 分层排错 (从物理层到应用层)
+- 具体设备深度诊断
+- 接口级问题定位
+- 配置检查和验证
+
+### 组合使用策略 (推荐)
+
+**两阶段分析法**:
+1. **阶段1: 委派 macro-analyzer**
+   - 目标: 确定故障域
+   - 输出: 问题设备/接口列表
+
+2. **阶段2: 委派 micro-analyzer**
+   - 目标: 定位具体根因
+   - 输出: 逐层检查结果
+
+**示例**:
+```
+# 用户: "R1到R3的网络很慢"
+
+# Agent 响应:
+# 1. 先用宏观分析定位问题
+task("macro-analyzer", "检查R1-R3路径,找出慢的节点")
+
+# 2. 根据宏观分析结果,用微观分析深入
+task("micro-analyzer", "对[R2]进行TCP/IP逐层排查,找出网络慢的原因")
+
+# 3. 综合两个子代理的结果,生成报告
+```
 
 ## TCP/IP 逐层排错框架 (微观)
 

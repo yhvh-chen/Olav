@@ -5,25 +5,30 @@ middleware, and system prompts.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from deepagents import create_deep_agent
 from langchain_core.tools import BaseTool
 
 from olav.core.llm import LLMFactory
 from olav.core.skill_loader import get_skill_loader
+from olav.core.subagent_manager import format_subagent_descriptions, get_subagent_middleware
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.loader import reload_capabilities
 from olav.tools.network import list_devices, nornir_execute
 from olav.tools.smart_query import batch_query, smart_query
 
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+
 
 def create_olav_agent(
     model: str | None = None,
-    checkpointer: Any | None = None,
+    checkpointer: object | None = None,
     debug: bool = False,
     enable_skill_routing: bool = True,
-) -> Any:
+    enable_subagents: bool = True,
+) -> "CompiledStateGraph":
     """Create the OLAV DeepAgent.
 
     This function creates and configures the main OLAV agent with:
@@ -32,12 +37,14 @@ def create_olav_agent(
     - Filesystem access (for Skills/Knowledge management)
     - HITL approval for write operations
     - Skill routing (optional, default enabled)
+    - Subagent delegation (optional, default enabled for Phase 3)
 
     Args:
         model: Model name or instance (defaults to configured LLM)
         checkpointer: Optional checkpointer for state persistence
         debug: Enable debug mode
         enable_skill_routing: Enable skill-based routing (default True)
+        enable_subagents: Enable subagent delegation (default True)
 
     Returns:
         Compiled DeepAgent ready to use
@@ -85,7 +92,7 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
 
 ## Rules
 - All commands are pre-approved (whitelist). Execute directly.
-- Dangerous commands are blocked (blacklist). 
+- Dangerous commands are blocked (blacklist).
 - For file writes, ask for approval.
 """
 
@@ -101,10 +108,16 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     else:
         system_prompt = base_prompt
 
+    # Inject subagent descriptions if enabled (Phase 3)
+    if enable_subagents:
+        subagent_desc = format_subagent_descriptions()
+        system_prompt = f"{system_prompt}\n\n{subagent_desc}"
+
     # Define tools - smart_query and batch_query are primary (P0 optimization)
     # Secondary tools kept for edge cases
     tools: list[BaseTool] = [
-        smart_query,  # P0: Primary tool - combines platform detection + command selection + execution
+        # P0: Primary tool - combines platform detection + command selection + execution
+        smart_query,
         batch_query,  # P0: Batch queries across multiple devices
         list_devices,  # Secondary: List available devices
         search_capabilities,  # Secondary: Manual command search
@@ -137,10 +150,16 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         name="olav",
     )
 
+    # Add subagent middleware if enabled (Phase 3)
+    if enable_subagents:
+        # Note: SubAgentMiddleware is created but the "task" tool registration
+        # is handled internally by DeepAgents framework
+        _ = get_subagent_middleware(tools=tools, default_model=llm)
+
     return agent
 
 
-def initialize_olav() -> Any:
+def initialize_olav() -> "CompiledStateGraph":
     """Initialize OLAV agent and reload capabilities.
 
     This is the main entry point for OLAV. It:
@@ -183,69 +202,13 @@ def create_subagent(
     return {
         "name": name,
         "description": description,
-        "prompt": system_prompt,
+        "system_prompt": system_prompt,  # DeepAgents expects 'system_prompt' not 'prompt'
         "tools": tools or [],
     }
 
 
-def get_macro_analyzer() -> dict[str, Any]:
-    """Get the macro-analyzer subagent configuration.
-
-    This subagent analyzes network topology, paths, and end-to-end connectivity.
-
-    Returns:
-        Subagent configuration
-    """
-    return create_subagent(
-        name="macro-analyzer",
-        description="Macro analysis: topology, paths, end-to-end connectivity",
-        system_prompt="""You are a network macro-analysis expert.
-
-Your responsibilities:
-1. Analyze network topology (LLDP/CDP/BGP neighbors)
-2. Trace data paths (traceroute, routing tables)
-3. Check end-to-end connectivity
-4. Identify failure domains (which area/device has issues)
-
-Working method: Start from a global view, progressively narrow down the scope.
-
-Available tools:
-- nornir_execute: Execute commands on network devices
-- list_devices: List available devices
-- search_capabilities: Find available commands
-""",
-        tools=[nornir_execute, list_devices, search_capabilities],
-    )
-
-
-def get_micro_analyzer() -> dict[str, Any]:
-    """Get the micro-analyzer subagent configuration.
-
-    This subagent performs TCP/IP layer-by-layer troubleshooting.
-
-    Returns:
-        Subagent configuration
-    """
-    return create_subagent(
-        name="micro-analyzer",
-        description="Micro analysis: TCP/IP layer-by-layer troubleshooting",
-        system_prompt="""You are a network micro-analysis expert, troubleshooting by TCP/IP layers.
-
-Troubleshooting order (bottom-up):
-1. **Physical Layer**: Port status, optical power, CRC errors
-2. **Data Link Layer**: VLAN, MAC table, STP state
-3. **Network Layer**: IP addresses, routing table, ARP
-4. **Transport Layer**: ACLs, NAT, port filtering
-5. **Application Layer**: DNS, service reachability
-
-Working method: Start from the physical layer, work upward layer by layer.
-
-Available tools:
-- nornir_execute: Execute commands on network devices
-- search_capabilities: Find available commands
-""",
-        tools=[nornir_execute, search_capabilities],
-    )
+# Re-export from subagent_configs for backward compatibility
+from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer  # noqa: E402, F401
 
 
 def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
