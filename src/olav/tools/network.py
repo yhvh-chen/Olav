@@ -99,14 +99,16 @@ class NetworkExecutor:
             Platform string (e.g., "cisco_ios") or None
         """
         try:
-            nr = InitNornir(config=str(self.nornir_config))
+            nr = InitNornir(config_file=str(self.nornir_config.resolve()))
             host = nr.inventory.hosts.get(device)
 
             if host and host.platform:
                 return host.platform
 
             return None
-        except Exception:
+        except Exception as e:
+            import sys
+            print(f"Debug: Failed to detect platform for {device}: {e}", file=sys.stderr)
             return None
 
     def execute(
@@ -310,9 +312,11 @@ def list_devices(
         - R2 (10.1.1.2) - cisco_ios"
     """
     try:
+        from pathlib import Path as PathlibPath
         from nornir import InitNornir
 
-        nr = InitNornir(config=".olav/config/nornir/config.yaml")
+        config_path = PathlibPath(".olav/config/nornir/config.yaml").resolve()
+        nr = InitNornir(config_file=str(config_path))
 
         # Apply filters
         if role:
@@ -337,4 +341,5 @@ def list_devices(
         return "Available devices:\n" + "\n".join(devices)
 
     except Exception as e:
-        return f"Error listing devices: {e}"
+        import traceback
+        return f"Error listing devices: {e}\n\nTraceback:\n{traceback.format_exc()}"

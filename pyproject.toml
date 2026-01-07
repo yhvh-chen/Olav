@@ -43,6 +43,9 @@ dependencies = [
     "deepagents",
 ]
 
+[project.scripts]
+olav = "olav.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",

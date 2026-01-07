@@ -1,57 +1,56 @@
 # Nornir Inventory - Device List
 # Example hosts - update with your actual devices
 
-hosts:
-  R1:
-    hostname: 192.168.100.101
-    platform: cisco_ios
-    groups:
-      - border
-    data:
-      role: border
-      site: lab
+R1:
+  hostname: 192.168.100.101
+  platform: cisco_ios
+  groups:
+    - border
+  data:
+    role: border
+    site: lab
 
-  R2:
-    hostname: 192.168.100.102
-    platform: cisco_ios
-    groups:
-      - border
-    data:
-      role: border
-      site: lab
+R2:
+  hostname: 192.168.100.102
+  platform: cisco_ios
+  groups:
+    - border
+  data:
+    role: border
+    site: lab
 
-  R3:
-    hostname: 192.168.100.103
-    platform: cisco_ios
-    groups:
-      - core
-    data:
-      role: core
-      site: lab
+R3:
+  hostname: 192.168.100.103
+  platform: cisco_ios
+  groups:
+    - core
+  data:
+    role: core
+    site: lab
 
-  R4:
-    hostname: 192.168.100.104
-    platform: cisco_ios
-    groups:
-      - core
-    data:
-      role: core
-      site: lab
+R4:
+  hostname: 192.168.100.104
+  platform: cisco_ios
+  groups:
+    - core
+  data:
+    role: core
+    site: lab
 
-  SW1:
-    hostname: 192.168.100.105
-    platform: cisco_ios
-    groups:
-      - access
-    data:
-      role: access
-      site: lab
+SW1:
+  hostname: 192.168.100.105
+  platform: cisco_ios
+  groups:
+    - access
+  data:
+    role: access
+    site: lab
 
-  SW2:
-    hostname: 192.168.100.106
-    platform: cisco_ios
-    groups:
-      - access
-    data:
-      role: access
-      site: lab
+SW2:
+  hostname: 192.168.100.106
+  platform: cisco_ios
+  groups:
+    - access
+  data:
+    role: access
+    site: lab
