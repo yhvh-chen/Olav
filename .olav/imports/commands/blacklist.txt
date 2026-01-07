@@ -1,0 +1,9 @@
+# CLI 命令黑名单
+
+# 危险命令 - 禁止执行
+reload
+reboot
+shutdown
+delete
+erase
+format

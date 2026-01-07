@@ -1,9 +1,0 @@
-{
-  "$schema": "https://langchain-ai.github.io/langgraph/reference/cli/#configuration-file",
-  "python_version": "3.11",
-  "dependencies": ["."],
-  "graphs": {
-    "orchestrator": "./src/olav/studio.py:graph"
-  },
-  "env": ".env"
-}

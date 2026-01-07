@@ -1,1 +1,1 @@
-"""Core abstractions and utilities for OLAV."""
+"""Core module"""

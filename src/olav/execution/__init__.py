@@ -1,1 +1,1 @@
-"""Execution backends and sandbox implementations."""
+"""Execution module"""
