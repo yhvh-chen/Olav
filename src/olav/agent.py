@@ -7,17 +7,15 @@ middleware, and system prompts.
 from pathlib import Path
 from typing import Any
 
-from deepagents import FilesystemMiddleware, create_deep_agent
+from deepagents import create_deep_agent
 from langchain_core.tools import BaseTool
 
-from config.settings import settings
 from olav.core.llm import LLMFactory
 from olav.core.skill_loader import get_skill_loader
-from olav.core.skill_router import create_skill_router
 from olav.tools.capabilities import api_call, search_capabilities
-from olav.tools.network import list_devices, nornir_execute, get_device_platform
-from olav.tools.smart_query import smart_query, batch_query
 from olav.tools.loader import reload_capabilities
+from olav.tools.network import list_devices, nornir_execute
+from olav.tools.smart_query import batch_query, smart_query
 
 
 def create_olav_agent(
@@ -106,12 +104,12 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     # Define tools - smart_query and batch_query are primary (P0 optimization)
     # Secondary tools kept for edge cases
     tools: list[BaseTool] = [
-        smart_query,      # P0: Primary tool - combines platform detection + command selection + execution
-        batch_query,      # P0: Batch queries across multiple devices
-        list_devices,     # Secondary: List available devices
+        smart_query,  # P0: Primary tool - combines platform detection + command selection + execution
+        batch_query,  # P0: Batch queries across multiple devices
+        list_devices,  # Secondary: List available devices
         search_capabilities,  # Secondary: Manual command search
-        nornir_execute,   # Secondary: Direct command execution
-        api_call,         # Secondary: API calls
+        nornir_execute,  # Secondary: Direct command execution
+        api_call,  # Secondary: API calls
     ]
 
     # Configure HITL - interrupt only on filesystem operations
@@ -120,8 +118,8 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     # 2. Blacklist of dangerous patterns (reload, erase, rewrite, etc)
     # All read-only operations proceed automatically. HITL interrupts disabled here.
     interrupt_on = {
-        "smart_query": False,   # Safe: uses whitelist internally
-        "batch_query": False,   # Safe: uses whitelist internally
+        "smart_query": False,  # Safe: uses whitelist internally
+        "batch_query": False,  # Safe: uses whitelist internally
         "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
         "api_call": False,  # Safe: API validation in tool layer
         "write_file": True,  # Filesystem operations require approval
@@ -263,6 +261,4 @@ def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
     for skill_id, skill in skills.items():
         skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {skill.description}")
 
-    return "When approaching tasks, consider these execution strategies:\n" + "\n".join(
-        skill_lines
-    )
+    return "When approaching tasks, consider these execution strategies:\n" + "\n".join(skill_lines)

@@ -10,6 +10,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from olav.cli import main

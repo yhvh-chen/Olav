@@ -1,33 +1,34 @@
 """Skill Loader - 从 Markdown frontmatter 加载和索引技能."""
 
-import re
-from pathlib import Path
-from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
 import yaml
 
 
 @dataclass
 class Skill:
     """技能数据结构."""
+
     id: str
     intent: str  # query | diagnose | inspect | config
     complexity: str  # simple | medium | complex
     description: str
-    examples: List[str]
+    examples: list[str]
     file_path: str
-    content: Optional[str] = None  # 延迟加载
+    content: str | None = None  # 延迟加载
 
 
 class SkillLoader:
     """技能加载器 - 解析frontmatter、生成索引、延迟加载内容."""
 
-    def __init__(self, skills_dir: Path):
+    def __init__(self, skills_dir: Path) -> None:
         self.skills_dir = Path(skills_dir)
-        self._index: Dict[str, Skill] = {}
-        self._content_cache: Dict[str, str] = {}
+        self._index: dict[str, Skill] = {}
+        self._content_cache: dict[str, str] = {}
 
-    def load_all(self) -> Dict[str, Skill]:
+    def load_all(self) -> dict[str, Skill]:
         """扫描并加载所有技能索引."""
         if self._index:
             return self._index
@@ -43,7 +44,7 @@ class SkillLoader:
 
         return self._index
 
-    def _parse_skill_header(self, file_path: Path) -> Optional[Skill]:
+    def _parse_skill_header(self, file_path: Path) -> Skill | None:
         """解析单个技能文件的 frontmatter (不加载完整内容)."""
         try:
             content = file_path.read_text(encoding="utf-8")
@@ -58,7 +59,7 @@ class SkillLoader:
                 return None
 
             # 检查 enabled 标志
-            if fm.get("enabled") == False:
+            if not fm.get("enabled"):
                 return None
 
             return Skill(
@@ -73,7 +74,7 @@ class SkillLoader:
             print(f"Error parsing skill {file_path}: {e}")
             return None
 
-    def _extract_frontmatter(self, content: str) -> Optional[Dict[str, Any]]:
+    def _extract_frontmatter(self, content: str) -> dict[str, Any] | None:
         """从 Markdown 内容中提取 YAML frontmatter."""
         if not content.startswith("---"):
             return None
@@ -89,7 +90,7 @@ class SkillLoader:
         except yaml.YAMLError:
             return None
 
-    def get_skill(self, skill_id: str) -> Optional[Skill]:
+    def get_skill(self, skill_id: str) -> Skill | None:
         """获取单个技能 (延迟加载内容)."""
         if not self._index:
             self.load_all()
@@ -108,14 +109,14 @@ class SkillLoader:
 
         return skill
 
-    def get_skills_by_intent(self, intent: str) -> List[Skill]:
+    def get_skills_by_intent(self, intent: str) -> list[Skill]:
         """按意图过滤技能."""
         if not self._index:
             self.load_all()
 
         return [s for s in self._index.values() if s.intent == intent]
 
-    def get_index_summary(self) -> Dict[str, Any]:
+    def get_index_summary(self) -> dict[str, Any]:
         """生成索引摘要 (用于LLM路由)."""
         if not self._index:
             self.load_all()
@@ -134,7 +135,7 @@ class SkillLoader:
         }
 
 
-def get_skill_loader(skills_dir: Optional[Path] = None) -> SkillLoader:
+def get_skill_loader(skills_dir: Path | None = None) -> SkillLoader:
     """获取全局 SkillLoader 实例 (单例)."""
     if not hasattr(get_skill_loader, "_instance"):
         if skills_dir is None:

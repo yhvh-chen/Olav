@@ -11,18 +11,21 @@ Agent 在执行命令前应查阅此文件，将用户使用的别名转换为�
 
 | 别名 | 实际值 | 类型 | 平台 | 备注 |
 |------|--------|------|------|------|
-| 核心交换机 | 10.1.1.1 | device | cisco_ios | 数据中心核心 |
-| CS1 | 10.1.1.1 | device | cisco_ios | Core Switch 1 |
-| CS2 | 10.1.1.2 | device | cisco_ios | Core Switch 2 |
-| 出口路由器 | 10.1.1.254 | device | cisco_ios | 互联网出口 |
-| R1 | 10.1.1.1 | device | cisco_ios | 上海核心路由器 |
-| R2 | 10.1.1.2 | device | cisco_ios | 北京核心路由器 |
-| 上海专线 | GigabitEthernet0/0/1 | interface | - | R1 上的专线接口 |
-| 北京专线 | GigabitEthernet0/0/1 | interface | - | R2 上的专线接口 |
-| 办公网 | VLAN 100 | vlan | - | 办公区域 |
-| 生产网 | VLAN 200 | vlan | - | 生产区域 |
-| DMZ | VLAN 300 | vlan | - | DMZ区域 |
-| 管理网 | VLAN 1 | vlan | - | 设备管理 |
+| 核心交换机 | sw1, sw2 | device | cisco_ios | 核心层交换机 |
+| SW1 | 192.168.100.105 | device | cisco_ios | Core Switch 1 |
+| SW2 | 192.168.100.106 | device | cisco_ios | Core Switch 2 |
+| 核心路由器 | r1, r2 | device | cisco_ios | 核心层路由器 |
+| R1 | 192.168.100.101 | device | cisco_ios | Area 1 Core Router |
+| R2 | 192.168.100.102 | device | cisco_ios | Area 1 Border Router |
+| R3 | 192.168.100.103 | device | cisco_ios | Core Router |
+| R4 | 192.168.100.104 | device | cisco_ios | Core Router |
+| 边界路由器 | r3, r4 | device | cisco_ios | 边界层路由器 |
+| 主链路 | ethernet0/0, ethernet0/1 | interface | - | 主要链路接口 |
+| 管理接口 | ethernet0/3 | interface | - | 管理网络接口 |
+| 环回接口 | loopback0 | interface | - | 环回地址接口 |
+| 办公网 | VLAN 10 | vlan | - | 办公区域 |
+| 生产网 | VLAN 20 | vlan | - | 生产区域 |
+| 访客网 | VLAN 30 | vlan | - | 访客区域 |
 
 ## 使用示例
 

@@ -80,8 +80,7 @@ Return JSON: {"is_relevant": true/false}"""
 
             is_relevant = result.get("is_relevant", True)
             logger.debug(
-                f"Network relevance check: query='{query[:50]}...', "
-                f"relevant={is_relevant}"
+                f"Network relevance check: query='{query[:50]}...', relevant={is_relevant}"
             )
 
             return RelevanceResult(

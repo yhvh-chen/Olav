@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from olav.core.database import OlavDatabase
 

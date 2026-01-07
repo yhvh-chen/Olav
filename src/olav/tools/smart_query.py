@@ -4,31 +4,30 @@ This module implements P0 optimization: combining multiple tool calls into one
 to reduce LLM decision cycles from 4-5 down to 1-2.
 
 Also implements P2: Command mapping cache to avoid repeated database lookups.
+Also implements P4: Nornir connection pool singleton.
+Also implements P5: Batch query parallelization using Nornir native parallel execution.
 """
 
 from functools import lru_cache
-from pathlib import Path
-from typing import Literal
 
 from langchain_core.tools import tool
-from nornir import InitNornir
 
-from config.settings import settings
 from olav.core.database import get_database
-
+from olav.tools.network import get_nornir
 
 # ============================================================================
 # P2: Command Mapping Cache
 # ============================================================================
 
+
 @lru_cache(maxsize=50)
 def get_cached_commands(platform: str, intent: str) -> list[str]:
     """Cache command lookups by platform and intent.
-    
+
     Args:
         platform: Device platform (e.g., "cisco_ios", "huawei_vrp")
         intent: Query intent keyword (e.g., "interface", "bgp", "ospf")
-    
+
     Returns:
         List of matching command names
     """
@@ -44,39 +43,39 @@ def get_cached_commands(platform: str, intent: str) -> list[str]:
 
 def get_best_command(platform: str, intent: str) -> str | None:
     """Get the best matching command for an intent.
-    
+
     Priority:
     1. Exact match with "brief" (more concise output)
     2. Exact keyword match
     3. First available command
-    
+
     Args:
         platform: Device platform
         intent: Query intent keyword
-    
+
     Returns:
         Best matching command or None
     """
     commands = get_cached_commands(platform, intent)
-    
+
     if not commands:
         return None
-    
+
     # Prefer "brief" commands for concise output
     for cmd in commands:
         if "brief" in cmd.lower():
             return cmd
-    
+
     # Prefer commands that start with "show" for Cisco
     for cmd in commands:
         if cmd.lower().startswith("show "):
             return cmd
-    
+
     # Prefer commands that start with "display" for Huawei
     for cmd in commands:
         if cmd.lower().startswith("display "):
             return cmd
-    
+
     # Return first available
     return commands[0] if commands else None
 
@@ -90,24 +89,24 @@ _device_cache: dict[str, dict] = {}
 
 def get_device_info(device_name: str) -> dict | None:
     """Get device information from Nornir inventory with caching.
-    
+
     Args:
         device_name: Device name (e.g., "R1", "SW1")
-    
+
     Returns:
         Dict with hostname, platform, role, site or None if not found
     """
     if device_name in _device_cache:
         return _device_cache[device_name]
-    
+
     try:
-        config_path = Path(".olav/config/nornir/config.yaml").resolve()
-        nr = InitNornir(config_file=str(config_path))
-        
+        # P4: Use singleton Nornir instance
+        nr = get_nornir()
+
         host = nr.inventory.hosts.get(device_name)
         if not host:
             return None
-        
+
         info = {
             "name": device_name,
             "hostname": host.hostname or device_name,
@@ -115,10 +114,10 @@ def get_device_info(device_name: str) -> dict | None:
             "role": host.get("role", "unknown"),
             "site": host.get("site", "unknown"),
         }
-        
+
         _device_cache[device_name] = info
         return info
-        
+
     except Exception:
         return None
 
@@ -126,6 +125,7 @@ def get_device_info(device_name: str) -> dict | None:
 # ============================================================================
 # P0: Smart Query Tool (Combines platform detection + command search + execution)
 # ============================================================================
+
 
 @tool
 def smart_query(
@@ -140,7 +140,8 @@ def smart_query(
     2. Finds the best matching command for your intent
     3. Executes the command and returns results
 
-    Use this instead of calling get_device_platform + search_capabilities + nornir_execute separately.
+    Use this instead of calling these separately:
+    get_device_platform, search_capabilities, nornir_execute.
 
     Args:
         device: Device name (e.g., "R1", "SW1", "core-router")
@@ -166,11 +167,14 @@ def smart_query(
     # Step 1: Get device info
     info = get_device_info(device)
     if not info:
-        return f"Error: Device '{device}' not found in inventory. Use list_devices to see available devices."
-    
+        return (
+            f"Error: Device '{device}' not found in inventory. "
+            f"Use list_devices to see available devices."
+        )
+
     platform = info["platform"]
     hostname = info["hostname"]
-    
+
     # Step 2: Determine command
     if command:
         selected_command = command
@@ -183,16 +187,17 @@ def smart_query(
                 selected_command = cached[0]
             else:
                 return (
-                    f"Error: No commands found for intent '{intent}' on platform '{platform}'.\n"
-                    f"Available intents: interface, bgp, ospf, route, vlan, mac, arp, version, config"
+                f"Error: No commands found for intent '{intent}' on platform "
+                f"'{platform}'.\nAvailable intents: interface, bgp, ospf, route, "
+                f"vlan, mac, arp, version, config"
                 )
-    
+
     # Step 3: Execute command
     from olav.tools.network import get_executor
-    
+
     executor = get_executor()
     result = executor.execute(device=device, command=selected_command)
-    
+
     # Step 4: Format output
     if result.success:
         return (
@@ -209,15 +214,15 @@ def smart_query(
         )
 
 
-@tool  
+@tool
 def batch_query(
     devices: str,
     intent: str,
 ) -> str:
     """Query multiple devices with the same intent.
 
-    Executes the same type of query across multiple devices in parallel.
-    Much faster than querying devices one by one.
+    P5 Optimization: Uses Nornir's native parallel execution for significant
+    speedup when querying multiple devices (up to 10x faster than sequential).
 
     Args:
         devices: Comma-separated device names (e.g., "R1,R2,R3" or "all")
@@ -230,65 +235,136 @@ def batch_query(
         >>> batch_query("R1,R2,R3", "bgp")
         "## Batch Query: bgp
         ### R1: [output]
-        ### R2: [output]  
+        ### R2: [output]
         ### R3: [output]"
 
         >>> batch_query("all", "version")
         "## Batch Query: version (6 devices)
         [output from all devices]"
     """
-    from olav.tools.network import list_devices as _list_devices
-    
+    from nornir_netmiko.tasks import netmiko_send_command
+
+    # Get singleton Nornir instance
+    nr = get_nornir()
+
     # Parse device list
     if devices.lower() == "all":
-        # Get all devices from inventory
-        try:
-            config_path = Path(".olav/config/nornir/config.yaml").resolve()
-            nr = InitNornir(config_file=str(config_path))
-            device_list = list(nr.inventory.hosts.keys())
-        except Exception as e:
-            return f"Error loading inventory: {e}"
+        device_list = list(nr.inventory.hosts.keys())
     else:
         device_list = [d.strip() for d in devices.split(",")]
-    
+
     if not device_list:
         return "Error: No devices specified"
-    
-    # Query each device
-    results = []
+
+    # Validate devices exist
+    valid_devices = []
+    invalid_devices = []
     for device in device_list:
-        # Use smart_query internally
+        if device in nr.inventory.hosts:
+            valid_devices.append(device)
+        else:
+            invalid_devices.append(device)
+
+    if not valid_devices:
+        return f"Error: No valid devices found. Invalid: {', '.join(invalid_devices)}"
+
+    # Determine command per platform (group devices by platform)
+    # Most common case: all same platform, use same command
+    platform_commands: dict[str, str] = {}
+    device_commands: dict[str, str] = {}
+
+    for device in valid_devices:
         info = get_device_info(device)
         if not info:
-            results.append(f"### {device}\n❌ Not found in inventory\n")
             continue
-        
         platform = info["platform"]
-        selected_command = get_best_command(platform, intent)
-        
-        if not selected_command:
-            results.append(f"### {device}\n❌ No command for intent '{intent}'\n")
-            continue
-        
-        from olav.tools.network import get_executor
-        executor = get_executor()
-        result = executor.execute(device=device, command=selected_command)
-        
-        if result.success:
-            # Truncate long output for batch
-            output = result.output or ""
-            if len(output) > 500:
-                output = output[:500] + "\n... (truncated)"
-            results.append(f"### {device} ({platform})\n```\n{output}\n```\n")
+
+        if platform not in platform_commands:
+            cmd = get_best_command(platform, intent)
+            platform_commands[platform] = cmd
+
+        device_commands[device] = platform_commands[platform]
+
+    # Check if we have a command for all devices
+    devices_without_cmd = [d for d in valid_devices if not device_commands.get(d)]
+    if devices_without_cmd:
+        return (
+            f"Error: No command for intent '{intent}' on devices: {', '.join(devices_without_cmd)}"
+        )
+
+    # P5: Use Nornir parallel execution
+    # Group devices by command to minimize task variations
+    command_devices: dict[str, list[str]] = {}
+    for device, cmd in device_commands.items():
+        if cmd not in command_devices:
+            command_devices[cmd] = []
+        command_devices[cmd].append(device)
+
+    # Execute in parallel per command group
+    all_results: dict[str, dict] = {}
+
+    for command, cmd_devices_list in command_devices.items():
+        # Filter Nornir to these devices
+        nr_filtered = nr.filter(filter_func=lambda h: h.name in cmd_devices_list)
+
+        # Execute command in parallel (Nornir handles threading)
+        agg_result = nr_filtered.run(
+            task=netmiko_send_command,
+            command_string=command,
+            read_timeout=30,
+        )
+
+        # Collect results
+        for device_name, result in agg_result.items():
+            if result.failed:
+                error_msg = str(result.exception) if result.exception else "Unknown error"
+                all_results[device_name] = {
+                    "success": False,
+                    "error": error_msg,
+                    "command": command,
+                }
+            else:
+                all_results[device_name] = {
+                    "success": True,
+                    "output": str(result.result),
+                    "command": command,
+                }
+
+    # Format output
+    results_formatted = []
+    for device in valid_devices:
+        info = get_device_info(device)
+        platform = info["platform"] if info else "unknown"
+
+        if device in all_results:
+            result = all_results[device]
+            if result["success"]:
+                output = result["output"]
+                # Truncate long output for batch display
+                if len(output) > 500:
+                    output = output[:500] + "\n... (truncated)"
+                results_formatted.append(f"### {device} ({platform})\n```\n{output}\n```\n")
+            else:
+                results_formatted.append(f"### {device}\n❌ Error: {result['error']}\n")
         else:
-            results.append(f"### {device}\n❌ Error: {result.error}\n")
-    
-    return f"## Batch Query: {intent} ({len(device_list)} devices)\n\n" + "\n".join(results)
+            results_formatted.append(f"### {device}\n❌ Not processed\n")
+
+    # Add invalid devices to output
+    for device in invalid_devices:
+        results_formatted.append(f"### {device}\n❌ Not found in inventory\n")
+
+    header = f"## Batch Query: {intent} ({len(valid_devices)} devices"
+    if invalid_devices:
+        header += f", {len(invalid_devices)} not found"
+    header += ")\n\n"
+
+    return header + "\n".join(results_formatted)
 
 
 # ============================================================================
 # Cache Management
 # ============================================================================
+
 
 def clear_command_cache() -> None:
     """Clear the command mapping cache."""

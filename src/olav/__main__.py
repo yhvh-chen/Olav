@@ -10,6 +10,7 @@ if str(project_root) not in sys.path:
 
 # Load environment first
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from olav.cli import main

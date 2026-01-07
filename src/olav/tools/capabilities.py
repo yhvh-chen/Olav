@@ -4,12 +4,10 @@ This module provides tools for searching capabilities (CLI commands and API endp
 and making API calls to external systems.
 """
 
-from collections.abc import Callable
 from typing import Any, Literal
 
 import httpx
 from langchain_core.tools import tool
-from pydantic import Field
 
 from olav.core.database import get_database
 

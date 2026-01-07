@@ -50,17 +50,14 @@ class LLMFactory:
             if json_mode:
                 config["format"] = "json"
             logger.debug(
-                f"Creating Ollama chat model: model={model_name}, "
-                f"base_url={config['base_url']}"
+                f"Creating Ollama chat model: model={model_name}, base_url={config['base_url']}"
             )
         elif provider == "openai":
             config["api_key"] = settings.llm_api_key
             if settings.llm_base_url:
                 config["base_url"] = settings.llm_base_url
             if json_mode:
-                config["model_kwargs"] = {
-                    "response_format": {"type": "json_object"}
-                }
+                config["model_kwargs"] = {"response_format": {"type": "json_object"}}
             logger.debug(f"Creating OpenAI chat model: {model_name}")
         elif provider == "azure":
             config["api_key"] = settings.llm_api_key

@@ -4,13 +4,12 @@ This module provides tools for executing commands on network devices using Norni
 Includes command whitelist enforcement and audit logging.
 """
 
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from langchain_core.tools import tool
 from nornir import InitNornir
+from nornir.core import Nornir
 from nornir.core.exceptions import NornirSubTaskError
 from nornir.core.task import AggregatedResult, Result
 from nornir_netmiko.tasks import netmiko_send_command
@@ -18,6 +17,52 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from olav.core.database import get_database
+
+# ============================================================================
+# P4: Nornir Connection Pool Singleton
+# ============================================================================
+
+_nornir_instance: Nornir | None = None
+
+
+def get_nornir(
+    config_file: str | Path = ".olav/config/nornir/config.yaml",
+) -> Nornir:
+    """Get the global Nornir instance (singleton pattern).
+
+    P4 Optimization: Reuse a single Nornir instance to avoid repeated
+    initialization overhead (~200-500ms per InitNornir call).
+
+    Args:
+        config_file: Path to Nornir configuration file
+
+    Returns:
+        Shared Nornir instance with credentials applied
+    """
+    global _nornir_instance
+
+    if _nornir_instance is None:
+        config_path = Path(config_file).resolve()
+        _nornir_instance = InitNornir(config_file=str(config_path))
+
+        # Apply credentials from settings to all hosts
+        username = getattr(settings, "device_username", None)
+        password = getattr(settings, "device_password", None)
+
+        if username or password:
+            for host in _nornir_instance.inventory.hosts.values():
+                if username:
+                    host.username = username
+                if password:
+                    host.password = password
+
+    return _nornir_instance
+
+
+def reset_nornir() -> None:
+    """Reset the Nornir singleton (for testing or reconnection)."""
+    global _nornir_instance
+    _nornir_instance = None
 
 
 class CommandExecutionResult(BaseModel):
@@ -40,7 +85,7 @@ class NetworkExecutor:
         blacklist_file: str | Path = ".olav/imports/commands/blacklist.txt",
         username: str | None = None,
         password: str | None = None,
-    ):
+    ) -> None:
         """Initialize executor.
 
         Args:
@@ -106,22 +151,18 @@ class NetworkExecutor:
             Platform string (e.g., "cisco_ios") or None
         """
         try:
-            nr = InitNornir(config_file=str(self.nornir_config.resolve()))
+            # P4: Use singleton Nornir instance
+            nr = get_nornir(str(self.nornir_config))
             host = nr.inventory.hosts.get(device)
 
             if host:
-                # Override credentials from .env
-                if self.username:
-                    host.username = self.username
-                if self.password:
-                    host.password = self.password
-                    
                 if host.platform:
                     return host.platform
 
             return None
         except Exception as e:
             import sys
+
             print(f"Debug: Failed to detect platform for {device}: {e}", file=sys.stderr)
             return None
 
@@ -170,14 +211,8 @@ class NetworkExecutor:
 
         # Execute command
         try:
-            nr = InitNornir(config_file=str(self.nornir_config.resolve()))
-
-            # Override credentials from .env for all hosts
-            for host in nr.inventory.hosts.values():
-                if self.username:
-                    host.username = self.username
-                if self.password:
-                    host.password = self.password
+            # P4: Use singleton Nornir instance
+            nr = get_nornir(str(self.nornir_config))
 
             # Filter to single device
             nr_filtered = nr.filter(name=device)
@@ -333,22 +368,20 @@ def list_devices(
         - R2 (10.1.1.2) - cisco_ios"
     """
     try:
-        from pathlib import Path as PathlibPath
-        from nornir import InitNornir
+        # P4: Use singleton Nornir instance
+        nr = get_nornir()
 
-        config_path = PathlibPath(".olav/config/nornir/config.yaml").resolve()
-        nr = InitNornir(config_file=str(config_path))
-
-        # Apply filters
+        # Apply filters (create filtered view)
+        nr_filtered = nr
         if role:
-            nr = nr.filter(role=role)
+            nr_filtered = nr_filtered.filter(role=role)
         if site:
-            nr = nr.filter(site=site)
+            nr_filtered = nr_filtered.filter(site=site)
         if platform:
-            nr = nr.filter(platform=platform)
+            nr_filtered = nr_filtered.filter(platform=platform)
 
         devices = []
-        for name, host in nr.inventory.hosts.items():
+        for name, host in nr_filtered.inventory.hosts.items():
             hostname = host.hostname or name
             host_platform = host.platform or "unknown"
             host_role = host.get("role", "unknown")
@@ -363,6 +396,7 @@ def list_devices(
 
     except Exception as e:
         import traceback
+
         return f"Error listing devices: {e}\n\nTraceback:\n{traceback.format_exc()}"
 
 
@@ -387,20 +421,8 @@ def get_device_platform(device: str) -> str:
         "Device SW1 platform: cisco_ios"
     """
     try:
-        from pathlib import Path as PathlibPath
-        from nornir import InitNornir
-
-        config_path = PathlibPath(".olav/config/nornir/config.yaml").resolve()
-        nr = InitNornir(config_file=str(config_path))
-
-        # Override credentials from .env
-        executor = get_executor()
-        for host in nr.inventory.hosts.values():
-            if executor.username:
-                host.username = executor.username
-            if executor.password:
-                host.password = executor.password
-
+        # P4: Use singleton Nornir instance
+        nr = get_nornir()
         host = nr.inventory.hosts.get(device)
 
         if not host:
@@ -411,4 +433,5 @@ def get_device_platform(device: str) -> str:
 
     except Exception as e:
         import traceback
+
         return f"Error getting device platform: {e}\n\nTraceback:\n{traceback.format_exc()}"

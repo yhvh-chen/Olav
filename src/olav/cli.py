@@ -6,7 +6,6 @@ Main CLI entry point using Typer for command-line interface.
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent.parent
@@ -37,7 +36,7 @@ def query(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
 ) -> None:
     """Execute a network operations query.
-    
+
     Examples:
         olav query "查看 R1 的接口状态"
         olav query "列出所有设备"
@@ -53,21 +52,21 @@ def query(
     try:
         # Create agent
         agent = create_olav_agent(debug=debug)
-        
+
         # Run agent query
         config = {"configurable": {"thread_id": "cli_query"}}
-        
+
         # Use asyncio to run the async invoke
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         response = loop.run_until_complete(
             agent.ainvoke(
                 {"messages": [{"role": "user", "content": query_text}]},
                 config=config,
             )
         )
-        
+
         # Extract and display response
         if "messages" in response:
             for msg in response["messages"]:
@@ -86,6 +85,7 @@ def query(
         console.print(f"[bold red]❌ Error: {str(e)}[/bold red]")
         if debug:
             import traceback
+
             traceback.print_exc()
         raise typer.Exit(1)
 
@@ -97,7 +97,7 @@ def devices() -> None:
 
     try:
         result = nornir_list_devices.invoke({})
-        
+
         console.print(
             Panel(
                 result,
@@ -153,7 +153,7 @@ def version() -> None:
 @app.command()
 def interactive() -> None:
     """Start interactive OLAV session.
-    
+
     Type your queries and OLAV will respond.
     Commands: 'help', 'config', 'devices', 'quit'
     """
@@ -217,7 +217,7 @@ def interactive() -> None:
                     for msg in response["messages"]:
                         if hasattr(msg, "content") and msg.content:
                             console.print(f"\n[bold green]OLAV:[/bold green] {msg.content}\n")
-                            
+
             except Exception as e:
                 console.print(f"[bold red]Error: {str(e)}[/bold red]")
 
