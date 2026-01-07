@@ -1,3 +1,15 @@
+---
+id: quick-query
+intent: query
+complexity: simple
+description: "简单状态查询，1-2条命令即可完成，无需分解任务"
+examples:
+  - "R1的接口状态"
+  - "查看R2 BGP邻居"
+  - "设备版本信息"
+enabled: true
+---
+
 # Quick Query (快速查询)
 
 ## 适用场景

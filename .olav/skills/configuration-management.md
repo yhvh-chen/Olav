@@ -1,3 +1,15 @@
+---
+id: configuration-management
+intent: config
+complexity: complex
+description: "设备配置管理和变更执行，需要HITL审批"
+examples:
+  - "修改VLAN配置"
+  - "更新BGP路由策略"
+  - "应用安全策略"
+enabled: true
+---
+
 # 配置管理技能
 
 ## 概述

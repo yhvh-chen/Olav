@@ -1,3 +1,15 @@
+---
+id: deep-analysis
+intent: diagnose
+complexity: complex
+description: "复杂故障分析，需要多步诊断和子任务分解"
+examples:
+  - "网络故障完整根因分析"
+  - "跨域连通性问题排查"
+  - "端到端路径分析"
+enabled: true
+---
+
 # Deep Analysis (深度分析)
 
 ## 适用场景

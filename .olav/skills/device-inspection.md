@@ -1,3 +1,15 @@
+---
+id: device-inspection
+intent: inspect
+complexity: medium
+description: "设备系统健康检查，按模板生成结构化报告"
+examples:
+  - "巡检R1的系统状态"
+  - "设备健康检查报告"
+  - "上线前设备检查"
+enabled: true
+---
+
 # Device Inspection (设备巡检)
 
 ## 适用场景

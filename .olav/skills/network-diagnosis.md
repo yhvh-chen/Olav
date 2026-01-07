@@ -1,3 +1,15 @@
+---
+id: network-diagnosis
+intent: diagnose
+complexity: medium
+description: "网络故障诊断和问题分析，收集信息后找出根因"
+examples:
+  - "为什么BGP邻居不通"
+  - "设备无法到达"
+  - "路由缺失问题排查"
+enabled: true
+---
+
 # 诊断技能
 
 ## 概述

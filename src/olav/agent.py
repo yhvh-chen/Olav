@@ -12,6 +12,8 @@ from langchain_core.tools import BaseTool
 
 from config.settings import settings
 from olav.core.llm import LLMFactory
+from olav.core.skill_loader import get_skill_loader
+from olav.core.skill_router import create_skill_router
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.network import list_devices, nornir_execute, get_device_platform
 from olav.tools.smart_query import smart_query, batch_query
@@ -22,6 +24,7 @@ def create_olav_agent(
     model: str | None = None,
     checkpointer: Any | None = None,
     debug: bool = False,
+    enable_skill_routing: bool = True,
 ) -> Any:
     """Create the OLAV DeepAgent.
 
@@ -30,11 +33,13 @@ def create_olav_agent(
     - Capability search tools (search_capabilities, api_call)
     - Filesystem access (for Skills/Knowledge management)
     - HITL approval for write operations
+    - Skill routing (optional, default enabled)
 
     Args:
         model: Model name or instance (defaults to configured LLM)
         checkpointer: Optional checkpointer for state persistence
         debug: Enable debug mode
+        enable_skill_routing: Enable skill-based routing (default True)
 
     Returns:
         Compiled DeepAgent ready to use
@@ -47,13 +52,13 @@ def create_olav_agent(
     else:
         llm = model
 
-    # Load system prompt from OLAV.md
+    # Load base system prompt from OLAV.md or use default
     olav_md_path = Path(".olav/OLAV.md")
     if olav_md_path.exists():
-        system_prompt = olav_md_path.read_text(encoding="utf-8")
+        base_prompt = olav_md_path.read_text(encoding="utf-8")
     else:
         # P1: Optimized compact system prompt (~500 tokens vs ~3000)
-        system_prompt = """# OLAV - Network AI Assistant
+        base_prompt = """# OLAV - Network AI Assistant
 
 You are OLAV, an AI for network operations. Execute queries efficiently.
 
@@ -85,6 +90,18 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
 - Dangerous commands are blocked (blacklist). 
 - For file writes, ask for approval.
 """
+
+    # Inject skill guidance if enabled
+    if enable_skill_routing:
+        skill_loader = get_skill_loader()
+        skills = skill_loader.load_all()
+        if skills:
+            skill_summary = _format_skills_for_prompt(skills)
+            system_prompt = f"{base_prompt}\n\n## Skill Guidance\n{skill_summary}"
+        else:
+            system_prompt = base_prompt
+    else:
+        system_prompt = base_prompt
 
     # Define tools - smart_query and batch_query are primary (P0 optimization)
     # Secondary tools kept for edge cases
@@ -230,4 +247,22 @@ Available tools:
 - search_capabilities: Find available commands
 """,
         tools=[nornir_execute, search_capabilities],
+    )
+
+
+def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
+    """Format skills for inclusion in system prompt.
+
+    Args:
+        skills: Dictionary of Skill objects
+
+    Returns:
+        Formatted skill descriptions for prompt
+    """
+    skill_lines = []
+    for skill_id, skill in skills.items():
+        skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {skill.description}")
+
+    return "When approaching tasks, consider these execution strategies:\n" + "\n".join(
+        skill_lines
     )
