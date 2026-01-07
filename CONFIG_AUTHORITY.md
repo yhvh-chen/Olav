@@ -35,10 +35,41 @@
    └─ 所有可配置选项的说明
    └─ 提交到 git，用于 onboarding
 
-4️⃣  .olav/settings.json ← DeepAgents 专用配置（READ-ONLY）
-   └─ 仅供参考，不影响 Python 配置加载
-   └─ 用于定义 OLAV Agent 的元数据
-   └─ 不重复定义环境配置
+4️⃣  .olav/settings.json ← DeepAgents Agent 元数据（仅供参考）
+   └─ 目的：定义 OLAV Agent 的基本属性（name, version, description）
+   └─ 用途：DeepAgents 框架加载 agent 时读取
+   └─ ⚠️  此文件中的 LLM/capabilities 配置是**示意性的**，不影响运行时
+   └─ 运行时的实际值来自 config/settings.py + .env
+   └─ 不提交密钥或敏感信息到此文件
+   └─ 更新此文件时确保与 config/settings.py 保持一致
+
+## ⚠️ 关键澄清：.olav/settings.json vs config/settings.py
+
+| 方面 | `.olav/settings.json` | `config/settings.py` |
+|------|---------------------|-------------------|
+| **目的** | DeepAgents framework metadata | Application runtime configuration |
+| **权威性** | 仅供参考 📖 | ✅ 权威源（SINGLE SOURCE OF TRUTH） |
+| **运行时使用** | ❌ 不加载（framework 信息用） | ✅ 加载并用于运行时 |
+| **敏感信息** | ❌ 不应包含 API 密钥 | ✅ 通过 .env 覆盖 |
+| **LLM 配置** | 示意值，仅展示默认 | ✅ 真实配置源 |
+| **数据库配置** | 示意值，仅文档 | ✅ 真实配置源 |
+| **修改频率** | 很少（agent 元数据） | 常见（环境切换） |
+
+### 🎯 **最佳实践**
+
+**如果需要改变 LLM 或数据库配置，应该编辑：**
+1. ✅ `.env` （用户本地值）
+2. ✅ `.env.example` （如果是新的公共配置）
+3. ✅ `config/settings.py` （如果是新的字段定义）
+4. ⚠️ `.olav/settings.json` （仅为了保持文档一致性，不影响运行）
+
+### 📋 配置同步说明
+
+`.olav/settings.json` 中的配置应该与 `config/settings.py` 的默认值**一致**，但：
+- `.olav/settings.json` 是静态的，用于文档和 agent 描述
+- `config/settings.py` 是动态的，通过 .env 可以被覆盖
+- 实际运行时的值由 `config/settings.py` + `.env` 决定
+
 ```
 
 ## v0.8 架构移除的配置
