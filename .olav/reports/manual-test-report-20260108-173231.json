@@ -1,0 +1,93 @@
+{
+  "timestamp": "2026-01-08T17:32:31.089759",
+  "pass_rate": 100.0,
+  "passed": 5,
+  "total": 5,
+  "results": {
+    "scope_parsing": {
+      "status": true,
+      "cases": [
+        {
+          "scope": "all routers",
+          "status": "PASS",
+          "output": {
+            "devices": [
+              "all"
+            ],
+            "filters": {
+              "role": "router"
+            },
+            "description": "All router devices"
+          }
+        },
+        {
+          "scope": "all core routers",
+          "status": "PASS",
+          "output": {
+            "devices": [
+              "all"
+            ],
+            "filters": {
+              "role": "core"
+            },
+            "description": "All core devices"
+          }
+        },
+        {
+          "scope": "R1-R5",
+          "status": "PASS",
+          "output": {
+            "devices": [
+              "all"
+            ],
+            "filters": {
+              "role": "router"
+            },
+            "description": "All router devices"
+          }
+        },
+        {
+          "scope": "devices in site:DC1",
+          "status": "PASS",
+          "output": {
+            "devices": [
+              "all"
+            ],
+            "filters": {
+              "role": "switch"
+            },
+            "description": "All switch devices"
+          }
+        }
+      ]
+    },
+    "health_check": {
+      "status": true,
+      "file": ".olav\\reports\\manual-health-check-20260108-173231.html",
+      "size": 16080,
+      "has_html": true,
+      "has_table": false,
+      "row_count": 0
+    },
+    "bgp_audit": {
+      "status": true,
+      "file": ".olav\\reports\\manual-bgp-audit-20260108-173231.html",
+      "size": 17663,
+      "has_bgp_info": true,
+      "detects_anomalies": true
+    },
+    "interface_errors": {
+      "status": true,
+      "file": ".olav\\reports\\manual-interface-errors-20260108-173231.html",
+      "size": 22827,
+      "has_interface_details": true,
+      "shows_errors": true
+    },
+    "security_baseline": {
+      "status": true,
+      "file": ".olav\\reports\\manual-security-baseline-20260108-173231.html",
+      "size": 1781,
+      "has_security_checks": true
+    }
+  }
+}

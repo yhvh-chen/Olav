@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>接口错误分析报告</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header .meta {
+            opacity: 0.95;
+            font-size: 1.1em;
+        }
+
+        .summary {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .summary-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #fa709a;
+            text-align: center;
+        }
+
+        .summary-item.critical {
+            border-left-color: #dc3545;
+        }
+
+        .summary-item.warning {
+            border-left-color: #ffc107;
+        }
+
+        .summary-item .label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+
+        .summary-item .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .device-section {
+            margin-bottom: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .device-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 2px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .device-header h2 {
+            font-size: 1.5em;
+            color: #333;
+        }
+
+        .device-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+            background: #cfe2ff;
+            color: #084298;
+        }
+
+        .device-status.critical {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .error-content {
+            padding: 20px;
+            background: white;
+        }
+
+        .error-summary {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .error-summary strong {
+            color: #856404;
+        }
+
+        .error-section {
+            margin-bottom: 25px;
+        }
+
+        .error-section h3 {
+            color: #fa709a;
+            font-size: 1.2em;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #fa709a;
+        }
+
+        .interface-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-left: 4px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 12px;
+        }
+
+        .interface-item.error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+        .interface-item.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+
+        .interface-item.healthy {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        .interface-name {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+
+        .interface-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .interface-metric {
+            font-size: 0.95em;
+        }
+
+        .interface-metric strong {
+            color: #495057;
+        }
+
+        .error-indicator {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .error-indicator.critical {
+            background: #dc3545;
+        }
+
+        .error-indicator.warning {
+            background: #ffc107;
+        }
+
+        .error-indicator.healthy {
+            background: #28a745;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            border: 1px solid #dee2e6;
+        }
+
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+            color: #495057;
+            border: 1px solid #dee2e6;
+        }
+
+        td {
+            padding: 10px 12px;
+            border: 1px solid #dee2e6;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .counter-high {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .counter-medium {
+            color: #ffc107;
+            font-weight: bold;
+        }
+
+        .counter-normal {
+            color: #28a745;
+        }
+
+        .recommendations {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .recommendations h3 {
+            color: #004085;
+            margin-bottom: 15px;
+        }
+
+        .recommendations ul {
+            list-style-position: inside;
+            color: #004085;
+        }
+
+        .recommendations li {
+            margin-bottom: 8px;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚠️ 接口错误分析报告</h1>
+            <div class="meta">生成于 2026-01-08 17:42:17</div>
+        </div>
+
+        <div class="summary">
+            <h2>错误分析概览</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="label">分析设备数</div>
+                    <div class="value">1</div>
+                </div>
+                <div class="summary-item critical">
+                    <div class="label">错误接口数</div>
+                    <div class="value">2</div>
+                </div>
+                <div class="summary-item warning">
+                    <div class="label">警告接口数</div>
+                    <div class="value">5</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content">
+            
+            <h2>详细错误分析</h2>
+            
+            
+            <div class="device-section">
+                <div class="device-header">
+                    <h2>设备: R1</h2>
+                    <span class="device-status">🔍 已分析</span>
+                </div>
+                
+                <div class="error-content">
+                    <!-- 错误概览 -->
+                    <div class="error-summary">
+                        <strong>📊 错误统计</strong>
+                        <p>检查接口: 24 | 错误接口: 2 | 警告接口: 5 | 正常接口: 17</p>
+                    </div>
+
+                    <!-- 错误接口 (严重) -->
+                    <div class="error-section">
+                        <h3><span class="error-indicator critical"></span>严重错误接口</h3>
+                        
+                        <div class="interface-item error">
+                            <div class="interface-name">Ethernet1/1 (Link to Core-Router-1)</div>
+                            <div class="interface-metrics">
+                                <div class="interface-metric">
+                                    <strong>CRC 错误:</strong>
+                                    <span class="counter-high">1,247 errors</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>帧错误:</strong>
+                                    <span class="counter-high">345 errors</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>丢包率:</strong>
+                                    <span class="counter-high">0.3%</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>状态:</strong>
+                                    <span style="color: #dc3545;">⚠️ UP (错误率异常)</span>
+                                </div>
+                            </div>
+                            <p style="margin-top: 10px; color: #721c24;"><strong>建议:</strong> 检查光模块质量、光纤连接质量，必要时更换光缆</p>
+                        </div>
+
+                        <div class="interface-item error">
+                            <div class="interface-name">Ethernet2/5 (Link to Distribution-Switch)</div>
+                            <div class="interface-metrics">
+                                <div class="interface-metric">
+                                    <strong>丢包:</strong>
+                                    <span class="counter-high">5,621 packets</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>输出错误:</strong>
+                                    <span class="counter-high">892 errors</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>延迟:</strong>
+                                    <span class="counter-high">45ms (平均)</span>
+                                </div>
+                                <div class="interface-metric">
+                                    <strong>状态:</strong>
+                                    <span style="color: #dc3545;">⚠️ UP (性能下降)</span>
+                                </div>
+                            </div>
+                            <p style="margin-top: 10px; color: #721c24;"><strong>建议:</strong> 检查对端设备，运行 ping 和 traceroute 诊断路径问题</p>
+                        </div>
+                    </div>
+
+                    <!-- 警告接口 -->
+                    <div class="error-section">
+                        <h3><span class="error-indicator warning"></span>警告接口 (监控)</h3>
+                        
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>接口</th>
+                                    <th>CRC 错误</th>
+                                    <th>丢包数</th>
+                                    <th>状态</th>
+                                    <th>趋势</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Ethernet1/2</td>
+                                    <td><span class="counter-medium">45</span></td>
+                                    <td><span class="counter-medium">156</span></td>
+                                    <td>UP</td>
+                                    <td>↑ 逐渐上升</td>
+                                </tr>
+                                <tr>
+                                    <td>Ethernet1/3</td>
+                                    <td><span class="counter-medium">28</span></td>
+                                    <td><span class="counter-medium">89</span></td>
+                                    <td>UP</td>
+                                    <td>→ 稳定</td>
+                                </tr>
+                                <tr>
+                                    <td>Ethernet1/4</td>
+                                    <td><span class="counter-medium">62</span></td>
+                                    <td><span class="counter-medium">203</span></td>
+                                    <td>UP</td>
+                                    <td>↑ 快速上升</td>
+                                </tr>
+                                <tr>
+                                    <td>Ethernet2/1</td>
+                                    <td><span class="counter-medium">34</span></td>
+                                    <td><span class="counter-medium">112</span></td>
+                                    <td>UP</td>
+                                    <td>→ 稳定</td>
+                                </tr>
+                                <tr>
+                                    <td>Ethernet2/2</td>
+                                    <td><span class="counter-medium">51</span></td>
+                                    <td><span class="counter-medium">178</span></td>
+                                    <td>UP</td>
+                                    <td>↑ 上升</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 正常接口 -->
+                    <div class="error-section">
+                        <h3><span class="error-indicator healthy"></span>正常接口 (17 个)</h3>
+                        <p>Ethernet1/5-1/8, Ethernet1/10-1/15, Ethernet2/3, Ethernet2/4, Ethernet2/6-2/8</p>
+                        <p style="color: #28a745; margin-top: 5px;">✓ 所有指标正常，无错误</p>
+                    </div>
+
+                    <!-- 建议 -->
+                    
+                </div>
+            </div>
+            
+            
+        </div>
+
+        <div class="footer">
+            <p>OLAV Interface Error Analysis Report v0.8 | 自动生成的接口错误诊断报告</p>
+            <p>报告包含的所有数据仅供参考，建议定期进行人工审核和物理检查</p>
+        </div>
+    </div>
+</body>
+</html>
