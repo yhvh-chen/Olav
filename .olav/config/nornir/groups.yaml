@@ -1,5 +1,11 @@
 # Nornir Inventory - Device Groups
 
+# Test group - all lab/test devices
+test:
+  data:
+    site: lab
+    role: test
+
 core:
   data:
     site: datacenter
