@@ -6,7 +6,13 @@ DeepAgents Native Framework
 __version__ = "0.8.0"
 
 # Main agent
-from olav.agent import create_olav_agent, get_macro_analyzer, get_micro_analyzer, initialize_olav
+from olav.agent import (
+    create_olav_agent,
+    get_inspector_agent,
+    get_macro_analyzer,
+    get_micro_analyzer,
+    initialize_olav,
+)
 
 # Core database
 from olav.core.database import OlavDatabase, get_database
@@ -24,6 +30,7 @@ __all__ = [
     "initialize_olav",
     "get_macro_analyzer",
     "get_micro_analyzer",
+    "get_inspector_agent",
     # Database
     "OlavDatabase",
     "get_database",

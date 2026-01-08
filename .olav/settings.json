@@ -17,5 +17,16 @@
   "security": {
     "hitl_required_for": ["write", "configure", "delete"],
     "command_blacklist": ".olav/imports/commands/blacklist.txt"
+  },
+  "inspection": {
+    "defaultTemplate": "health-check",
+    "maxDevices": 100,
+    "maxWorkers": 10,
+    "timeout": 30,
+    "reportFormat": "html",
+    "saveReports": true,
+    "reportDir": ".olav/reports",
+    "checkTypes": ["health-check", "bgp-audit", "interface-errors", "security-baseline"],
+    "refreshInterval": 3600
   }
 }

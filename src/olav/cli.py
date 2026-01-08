@@ -87,7 +87,7 @@ def query(
             import traceback
 
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -108,7 +108,7 @@ def devices() -> None:
 
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}[/bold red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()

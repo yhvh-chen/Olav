@@ -314,11 +314,11 @@ class OlavDatabase:
         """Close the database connection."""
         self.conn.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "OlavDatabase":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit."""
         self.close()
 

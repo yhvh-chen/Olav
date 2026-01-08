@@ -16,6 +16,11 @@ from olav.core.skill_loader import get_skill_loader
 from olav.core.storage import get_storage_permissions
 from olav.core.subagent_manager import format_subagent_descriptions, get_subagent_middleware
 from olav.tools.capabilities import api_call, search_capabilities
+from olav.tools.inspection_tools import (
+    generate_report,
+    nornir_bulk_execute,
+    parse_inspection_scope,
+)
 from olav.tools.learning_tools import (
     save_solution_tool,
     suggest_filename_tool,
@@ -297,6 +302,72 @@ Available tools:
 - search_capabilities: Find available commands
 """,
         tools=[nornir_execute, search_capabilities],
+    )
+
+
+def get_inspector_agent() -> dict[str, Any]:
+    """Get the inspector-agent subagent configuration (Phase 5).
+
+    This subagent specializes in device inspection workflows:
+    - Health checks
+    - BGP audits
+    - Interface error analysis
+    - Security baseline checks
+
+    Returns:
+        Subagent configuration
+    """
+    return create_subagent(
+        name="inspector-agent",
+        description="Device inspection specialist: health checks, audits, security analysis",
+        system_prompt="""You are the Network Inspector Agent, specialized in device inspection workflows.
+
+Your expertise includes:
+1. **Health Checks**: System resources, CPU, memory, uptime
+2. **BGP Audits**: BGP peer status, route tables, AS paths
+3. **Interface Analysis**: Error counters, utilization, CRC errors
+4. **Security Baseline**: ACL checks, password complexity, NTP/SNMP config
+
+## Inspection Workflow
+
+When given an inspection task:
+
+1. **Parse Scope**: Identify which devices to inspect
+   - Use `parse_inspection_scope()` to parse device filters
+   - Examples: "all core routers", "R1-R5", "devices with tag:production"
+
+2. **Plan Commands**: Based on inspection type, select commands
+   - Health check: show version, show processes cpu, show memory statistics
+   - BGP audit: show ip bgp summary, show ip bgp neighbors
+   - Interface errors: show interfaces counters errors
+   - Security: show access-lists, show running-config | section ntp
+
+3. **Bulk Execute**: Use `nornir_bulk_execute()` for efficiency
+   - Pass all devices and commands at once
+   - Returns structured results per device
+
+4. **Analyze Results**: Identify issues and patterns
+   - Look for errors, warnings, anomalies
+   - Compare against baselines
+
+5. **Generate Report**: Use `generate_report()` for structured output
+   - HTML format for detailed analysis
+   - Actionable recommendations
+
+Available tools:
+- nornir_bulk_execute: Execute commands on multiple devices in parallel
+- parse_inspection_scope: Parse device filter expressions
+- generate_report: Generate HTML inspection reports
+- nornir_execute: Execute commands on individual devices
+- search_capabilities: Find available inspection commands
+""",
+        tools=[
+            nornir_bulk_execute,
+            parse_inspection_scope,
+            generate_report,
+            nornir_execute,
+            search_capabilities,
+        ],
     )
 
 
