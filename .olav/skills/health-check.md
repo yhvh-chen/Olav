@@ -1,56 +1,56 @@
-# Health Check (系统健康检查)
+# Health Check
 
-## 适用场景
-- 定期设备健康检查
-- 设备上线前验证
-- 资源使用监控
-- 系统状态巡检
+## Use Cases
+- Periodic device health checks
+- Pre-deployment device verification
+- Resource usage monitoring
+- System status inspection
 
-## 识别标志
-用户问题包含: "健康检查"、"系统状态"、"巡检"、"资源使用"、"CPU/内存"
+## Recognition Triggers
+User questions containing: "health check", "system status", "inspection", "resource usage", "CPU", "memory"
 
-## 执行策略
-1. 使用 `write_todos` 规划检查项
-2. 使用 `parse_inspection_scope()` 确定检查范围
-3. 使用 `nornir_bulk_execute()` 批量执行检查命令
-4. 分析结果，识别异常
-5. 使用 `generate_report()` 生成健康检查报告
+## Execution Strategy
+1. Use `write_todos` to plan check items
+2. Use `parse_inspection_scope()` to determine inspection scope
+3. Use `nornir_bulk_execute()` to execute check commands in bulk
+4. Analyze results and identify anomalies
+5. Use `generate_report()` to generate health check report
 
-## 检查项
+## Check Items
 
-### 系统基础
-- [ ] show version (版本、运行时间)
-- [ ] show processes cpu history (CPU 趋势)
-- [ ] show memory statistics (内存使用)
-- [ ] show environment (温度、电源、风扇)
+### System Basics
+- [ ] show version (version, uptime)
+- [ ] show processes cpu history (CPU trend)
+- [ ] show memory statistics (memory usage)
+- [ ] show environment (temperature, power, fan)
 
-### 接口状态
-- [ ] show interfaces status (端口状态概览)
-- [ ] show interfaces counters (接口计数器)
-- [ ] show ip interface brief (IP 接口状态)
+### Interface Status
+- [ ] show interfaces status (port status overview)
+- [ ] show interfaces counters (interface counters)
+- [ ] show ip interface brief (IP interface status)
 
-### 路由状态
-- [ ] show ip route summary (路由汇总)
-- [ ] show ip ospf neighbor (OSPF 邻居)
-- [ ] show ip bgp summary (BGP 邻居)
+### Routing Status
+- [ ] show ip route summary (routing summary)
+- [ ] show ip ospf neighbor (OSPF neighbors)
+- [ ] show ip bgp summary (BGP neighbors)
 
-## 报告格式
-使用 `generate_report(template="health-check")` 生成报告，包含：
-- 设备列表
-- 每项检查的结果
-- 异常项高亮
-- 资源使用趋势
-- 建议措施
+## Report Format
+Use `generate_report(template="health-check")` to generate report containing:
+- Device list
+- Results of each check item
+- Highlighted anomalies
+- Resource usage trends
+- Recommendations
 
-## 示例
+## Example
 
-### 执行健康检查
+### Execute Health Check
 ```
-用户: "对所有核心交换机进行健康检查"
+User: "Perform health checks on all core routers"
 
-Agent 步骤:
+Agent steps:
 1. parse_inspection_scope("all core routers")
-   → 返回: {"devices": ["all"], "filters": {"role": "core"}}
+   → Returns: {"devices": ["all"], "filters": {"role": "core"}}
 
 2. nornir_bulk_execute(
        devices="all",
@@ -63,11 +63,11 @@ Agent 步骤:
        max_workers=10
    )
 
-3. 分析结果:
-   - 检查 CPU 使用率是否 >80%
-   - 检查内存使用率是否 >85%
-   - 检查接口是否有 error
-   - 检查运行时间是否异常短
+3. Analyze results:
+   - Check if CPU usage > 80%
+   - Check if memory usage > 85%
+   - Check for interface errors
+   - Check if uptime is abnormally short
 
 4. generate_report(
        template="health-check",
@@ -76,23 +76,23 @@ Agent 步骤:
    )
 ```
 
-### 预期输出
+### Expected Output
 ```
-✅ 健康检查完成
+✅ Health Check Complete
 
-检查范围: 5 台核心交换机
-检查时间: 2025-01-08 14:30
+Check Scope: 5 core routers
+Check Time: 2025-01-08 14:30
 
-检查结果:
-  CS-DC1: ✅ 正常 (CPU 15%, 内存 45%, 运行 45 天)
-  CS-DC2: ✅ 正常 (CPU 12%, 内存 42%, 运行 45 天)
-  CS-DC3: ⚠️  警告 (CPU 82%, 内存 78%, 运行 30 天)
-  CS-DC4: ✅ 正常 (CPU 10%, 内存 40%, 运行 60 天)
-  CS-DC5: ❌ 异常 (内存 90%, 接口 Gi0/1 有 CRC 错误)
+Check Results:
+  CS-DC1: ✅ Healthy (CPU 15%, Memory 45%, Uptime 45 days)
+  CS-DC2: ✅ Healthy (CPU 12%, Memory 42%, Uptime 45 days)
+  CS-DC3: ⚠️  Warning (CPU 82%, Memory 78%, Uptime 30 days)
+  CS-DC4: ✅ Healthy (CPU 10%, Memory 40%, Uptime 60 days)
+  CS-DC5: ❌ Anomaly (Memory 90%, Interface Gi0/1 has CRC errors)
 
-报告已生成: .olav/reports/health-check-20250108.html
+Report generated: .olav/reports/health-check-20250108.html
 
-建议措施:
-  - CS-DC3: CPU 使用率偏高，检查是否有进程异常
-  - CS-DC5: 内存使用率过高，检查 Gi0/1 接口 CRC 错误原因
+Recommendations:
+  - CS-DC3: High CPU usage - check for abnormal processes
+  - CS-DC5: High memory usage - check Gi0/1 CRC error causes
 ```

@@ -305,7 +305,7 @@ def generate_report(
         output_path = Path(output_path)
 
     # Load Jinja2 template
-    template_path = Path(f".olav/templates/{template}.html.j2")
+    template_path = Path(f".olav/inspect_templates/{template}.html.j2")
 
     if template_path.exists():
         template_content = template_path.read_text()
