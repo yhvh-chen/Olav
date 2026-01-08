@@ -2,10 +2,10 @@
 id: device-inspection
 intent: inspect
 complexity: medium
-description: "Comprehensive L1-L4 network device inspection for all lab devices, generates detailed structured reports"
+description: "Comprehensive L1-L4 network device inspection for all test devices, generates detailed structured reports"
 examples:
-  - "Inspect all lab devices"
-  - "Full L1-L4 health check lab"
+  - "Inspect all test devices"
+  - "Full L1-L4 health check test"
   - "Complete network device inspection"
 enabled: true
 ---
@@ -13,7 +13,7 @@ enabled: true
 # Device Inspection - Comprehensive L1-L4
 
 ## Applicable Scenarios
-- Comprehensive network health assessment (all lab devices)
+- Comprehensive network health assessment (all test devices)
 - Full stack network inspection (L1-L4)
 - Network baseline establishment and verification
 - Pre-maintenance complete audit
@@ -22,7 +22,7 @@ enabled: true
 User questions contain: "inspect", "comprehensive", "full check", "all devices", "L1-L4"
 
 ## Execution Strategy
-1. **List all devices in 'lab' group** using list_devices(group="lab")
+1. **List all devices in 'test' group** using list_devices(group="test")
 2. **For each device, execute comprehensive inspection** covering L1 (Physical), L2 (Data Link), L3 (Network), L4 (Transport)
 3. **Generate consolidated report** with device-by-device status
 4. **Flag anomalies** across all layers
@@ -39,7 +39,7 @@ User questions contain: "inspect", "comprehensive", "full check", "all devices",
 - [ ] `show vlan brief` (VLAN configuration and status)
 - [ ] `show spanning-tree summary` (STP topology, root bridge)
 - [ ] `show spanning-tree detail` (Port states, costs)
-- [ ] `show lldp neighbors` (LLDP neighbor discovery)
+- [ ] `show cdp neighbors` (CDP neighbor discovery)
 - [ ] `show mac address-table` (MAC table status, count)
 
 ### L3 - Network Layer
@@ -60,7 +60,7 @@ User questions contain: "inspect", "comprehensive", "full check", "all devices",
 
 ### Executive Summary
 ```
-📋 Lab Network Comprehensive Inspection Report
+📋 test Network Comprehensive Inspection Report
 Inspection Time: 2026-01-08 14:30:00
 Total Devices: 8
 Overall Status: 2 devices OK, 5 devices WARNING, 1 device CRITICAL
@@ -87,7 +87,7 @@ Each device gets a full L1-L4 report:
 
 Layer 1 (Physical):
   CPU Utilization: 15% (5min avg) ✅
-  Memory Usage: 62% (available: 8.2GB) ✅
+  Memory Usage: 62% (avaitestle: 8.2GB) ✅
   Temperature: 42°C (threshold: 70°C) ✅
   Power Supplies: 2/2 ACTIVE ✅
   Fans: 6/6 SPINNING ✅
@@ -135,12 +135,12 @@ Warnings (Monitor):
 
 Informational (Good Status):
 - All core devices operating normally
-- Lab network stable and well-managed
+- test network stable and well-managed
 ```
 
 ## Multi-Device Inspection Process
 
-1. **Device Collection**: Query all devices in 'lab' group
+1. **Device Collection**: Query all devices in 'test' group
 2. **Parallel Execution**: Execute inspection template on each device
 3. **Data Aggregation**: Collect and normalize results
 4. **Analysis**: Compare against health baselines
@@ -152,7 +152,7 @@ Informational (Good Status):
 
 ## Output Artifact
 ```
-reports/lab-comprehensive-inspection-20260108-143000.html
+reports/test-comprehensive-inspection-20260108-143000.html
 ├─ Executive Summary Dashboard
 ├─ Device Status Matrix
 ├─ Layer-by-Layer Details (8 devices × 4 layers = 32 sections)
