@@ -111,6 +111,53 @@ class OlavDatabase:
                 UNIQUE(device, command)
             )
         """)
+        
+        # Auto-load command whitelist if capabilities table is empty or has few commands
+        self._ensure_command_whitelist_loaded()
+
+    def _ensure_command_whitelist_loaded(self) -> None:
+        """Ensure command whitelist is loaded into capabilities table."""
+        # Check if we have enough commands loaded
+        result = self.conn.execute(
+            "SELECT COUNT(*) FROM capabilities WHERE type = 'command'"
+        ).fetchone()
+        command_count = result[0] if result else 0
+        
+        if command_count >= 10:
+            # Already have commands loaded
+            return
+        
+        # Load from whitelist files
+        whitelist_dir = Path(".olav/imports/commands")
+        if not whitelist_dir.exists():
+            return
+        
+        for platform_file in whitelist_dir.glob("*.txt"):
+            if platform_file.name == "blacklist.txt":
+                continue
+            
+            platform = platform_file.stem
+            
+            for line in platform_file.read_text(encoding="utf-8").split("\n"):
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                
+                # Skip HITL commands (those starting with !)
+                is_write = line.startswith("!")
+                cmd = line[1:] if is_write else line
+                
+                try:
+                    self.insert_capability(
+                        cap_type="command",
+                        platform=platform,
+                        name=cmd,
+                        source_file=str(platform_file),
+                        is_write=is_write,
+                    )
+                except Exception:
+                    # Ignore duplicates
+                    pass
 
     def search_capabilities(
         self,

@@ -550,59 +550,68 @@ def list_devices(
     role: str | None = None,
     site: str | None = None,
     platform: str | None = None,
+    group: str | None = None,
     alias: str | None = None,
 ) -> str:
     """List devices from the Nornir inventory.
 
     This tool queries the Nornir inventory to list available network devices.
-    Devices can be filtered by role, site, platform, or searched by alias.
+    Devices can be filtered by role, site, platform, group, or searched by alias.
 
     Args:
-        role: Optional role filter (e.g., "core", "access")
-        site: Optional site filter (e.g., "datacenter1")
+        role: Optional role filter (e.g., "core", "access", "border")
+        site: Optional site filter (e.g., "lab", "datacenter")
         platform: Optional platform filter (e.g., "cisco_ios", "huawei_vrp")
+        group: Optional group filter (e.g., "test", "core", "border")
         alias: Optional alias search term (e.g., "核心路由器", "边界")
                Searches device name, hostname, role, and aliases field
 
     Returns:
-        List of devices with their properties
+        List of devices with their properties (including groups)
 
     Examples:
         >>> list_devices()
         "Available devices:
-        - R1 (10.1.1.1) - cisco_ios - core
-        - R2 (10.1.1.2) - cisco_ios - core
-        - SW1 (10.1.2.1) - cisco_ios - access"
+        - R1 (10.1.1.1) - cisco_ios - border@lab [test]
+        - R3 (10.1.1.3) - cisco_ios - core@lab [test]"
+
+        >>> list_devices(group="test")
+        "Devices in group 'test':
+        - R1, R2, R3, R4, SW1, SW2"
 
         >>> list_devices(role="core")
         "Core devices:
-        - R1 (10.1.1.1) - cisco_ios
-        - R2 (10.1.1.2) - cisco_ios"
-
-        >>> list_devices(alias="核心路由器")
-        "Devices matching '核心路由器':
-        - R3 (10.1.1.3) - cisco_ios - core (alias: 核心路由器1)"
+        - R3 (10.1.1.3) - cisco_ios [test]
+        - R4 (10.1.1.4) - cisco_ios [test]"
     """
     try:
         # P4: Use singleton Nornir instance
         nr = get_nornir()
 
-        # Apply filters (create filtered view)
-        nr_filtered = nr
-        if role:
-            nr_filtered = nr_filtered.filter(role=role)
-        if site:
-            nr_filtered = nr_filtered.filter(site=site)
-        if platform:
-            nr_filtered = nr_filtered.filter(platform=platform)
-
+        # Start with all hosts
         devices = []
-        for name, host in nr_filtered.inventory.hosts.items():
+        for name, host in nr.inventory.hosts.items():
             hostname = host.hostname or name
             host_platform = host.platform or "unknown"
             host_role = host.get("role", "unknown")
             host_site = host.get("site", "unknown")
             host_aliases = host.get("aliases", []) or []
+            
+            # Get groups as list of strings
+            if hasattr(host.groups, 'keys'):
+                host_groups = list(host.groups.keys())
+            else:
+                host_groups = [str(g) for g in host.groups] if host.groups else []
+
+            # Apply filters
+            if role and host_role != role:
+                continue
+            if site and host_site != site:
+                continue
+            if platform and host_platform != platform:
+                continue
+            if group and group not in host_groups:
+                continue
 
             # Alias search - match against name, hostname, role, or aliases
             if alias:
@@ -632,18 +641,32 @@ def list_devices(
 
                 # Add matched alias info
                 alias_info = f" (alias: {matched_alias})" if matched_alias else ""
+                groups_str = f" [{','.join(host_groups)}]" if host_groups else ""
                 devices.append(
-                    f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}{alias_info}"
+                    f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}{groups_str}{alias_info}"
                 )
             else:
-                devices.append(f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}")
+                groups_str = f" [{','.join(host_groups)}]" if host_groups else ""
+                devices.append(f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}{groups_str}")
 
         if not devices:
             if alias:
                 return f"No devices found matching alias '{alias}'."
+            if group:
+                return f"No devices found in group '{group}'."
             return "No devices found matching the criteria."
 
-        header = f"Devices matching '{alias}':" if alias else "Available devices:"
+        # Generate appropriate header
+        if group:
+            header = f"Devices in group '{group}':"
+        elif role:
+            header = f"Devices with role '{role}':"
+        elif site:
+            header = f"Devices at site '{site}':"
+        elif alias:
+            header = f"Devices matching '{alias}':"
+        else:
+            header = "Available devices:"
         return header + "\n" + "\n".join(devices)
 
     except Exception as e:

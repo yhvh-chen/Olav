@@ -16,18 +16,21 @@ from olav.core.skill_loader import get_skill_loader
 from olav.core.storage import get_storage_permissions
 from olav.core.subagent_manager import format_subagent_descriptions, get_subagent_middleware
 from olav.tools.capabilities import api_call, search_capabilities
-from olav.tools.inspection_tools import (
-    generate_report,
-    nornir_bulk_execute,
-    parse_inspection_scope,
-)
+from olav.tools.inspection_tools import generate_report
 from olav.tools.learning_tools import (
     save_solution_tool,
     suggest_filename_tool,
 )
 from olav.tools.loader import reload_capabilities
 from olav.tools.network import list_devices, nornir_execute
-from olav.tools.smart_query import batch_query, smart_query
+from olav.tools.smart_query import smart_query
+from olav.tools.storage_tools import (
+    list_saved_files,
+    read_file,
+    save_device_config,
+    save_tech_support,
+    write_file,
+)
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -137,20 +140,28 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     storage_permissions = get_storage_permissions()
     system_prompt = f"{system_prompt}\n\n{storage_permissions}"
 
-    # Define tools - smart_query and batch_query are primary (P0 optimization)
+    # Define tools - smart_query is primary (unified single/batch queries)
     # Secondary tools kept for edge cases
+    # Note: Group/role/site filtering is handled by smart_query filters
     tools: list[BaseTool] = [
-        # P0: Primary tool - combines platform detection + command selection + execution
+        # P0: Primary tool - single or batch queries with auto command selection
+        # Supports: "R1", "R1,R2", "all", "role:core", "site:lab", "group:test"
         smart_query,
-        batch_query,  # P0: Batch queries across multiple devices
-        list_devices,  # Secondary: List available devices
+        list_devices,  # List available devices with group/role/site info
         search_capabilities,  # Secondary: Manual command search
         nornir_execute,  # Secondary: Direct command execution
         api_call,  # Secondary: API calls
         # Phase 4: Learning tools - self-learning capabilities
         save_solution_tool,  # Save successful troubleshooting cases
         suggest_filename_tool,  # Suggest solution filenames
-        # Note: update_aliases_tool removed - aliases managed via Nornir hosts.yaml
+        # Phase 6: Storage tools - file operations with HITL
+        write_file,  # Generic file write (requires HITL)
+        read_file,  # Read files from .olav/
+        save_device_config,  # Save device configs (requires HITL)
+        save_tech_support,  # Save tech-support output (requires HITL)
+        list_saved_files,  # List saved files
+        # Note: Batch backup by group/role/site is skill-driven, not tool-driven
+        # Agent uses list_devices + nornir_execute + save_device_config combo
     ]
 
     # Configure HITL - interrupt only on filesystem operations
@@ -160,15 +171,18 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     # All read-only operations proceed automatically. HITL interrupts disabled here.
     if enable_hitl:
         interrupt_on = {
-            "smart_query": False,  # Safe: uses whitelist internally
-            "batch_query": False,  # Safe: uses whitelist internally
+            "smart_query": False,  # Safe: uses whitelist internally (handles batch too)
             "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
             "api_call": False,  # Safe: API validation in tool layer
             "save_solution": True,  # Phase 4: Learning - requires approval (writes to disk)
             "update_aliases": True,  # Phase 4: Learning - requires approval (writes to disk)
             "suggest_solution_filename": False,  # Phase 4: Learning - read-only helper
-            "write_file": True,  # Filesystem operations require approval
-            "edit_file": True,  # Filesystem editing requires approval
+            # Phase 6: Storage tools - file operations
+            "write_file": True,  # Filesystem write requires approval
+            "read_file": False,  # Read-only is safe
+            "save_device_config": True,  # Config backup requires approval
+            "save_tech_support": True,  # Tech-support save requires approval
+            "list_saved_files": False,  # Listing is read-only
         }
     else:
         # HITL disabled - all operations proceed without approval (for testing)

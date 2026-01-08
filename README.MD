@@ -1,8 +1,9 @@
 # 🤖 OLAV - Enterprise Network Operations AI Assistant
 
 **Version**: 0.8.0  
-**Status**: ✅ Phase 1-5 Production Ready  
+**Status**: ✅ Production Ready  
 **Architecture**: DeepAgents Native + Three-Layer Knowledge Architecture (Skills/Knowledge/Tools)  
+**CLI**: Interactive DeepAgent CLI  
 **Platform**: Compatible with Claude Code, supports Windows/Mac/Linux  
 
 **[中文指南](i18n/zh.md)** | **English Guide**
@@ -13,9 +14,9 @@
 
 - [Quick Start](#quick-start)
 - [Features](#features)
-- [Development Phases](#development-phases)
 - [Installation](#installation)
 - [Usage Examples](#usage-examples)
+- [Backup Guide](#backup-usage-guide)
 - [Architecture](#architecture)
 - [Technology Stack](#technology-stack)
 
@@ -34,33 +35,54 @@ cp .env.example .env
 # Edit .env and add your device information and API keys
 ```
 
-### 2️⃣ Run Your First Command
+### 2️⃣ Launch Interactive CLI
 
 ```bash
-# Query device status
-uv run python -m olav.main "Check R1 interface status"
+# Start DeepAgent CLI
+uv run python -m olav.main
 
-# Perform comprehensive inspection
-uv run python -m olav.main "Inspect all lab devices"
-
-# Search capability library
-uv run python -m olav.main "How to check BGP neighbors?"
+# Welcome to OLAV Interactive CLI
+# Type /help for available commands
 ```
 
-### 3️⃣ Use with Claude Code
+### 3️⃣ Use Slash Commands in CLI
+
+```
+OLAV> /devices
+✅ R1, R2, R3, R4, SW1, SW2 (Connected)
+
+OLAV> Check R1 interface status
+🔍 Query matched to 'quick-query' skill
+...
+
+OLAV> /inspect layer3
+📊 L3 Inspection Report
+...
+
+OLAV> /skills
+📚 Available Skills: device-inspection, quick-query, deep-analysis, config-backup
+
+OLAV> /history
+📜 Recent commands...
+
+OLAV> /quit
+```
+
+### 4️⃣ Use with Claude Code
 
 ```
 1. Navigate to the project directory
 2. Open in Claude Code
-3. View available skills: `/skills/device-inspection`
-4. Send command: "Inspect all lab devices with full L1-L4 health check"
+3. OLAV CLI automatically integrates with agent
+4. View available skills: `/skills`
+5. Send command: "Backup role:core devices running config"
 ```
 
 ---
 
 ## Features
 
-### 🎯 Three Core Capabilities
+### 🎯 Four Core Capabilities
 
 #### 1. **Device Inspection** - Comprehensive Device Health Check
 - **L1 Physical Layer**: CPU/Memory/Temperature/Power/Fans
@@ -76,8 +98,8 @@ uv run python -m olav.main "How to check BGP neighbors?"
 Examples:
 ```
 "Check R1 CPU usage"
-"Show interface status on S1"
-"Get BGP neighbors from R2"
+"Show interface status on SW1"
+"Get BGP neighbors from R3"
 ```
 
 #### 3. **Deep Analysis** - Multi-Step Complex Diagnostics
@@ -92,46 +114,18 @@ Examples:
 "Check network security baseline compliance"
 ```
 
----
+#### 4. **Device Backup** - Intelligent Configuration Backup
+- Flexible filtering by group/role/site
+- Single or batch device backup
+- Automatic file naming and timestamping
+- Git version control integration
 
-## Development Phases
-
-OLAV is developed in 5 progressive phases, each phase is fully production-ready:
-
-### Phase 1: MVP (Core Framework) ✅
-- **DeepAgents Agent** foundation
-- **Skill routing system**
-- **Basic command execution** (Nornir)
-- **Knowledge base** (aliases/topology)
-- **Status**: ✅ Production Ready
-
-### Phase 2: Skill System ✅
-- **Skill-based routing** - LLM intelligent routing
-- **Bilingual support** - English/Chinese recognition
-- **Three-layer knowledge architecture** - Skills/Knowledge/Tools
-- **Multi-device support** - Automatic batch processing
-- **Status**: ✅ Production Ready
-
-### Phase 3: SubAgent Framework ✅
-- **Macro analysis** - Topology-level path analysis
-- **Micro diagnostics** - Device-level layered diagnostics
-- **Backward compatibility** - Preserved original skills
-- **Automatic fallback** - Graceful degradation
-- **Status**: ✅ Production Ready
-
-### Phase 4: Inspection Automation ✅
-- **Comprehensive Inspection** - L1-L4 full coverage
-- **Multi-device Reports** - Unified multi-device reports
-- **Anomaly Detection** - Automatic anomaly flagging
-- **HTML Report Generation** - Professional visualization
-- **Status**: ✅ Production Ready
-
-### Phase 5: Real Device Testing ✅
-- **Real Nornir Integration** - Actual device connections
-- **Real LLM API** - Genuine LLM calls
-- **Complete E2E Testing** - 16+ real scenarios
-- **DuckDB Capability Library** - CLI/API/NETCONF command library
-- **Status**: ✅ Production Ready
+Examples:
+```
+"Backup all core devices running config"
+"Save group:test startup configs"
+"Backup role:border running-config"
+```
 
 ---
 
@@ -165,79 +159,173 @@ cp .env.example .env
 # Edit .olav/config/nornir/hosts.yaml
 # Edit .olav/config/nornir/groups.yaml
 
-# 5. Verify installation
-uv run python -m olav.main "Check device connectivity"
+# 5. Start interactive CLI and test
+uv run python -m olav.main
+
+# In CLI, test basic commands:
+# OLAV> /devices
+# OLAV> Check device connectivity
+# OLAV> /quit
 ```
 
 ---
 
 ## Usage Examples
 
-### Example 1: Basic Device Query
+### Example 1: Launch CLI and Query Device
 
 ```bash
-# CLI mode
-$ uv run python -m olav.main "R1 interface status"
+# Start interactive CLI
+$ uv run python -m olav.main
 
-# Expected output:
-# R1 Gi0/1: UP, 1000Mbps
-# R1 Gi0/2: UP, 1000Mbps
-# R1 Gi0/3: DOWN
+# OLAV> R1 interface status
+# 🔍 Query matched to 'quick-query' skill
+# Executing: show ip interface brief on R1
+# ...
+# ✅ Task completed
+#
+# OLAV>
 ```
 
-### Example 2: Comprehensive Device Inspection
+### Example 2: View Available Devices
 
 ```bash
-# Perform L1-L4 comprehensive inspection on all lab devices
-$ uv run python -m olav.main "Inspect all lab devices with comprehensive L1-L4 check"
-
-# Generated reports:
-# .olav/reports/lab-comprehensive-l1l4-20260108-143000.html
-#   ├─ Executive Summary (overall status of all 8 devices)
-#   ├─ L1-L4 layered data
-#   ├─ Anomaly detection and flagging
-#   └─ Remediation suggestions
+# OLAV> /devices
+# 📋 Connected Devices:
+#   R1 (Cisco IOS) - Group: test, Role: border, Site: lab
+#   R2 (Cisco IOS) - Group: test, Role: border, Site: lab
+#   R3 (Cisco IOS) - Group: test, Role: core, Site: lab
+#   R4 (Cisco IOS) - Group: test, Role: core, Site: lab
+#   SW1 (Cisco IOS) - Group: test, Role: access, Site: lab
+#   SW2 (Cisco IOS) - Group: test, Role: access, Site: lab
 ```
 
-### Example 3: Deep Analysis Workflow
+### Example 3: Perform Comprehensive Inspection
 
 ```bash
-# Complex multi-step diagnostics
-$ uv run python -m olav.main "Diagnose why BGP is flapping on R1 and provide remediation steps"
-
-# Expected workflow:
-# 1. Check BGP peer status
-# 2. Analyze interface stability
-# 3. Review routing table
-# 4. Check CPU/memory on router
-# 5. Provide recommendations
+# OLAV> Inspect all lab devices with comprehensive L1-L4 check
+# 🔍 Query matched to 'device-inspection' skill
+# 📊 L1-L4 Inspection Report for lab group
+#   ├─ Executive Summary (overall status of 6 devices)
+#   ├─ L1 Physical: CPU/Memory/Temp/Power ✅
+#   ├─ L2 Data Link: VLAN/STP/LLDP ✅
+#   ├─ L3 Network: Routes/OSPF/BGP ✅
+#   ├─ L4 Transport: TCP/Processes ✅
+#   └─ Anomalies: None detected
+#
+# 📁 Report saved to: .olav/reports/lab-comprehensive-l1l4-20260108-143000.html
 ```
 
-### Example 4: Using with Claude Code
+### Example 4: Use File References and Shell Commands
 
+```bash
+# OLAV> Analyze this config @network-config.txt against best practices
+# 📄 File loaded: network-config.txt (1024 bytes)
+# 🔍 Query matched to 'deep-analysis' skill
+# ...
+
+# OLAV> !ping -c 4 192.168.1.1 && Check if R1 is responding
+# $ ping -c 4 192.168.1.1
+# PING 192.168.1.1 (192.168.1.1) 56(84) bytes of data
+# ...
+# ✅ R1 is responding with 0% packet loss
 ```
-Claude Code prompt:
 
-"Use OLAV skills to:
-1. Inspect all lab devices
-2. Generate comprehensive health report
-3. Flag any anomalies
-4. Provide remediation suggestions"
+### Example 5: Backup Device Configurations
 
-Expected result:
-✅ Agent automatically matches device-inspection skill
-✅ Lists all lab group devices
-✅ Executes L1-L4 inspection
-✅ Generates HTML report to .olav/reports/
-✅ Extracts anomalies and suggests remediation
+```bash
+# Single device backup
+OLAV> Backup R1 running config
+🔍 Query matched to 'config-backup' skill
+📁 Saving R1 running configuration
+✅ Saved to: .olav/data/configs/R1-running-config-20260108-120000.txt
+
+# Backup by role
+OLAV> Backup all core role devices running config
+🔍 Query matched to 'config-backup' skill
+📁 Found 2 core devices: R3, R4
+✅ Saving R3 running configuration
+✅ Saving R4 running configuration
+
+# Backup by group
+OLAV> Backup test group startup config
+🔍 Query matched to 'config-backup' skill
+📁 Found 6 test group devices
+✅ Saving configurations (6 files)
+
+# Backup by site
+OLAV> Backup all lab devices running configs
+🔍 Query matched to 'config-backup' skill
+📁 Found 6 lab site devices
+✅ Batch backup complete (6 files saved)
 ```
 
 ---
 
-## 架构设计
+## Backup Usage Guide
 
-### 三层知识架构
-Architecture
+### Device Filtering Options
+
+The backup skill supports multiple filtering methods:
+
+| Filter Type | Syntax | Example |
+|------------|--------|---------|
+| **Single Device** | Device name | `backup R1 running config` |
+| **Multiple Devices** | Comma-separated | `backup R1,R2,R3 running config` |
+| **By Role** | `role:` prefix | `backup role:core running config` |
+| **By Group** | `group:` prefix | `backup group:test running config` |
+| **By Site** | `site:` prefix | `backup site:lab running config` |
+| **All Devices** | `all` keyword | `backup all running config` |
+
+### Backup File Locations
+
+All backups are automatically saved to `.olav/data/configs/` with timestamped filenames:
+
+```
+.olav/data/configs/
+├── R1-running-config-20260108-120000.txt
+├── R2-running-config-20260108-120000.txt
+├── R3-startup-config-20260108-120000.txt
+└── ...
+```
+
+### Viewing Available Devices
+
+```bash
+OLAV> /devices
+📋 Available Devices (with attributes):
+
+Device | Groups | Role | Site
+-------|--------|------|------
+R1     | test   | border | lab
+R2     | test   | border | lab
+R3     | test   | core | lab
+R4     | test   | core | lab
+SW1    | test   | access | lab
+SW2    | test   | access | lab
+```
+
+### Git Version Control
+
+Track configuration changes with Git:
+
+```bash
+# Initialize (one-time)
+cd .olav/data
+git init
+git config user.name "OLAV Backup"
+
+# After backups are saved
+git add configs/
+git commit -m "Backup $(date +%Y%m%d-%H%M%S)"
+
+# View backup history
+git log --oneline | head -10
+```
+
+---
+
+## Advanced Usage
 
 ### Three-Layer Knowledge Architecture
 
@@ -249,19 +337,19 @@ Architecture
 │  Layer 1: SKILLS (.olav/skills/*.md)                  │
 │  ├─ device-inspection    → Comprehensive L1-L4 check  │
 │  ├─ quick-query          → Fast 1-2 command queries   │
-│  └─ deep-analysis        → Multi-step diagnostics     │
+│  ├─ deep-analysis        → Multi-step diagnostics     │
+│  └─ config-backup        → Configuration backup       │
 │     [Strategy Layer - HOW: How to execute tasks]       │
 │                                                        │
 │  Layer 2: KNOWLEDGE (.olav/knowledge/*.md)            │
 │  ├─ aliases.md           → Device alias mapping       │
-│  ├─ topology.md          → Network topology           │
-│  └─ platform-commands.md → Multi-vendor command lib   │
+│  └─ topology.md          → Network topology           │
 │     [Knowledge Layer - WHAT: What are facts]          │
 │                                                        │
 │  Layer 3: TOOLS/CAPABILITIES                          │
 │  ├─ Nornir               → SSH batch execution        │
+│  ├─ smart_query          → Unified query tool         │
 │  ├─ DuckDB              → CLI/API/NETCONF library     │
-│  ├─ Jinja2              → Report template generation  │
 │  └─ LangChain           → LLM integration             │
 │     [Capability Layer - CAN: What we can do]          │
 │                                                        │
@@ -294,7 +382,11 @@ User Input
 │ (Jinja2 templates +      │
 │  HTML output)           │
 └──────────┬───────────────┘
-   Technology Stack
+```
+
+---
+
+## Architecture
 
 ### Core Technologies
 
@@ -302,12 +394,11 @@ User Input
 |-----------|-----------|---------|
 | **Framework** | DeepAgents | Agent orchestration and HITL |
 | **LLM** | OpenAI/Claude | Intent recognition and routing |
+| **CLI** | prompt-toolkit 3.0+ | Interactive command interface |
 | **Network** | Nornir 3.3 | Multi-device batch execution |
 | **Database** | DuckDB 0.8 | Lightweight capability library |
 | **Templates** | Jinja2 3.1 | HTML report generation |
-| **Testing** | Pytest 9.0 | Complete E2E testing |
 | **Package Manager** | uv | Fast dependency management |
-| **Code Quality** | Ruff | Linting + formatting |
 
 ### Key Features
 
@@ -315,7 +406,7 @@ User Input
 ✅ **Claude Code Compatible** - `.olav/` structure aligns with `.claude/`  
 ✅ **Multi-Vendor Support** - Cisco/Huawei/Arista/Juniper, etc.  
 ✅ **Intelligent Routing** - LLM automatically selects appropriate skills  
-✅ **Production Ready** - Complete testing, type checking, error handling  
+✅ **Production Ready** - Complete error handling, type hints, validation  
 ✅ **Easy to Extend** - Add new features by adding Markdown files  
 
 ---
@@ -326,26 +417,30 @@ User Input
 OLAV/
 ├── .olav/                     # OLAV configuration and knowledge base
 │   ├── OLAV.md               # Core system prompt
-│   ├── skills/               # 3 core skills (Markdown)
-│   │   ├── device-inspection.md
-│   │   ├── quick-query.md
-│   │   └── deep-analysis.md
+│   ├── skills/               # Core skills (Markdown)
+│   │   ├── device-inspection.md      # L1-L4 inspection
+│   │   ├── quick-query.md            # Fast queries
+│   │   ├── deep-analysis.md          # Complex diagnostics
+│   │   └── config-backup.md          # Configuration backup
 │   ├── knowledge/            # Knowledge base
-│   │   ├── aliases.md        # Device aliases
+│   │   ├── aliases.md        # Device alias mapping
 │   │   └── topology.md       # Network topology
 │   ├── config/nornir/        # Nornir inventory config
+│   ├── data/
+│   │   └── configs/          # Backup storage directory
 │   ├── reports/              # Generated HTML reports
 │   └── capabilities.db       # DuckDB command library
 │
 ├── src/olav/                 # Main source code
-│   ├── agent.py             # DeepAgents creation
+│   ├── agent.py             # DeepAgents agent creation
+│   ├── main.py              # CLI entry point
 │   ├── core/                # Core modules
-│   ├── tools/               # LangChain tools
-│   └── main.py              # CLI entry point
+│   └── tools/               # LangChain tools
 │
 ├── i18n/                     # Internationalization
 │   └── zh.md                # Chinese guide
 │
+├── tests/                    # Test suite
 ├── pyproject.toml           # Project configuration (uv)
 └── README.md                # This file
 ```
@@ -357,20 +452,34 @@ OLAV/
 ### Common Commands
 
 ```bash
-# Start OLAV CLI
+# 🚀 Start Interactive CLI
 uv run python -m olav.main
 
-# Perform device inspection
-uv run python -m olav.main "Inspect all lab devices"
+# 📋 In CLI - View Available Devices
+/devices
+/devices [group]
 
-# Query single device
-uv run python -m olav.main "Check R1 status"
+# 📚 In CLI - Show Available Skills
+/skills
+/skills [skill_name]
 
-# Code quality checks
-uv run ruff check src/ --fix
+# 🔍 In CLI - Quick Inspection
+/inspect [layer|scope]
 
-# Type checking
-uv run mypy src/ --strict
+# 📁 In CLI - List Backups
+/backups
+
+# 📜 In CLI - Show Command History
+/history
+
+# 🧹 In CLI - Clear Memory
+/clear
+
+# ❓ In CLI - Help
+/help
+
+# 🚪 In CLI - Exit
+/quit
 ```
 
 ---
@@ -379,15 +488,20 @@ uv run mypy src/ --strict
 
 ### Troubleshooting
 
-1. **Check logs**: `tail -f nornir.log`
-2. **Verify configuration**: `.env` and `.olav/config/nornir/`
-3. **Run diagnostics**: `uv run python -m olav.main "Test connectivity"`
+1. **Devices not found**: Check `.olav/config/nornir/hosts.yaml` and verify credentials in `.env`
+2. **Commands timing out**: Increase SSH timeout in Nornir config
+3. **Backup files not saving**: Verify `.olav/data/configs/` directory exists and is writable
 
-### Feedback
+### Common Issues
 
-- **Report Issues**: Describe the problem and reproduction steps
-- **Contribute**: Ensure code quality and tests pass
-- **Discuss Features**: Share your ideas
+**Q: How do I add a new device?**
+A: Edit `.olav/config/nornir/hosts.yaml` and add the device entry with group and role information.
+
+**Q: Can I backup specific configuration sections?**
+A: Use natural language in the skill: "Backup interface configs from core devices" - the skill will determine the best approach.
+
+**Q: How are backups organized?**
+A: All backups go to `.olav/data/configs/` with format `[device]-[config-type]-[timestamp].txt`
 
 ---
 
@@ -397,18 +511,5 @@ MIT License - See LICENSE file for details
 
 ---
 
-## Acknowledgments
-
-- **DeepAgents Framework**: Powerful agent orchestration capabilities
-- **Claude Code**: Inspired the three-layer knowledge architecture design
-- **Nornir**: Excellent network automation framework
-- **LangChain**: Flexible LLM integration
-
----
-
-**OLAV v0.8** - *Build Network Intelligence with AI*
-
-**Last Updated**: 2026-01-08 | **Maintained by
-**OLAV v0.8** - *Build Network Intelligence with AI*
-
-**最后更新**: 2026-01-08 | **维护者**: GitHub Copilot + Claude Haiku 4.5
+**OLAV v0.8** - *Build Network Intelligence with AI*  
+**Last Updated**: 2026-01-08 | **Maintained by**: GitHub Copilot + Claude Haiku 4.5

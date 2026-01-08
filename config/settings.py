@@ -161,8 +161,8 @@ class Settings(BaseSettings):
     log_format: Literal["json", "text"] = "text"
     
     # HITL Configuration
-    # Master switch for Human-in-the-Loop - set to false for automated testing
-    enable_hitl: bool = True
+    # Master switch for Human-in-the-Loop - set ENABLE_HITL=false in .env for yolo mode
+    enable_hitl: bool = True  # Reads from ENABLE_HITL env var
     hitl_require_approval_for_write: bool = True
     hitl_require_approval_for_skill_update: bool = True
     hitl_approval_timeout_seconds: int = 300

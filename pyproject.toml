@@ -37,6 +37,9 @@ dependencies = [
     # CLI
     "typer>=0.9.0",
     "rich>=13.0",
+    "prompt-toolkit>=3.0.0",  # Phase 6: Enhanced CLI input
+    # Phase 5: Report Generation
+    "jinja2>=3.1.0",
     # Utilities
     "python-dotenv>=1.0",
     "python-dateutil>=2.8.0",
@@ -66,6 +69,7 @@ dev-dependencies = [
     "pytest-xdist>=3.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
+    "pytest-timeout>=2.4.0",
 ]
 
 [tool.uv.sources]
@@ -104,6 +108,7 @@ markers = [
     "phase2: marks tests as Phase 2 skill-based routing tests",
     "phase3: marks tests as Phase 3 subagent tests",
     "phase5: marks tests as Phase 5 inspection tests",
+    "phase6: marks tests as Phase 6 CLI enhancement tests",
     "production: marks tests as production-grade tests",
     "real: marks tests that require real LLM and network devices",
     "real_devices: marks tests that require real device connectivity via Nornir",

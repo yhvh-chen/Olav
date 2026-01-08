@@ -133,18 +133,27 @@ def smart_query(
     intent: str,
     command: str | None = None,
 ) -> str:
-    """Query a network device with automatic command selection.
+    """Query network devices with automatic command selection.
 
     This is the PRIMARY tool for device queries. It automatically:
     1. Detects device platform from inventory
     2. Finds the best matching command for your intent
     3. Executes the command and returns results
 
-    Use this instead of calling these separately:
-    get_device_platform, search_capabilities, nornir_execute.
+    Supports both single and multiple devices:
+    - Single: "R1"
+    - Multiple: "R1,R2,R3" 
+    - All: "all"
+    - Filter: "role:core", "site:lab", "group:test"
 
     Args:
-        device: Device name (e.g., "R1", "SW1", "core-router")
+        device: Device name(s) or filter expression:
+                - Single device: "R1"
+                - Multiple devices: "R1,R2,R3"
+                - All devices: "all"
+                - By role: "role:core", "role:border"
+                - By site: "site:lab"
+                - By group: "group:test"
         intent: What you want to query (e.g., "interface", "bgp", "ospf", "route", "mac")
         command: Optional specific command to run (overrides auto-selection)
 
@@ -156,14 +165,29 @@ def smart_query(
         "## R1 (cisco_ios) - Interface Status
         [show ip interface brief output]"
 
-        >>> smart_query("SW1", "mac")
-        "## SW1 (cisco_ios) - MAC Address Table
-        [show mac address-table output]"
+        >>> smart_query("R1,R2", "bgp")
+        "## Batch Query: bgp (2 devices)
+        [output from both devices]"
 
-        >>> smart_query("R2", "bgp")
-        "## R2 (cisco_ios) - BGP Status
-        [show ip bgp summary output]"
+        >>> smart_query("role:core", "version")
+        "## Batch Query: version (2 devices - role:core)
+        [output from R3, R4]"
+
+        >>> smart_query("all", "version")
+        "## Batch Query: version (6 devices)
+        [output from all devices]"
     """
+    # Check if this is a batch query (multiple devices)
+    is_batch = (
+        "," in device or 
+        device.lower() == "all" or 
+        ":" in device  # role:, site:, group: filters
+    )
+    
+    if is_batch:
+        return _batch_query_internal(device, intent, command)
+    
+    # Single device query
     # Step 1: Get device info
     info = get_device_info(device)
     if not info:
@@ -214,47 +238,60 @@ def smart_query(
         )
 
 
-@tool
-def batch_query(
+def _batch_query_internal(
     devices: str,
     intent: str,
+    command: str | None = None,
 ) -> str:
-    """Query multiple devices with the same intent.
-
-    P5 Optimization: Uses Nornir's native parallel execution for significant
-    speedup when querying multiple devices (up to 10x faster than sequential).
-
-    Args:
-        devices: Comma-separated device names (e.g., "R1,R2,R3" or "all")
-        intent: What you want to query (e.g., "interface", "bgp", "version")
-
-    Returns:
-        Combined output from all devices
-
-    Examples:
-        >>> batch_query("R1,R2,R3", "bgp")
-        "## Batch Query: bgp
-        ### R1: [output]
-        ### R2: [output]
-        ### R3: [output]"
-
-        >>> batch_query("all", "version")
-        "## Batch Query: version (6 devices)
-        [output from all devices]"
+    """Internal batch query implementation.
+    
+    Handles: "R1,R2", "all", "role:core", "site:lab", "group:test"
     """
     from nornir_netmiko.tasks import netmiko_send_command
 
     # Get singleton Nornir instance
     nr = get_nornir()
+    
+    filter_desc = ""
 
-    # Parse device list
+    # Parse device specification
     if devices.lower() == "all":
         device_list = list(nr.inventory.hosts.keys())
+        filter_desc = "all"
+    elif devices.startswith("role:"):
+        # Filter by role
+        role = devices.split(":", 1)[1].strip()
+        device_list = [
+            name for name, host in nr.inventory.hosts.items()
+            if host.get("role") == role
+        ]
+        filter_desc = f"role:{role}"
+    elif devices.startswith("site:"):
+        # Filter by site
+        site = devices.split(":", 1)[1].strip()
+        device_list = [
+            name for name, host in nr.inventory.hosts.items()
+            if host.get("site") == site
+        ]
+        filter_desc = f"site:{site}"
+    elif devices.startswith("group:"):
+        # Filter by group
+        group = devices.split(":", 1)[1].strip()
+        device_list = []
+        for name, host in nr.inventory.hosts.items():
+            if hasattr(host.groups, 'keys'):
+                if group in host.groups.keys():
+                    device_list.append(name)
+            elif isinstance(host.groups, (list, tuple)):
+                if group in [str(g) for g in host.groups]:
+                    device_list.append(name)
+        filter_desc = f"group:{group}"
     else:
+        # Comma-separated device names
         device_list = [d.strip() for d in devices.split(",")]
 
     if not device_list:
-        return "Error: No devices specified"
+        return f"Error: No devices found matching '{devices}'"
 
     # Validate devices exist
     valid_devices = []
@@ -354,6 +391,8 @@ def batch_query(
         results_formatted.append(f"### {device}\n❌ Not found in inventory\n")
 
     header = f"## Batch Query: {intent} ({len(valid_devices)} devices"
+    if filter_desc:
+        header += f" - {filter_desc}"
     if invalid_devices:
         header += f", {len(invalid_devices)} not found"
     header += ")\n\n"

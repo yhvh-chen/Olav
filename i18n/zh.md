@@ -1,9 +1,10 @@
-# 🤖 OLAV - 网络运维智能助手
+# 🤖 OLAV - 企业网络运维 AI 助手
 
 **版本**: 0.8.0  
-**状态**: ✅ Phase 1-5 完全可用  
+**状态**: ✅ 生产就绪  
 **架构**: DeepAgents Native + 三层知识架构 (Skills/Knowledge/Tools)  
-**平台**: 兼容 Claude Code, 支持 Windows/Mac/Linux
+**CLI**: 交互式 DeepAgent CLI  
+**平台**: 兼容 Claude Code，支持 Windows/Mac/Linux
 
 **[中文指南](zh.md)** | **[English Guide](../README.md)**
 
@@ -13,9 +14,9 @@
 
 - [快速开始](#快速开始)
 - [功能概览](#功能概览)
-- [发展阶段](#发展阶段)
 - [安装](#安装)
 - [使用示例](#使用示例)
+- [备份指南](#备份使用指南)
 - [架构设计](#架构设计)
 - [核心技术](#核心技术)
 
@@ -34,33 +35,54 @@ cp .env.example .env
 # 编辑 .env，添加你的设备信息和API密钥
 ```
 
-### 2️⃣ 运行第一条命令
+### 2️⃣ 启动交互式 CLI
 
 ```bash
-# 查询设备状态
-uv run python -m olav.main "查询 R1 接口状态"
+# 启动 DeepAgent CLI
+uv run python -m olav.main
 
-# 执行全面巡检
-uv run python -m olav.main "巡检所有 lab 设备"
-
-# 搜索能力库
-uv run python -m olav.main "如何检查BGP邻居？"
+# 欢迎使用 OLAV 交互式 CLI
+# 输入 /help 查看可用命令
 ```
 
-### 3️⃣ 在 Claude Code 中使用
+### 3️⃣ 在 CLI 中使用斜杠命令
+
+```
+OLAV> /devices
+✅ R1, R2, R3, R4, SW1, SW2 (连接中)
+
+OLAV> 检查 R1 接口状态
+🔍 匹配到 'quick-query' Skill
+...
+
+OLAV> /inspect layer3
+📊 L3 巡检报告
+...
+
+OLAV> /skills
+📚 可用 Skills: device-inspection, quick-query, deep-analysis, config-backup
+
+OLAV> /history
+📜 最近命令...
+
+OLAV> /quit
+```
+
+### 4️⃣ 在 Claude Code 中使用
 
 ```
 1. 进入项目目录
 2. 在 Claude Code 中打开
-3. 使用 `/skills/device-inspection` 查看可用skills
-4. 发送指令: "Inspect all lab devices with full L1-L4 health check"
+3. OLAV CLI 自动与代理集成
+4. 查看可用 Skill: `/skills`
+5. 发送命令: "备份所有核心角色设备的运行配置"
 ```
 
 ---
 
 ## 功能概览
 
-### 🎯 三大核心能力
+### 🎯 四大核心能力
 
 #### 1. **Device Inspection** - 全面设备巡检
 - **L1 物理层**: CPU/内存/温度/电源/风扇
@@ -73,10 +95,11 @@ uv run python -m olav.main "如何检查BGP邻居？"
 - 自动命令选择
 - 面向多品牌网络设备 (Cisco/Huawei/Arista)
 
-```bash
+示例:
+```
 "检查 R1 CPU 使用率"
-"显示 S1 接口状态"
-"获取 R2 的 BGP 邻居"
+"显示 SW1 接口状态"
+"获取 R3 的 BGP 邻居"
 ```
 
 #### 3. **Deep Analysis** - 深度分析
@@ -84,52 +107,25 @@ uv run python -m olav.main "如何检查BGP邻居？"
 - 自动问题定位
 - 提供修复建议
 
-```bash
+示例:
+```
 "诊断 R1 的 BGP 邻居为何掉线"
 "分析核心交换机上的接口错误率"
 "检查网络安全基线合规性"
 ```
 
----
+#### 4. **Device Backup** - 智能配置备份
+- 按 group/role/site 灵活过滤
+- 单台或批量设备备份
+- 自动文件命名和时间戳
+- Git 版本控制集成
 
-## 发展阶段
-
-OLAV 按照 5 个阶段递进式开发，每个阶段都是完整可用的：
-
-### Phase 1: MVP (基础框架) ✅
-- **DeepAgents Agent** 基础
-- **Skill 路由系统** 
-- **基础命令执行** (Nornir)
-- **知识库** (aliases/topology)
-- **状态**: ✅ 生产可用
-
-### Phase 2: Skill 系统 ✅
-- **Skill-based routing** - LLM 智能路由
-- **英文/中文支持** - 双语识别
-- **三层知识架构** - Skills/Knowledge/Tools
-- **多设备支持** - 自动批处理
-- **状态**: ✅ 生产可用
-
-### Phase 3: SubAgent 框架 ✅
-- **Macro 分析** - 拓扑级路径分析
-- **Micro 诊断** - 设备级分层诊断
-- **后向兼容** - 保留原有skills
-- **自动降级** - 无法访问时优雅处理
-- **状态**: ✅ 生产可用
-
-### Phase 4: 检查自动化 ✅
-- **Comprehensive Inspection** - L1-L4 全覆盖
-- **Multi-device Reports** - 统一多设备报告
-- **Anomaly Detection** - 自动异常标记
-- **HTML 报告生成** - 专业可视化输出
-- **状态**: ✅ 生产可用
-
-### Phase 5: 真实设备测试 ✅
-- **Real Nornir 集成** - 实际设备连接
-- **Real LLM API** - 真实 LLM 调用
-- **完整 E2E 测试** - 16+ 真实场景
-- **DuckDB 能力库** - CLI/API/NETCONF 命令库
-- **状态**: ✅ 生产可用
+示例:
+```
+"备份所有核心角色设备的运行配置"
+"保存 test 组的启动配置"
+"备份 border 角色设备的 running-config"
+```
 
 ---
 
@@ -140,7 +136,7 @@ OLAV 按照 5 个阶段递进式开发，每个阶段都是完整可用的：
 - **Python 3.11+** (推荐 3.13)
 - **uv** 包管理器 (快速安装: `pip install uv`)
 - **网络设备** (Cisco IOS/XE, Huawei, Arista 等)
-- **SSH 访问** 到网络设备
+- **SSH 访问权限** 到网络设备
 
 ### 完整安装步骤
 
@@ -159,106 +155,203 @@ cp .env.example .env
 # - DEVICE_PASSWORD=password
 # - OPENAI_API_KEY=sk-...
 
-# 4. 配置 Nornir (网络设备库存)
+# 4. 配置 Nornir (网络设备清单)
 # 编辑 .olav/config/nornir/hosts.yaml
 # 编辑 .olav/config/nornir/groups.yaml
 
-# 5. 验证安装
-uv run python -m olav.main "检查设备连接"
+# 5. 启动交互式 CLI 并测试
+uv run python -m olav.main
+
+# 在 CLI 中测试基本命令:
+# OLAV> /devices
+# OLAV> 检查设备连接性
+# OLAV> /quit
 ```
 
 ---
 
 ## 使用示例
 
-### 示例 1: 基础设备查询
+### 示例 1: 启动 CLI 并查询设备
 
 ```bash
-# 方式 A: CLI
-$ uv run python -m olav.main "R1 接口状态"
+# 启动交互式 CLI
+$ uv run python -m olav.main
 
-# 预期结果:
-# R1 Gi0/1: UP, 1000Mbps
-# R1 Gi0/2: UP, 1000Mbps
-# R1 Gi0/3: DOWN
+# OLAV> R1 接口状态
+# 🔍 匹配到 'quick-query' Skill
+# 执行: show ip interface brief on R1
+# ...
+# ✅ 任务完成
+#
+# OLAV>
 ```
 
-### 示例 2: 全面设备巡检
+### 示例 2: 查看可用设备
 
 ```bash
-# 对所有 lab 设备执行 L1-L4 全面巡检
-$ uv run python -m olav.main "巡检所有 lab 设备并执行全面 L1-L4 健康检查"
-
-# 生成的报告:
-# .olav/reports/lab-comprehensive-l1l4-20260108-143000.html
-#   ├─ Executive Summary (所有8个设备的整体状态)
-#   ├─ L1-L4 分层数据
-#   ├─ 异常检测和标记
-#   └─ 修复建议
+# OLAV> /devices
+# 📋 连接的设备:
+#   R1 (Cisco IOS) - Group: test, Role: border, Site: lab
+#   R2 (Cisco IOS) - Group: test, Role: border, Site: lab
+#   R3 (Cisco IOS) - Group: test, Role: core, Site: lab
+#   R4 (Cisco IOS) - Group: test, Role: core, Site: lab
+#   SW1 (Cisco IOS) - Group: test, Role: access, Site: lab
+#   SW2 (Cisco IOS) - Group: test, Role: access, Site: lab
 ```
 
-### 示例 3: 深度分析工作流
+### 示例 3: 执行全面巡检
 
 ```bash
-# 复杂的多步诊断
-$ uv run python -m olav.main "诊断 R1 上的 BGP 闪振问题并提供修复步骤"
-
-# 预期工作流:
-# 1. 检查 BGP 邻接体状态
-# 2. 分析接口稳定性
-# 3. 审查路由表
-# 4. 检查路由器 CPU/内存
-# 5. 提供建议
+# OLAV> 巡检所有 lab 设备，进行完整的 L1-L4 检查
+# 🔍 匹配到 'device-inspection' Skill
+# 📊 lab 组 L1-L4 巡检报告
+#   ├─ 执行摘要 (6 个设备的总体状态)
+#   ├─ L1 物理层: CPU/内存/温度/电源 ✅
+#   ├─ L2 数据链路: VLAN/STP/LLDP ✅
+#   ├─ L3 网络层: 路由/OSPF/BGP ✅
+#   ├─ L4 传输层: TCP/进程 ✅
+#   └─ 异常检测: 未发现异常
+#
+# 📁 报告已保存: .olav/reports/lab-comprehensive-l1l4-20260108-143000.html
 ```
 
-### 示例 4: 在 Claude Code 中使用
+### 示例 4: 使用文件引用和 Shell 命令
 
+```bash
+# OLAV> 分析这个配置文件 @network-config.txt 是否符合最佳实践
+# 📄 文件已加载: network-config.txt (1024 字节)
+# 🔍 匹配到 'deep-analysis' Skill
+# ...
+
+# OLAV> !ping -c 4 192.168.1.1 && 检查 R1 是否响应
+# $ ping -c 4 192.168.1.1
+# PING 192.168.1.1 (192.168.1.1) 56(84) bytes of data
+# ...
+# ✅ R1 响应正常，丢包率 0%
 ```
-Claude Code 提示词:
 
-"使用 OLAV skills 执行以下任务:
-1. 巡检所有 lab 设备
-2. 生成综合健康报告
-3. 标记任何异常
-4. 提供修复建议"
+### 示例 5: 备份设备配置
 
-预期结果:
-✅ Agent 自动匹配 device-inspection skill
-✅ 列举所有 lab 组设备
-✅ 执行 L1-L4 巡检
-✅ 生成 HTML 报告到 .olav/reports/
-✅ 提取异常并建议修复
+```bash
+# 单台设备备份
+OLAV> 备份 R1 运行配置
+🔍 匹配到 'config-backup' Skill
+📁 正在保存 R1 运行配置
+✅ 已保存至: .olav/data/configs/R1-running-config-20260108-120000.txt
+
+# 按角色备份
+OLAV> 备份所有核心角色设备的运行配置
+🔍 匹配到 'config-backup' Skill
+📁 找到 2 个核心设备: R3, R4
+✅ 正在保存 R3 运行配置
+✅ 正在保存 R4 运行配置
+
+# 按组备份
+OLAV> 备份 test 组的启动配置
+🔍 匹配到 'config-backup' Skill
+📁 找到 6 个 test 组设备
+✅ 保存完成 (6 个文件)
+
+# 按站点备份
+OLAV> 备份所有 lab 站点设备的运行配置
+🔍 匹配到 'config-backup' Skill
+📁 找到 6 个 lab 站点设备
+✅ 批量备份完成 (6 个文件已保存)
 ```
 
 ---
 
-## 架构设计
+## 备份使用指南
+
+### 设备过滤选项
+
+备份 Skill 支持多种过滤方式:
+
+| 过滤类型 | 语法 | 示例 |
+|---------|------|------|
+| **单台设备** | 设备名称 | `备份 R1 运行配置` |
+| **多台设备** | 逗号分隔 | `备份 R1,R2,R3 运行配置` |
+| **按角色** | `role:` 前缀 | `备份 role:core 运行配置` |
+| **按组** | `group:` 前缀 | `备份 group:test 运行配置` |
+| **按站点** | `site:` 前缀 | `备份 site:lab 运行配置` |
+| **所有设备** | `all` 关键字 | `备份所有设备运行配置` |
+
+### 备份文件位置
+
+所有备份自动保存到 `.olav/data/configs/`，并使用时间戳命名:
+
+```
+.olav/data/configs/
+├── R1-running-config-20260108-120000.txt
+├── R2-running-config-20260108-120000.txt
+├── R3-startup-config-20260108-120000.txt
+└── ...
+```
+
+### 查看可用设备
+
+```bash
+OLAV> /devices
+📋 可用设备 (含属性):
+
+设备 | 组 | 角色 | 站点
+-----|------|------|------
+R1   | test   | border | lab
+R2   | test   | border | lab
+R3   | test   | core | lab
+R4   | test   | core | lab
+SW1  | test   | access | lab
+SW2  | test   | access | lab
+```
+
+### 使用 Git 进行版本控制
+
+使用 Git 追踪配置变化:
+
+```bash
+# 初始化 (仅一次)
+cd .olav/data
+git init
+git config user.name "OLAV Backup"
+
+# 备份后
+git add configs/
+git commit -m "Backup $(date +%Y%m%d-%H%M%S)"
+
+# 查看备份历史
+git log --oneline | head -10
+```
+
+---
+
+## 高级用法
 
 ### 三层知识架构
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│              OLAV 三层知识架构                          │
+│          OLAV 三层知识架构                              │
 ├────────────────────────────────────────────────────────┤
 │                                                        │
-│  Layer 1: SKILLS (.olav/skills/*.md)                  │
-│  ├─ device-inspection    → 全面 L1-L4 巡检           │
-│  ├─ quick-query          → 快速 1-2 命令查询          │
-│  └─ deep-analysis        → 多步复杂诊断               │
+│  第 1 层: SKILLS (.olav/skills/*.md)                   │
+│  ├─ device-inspection    → 全面 L1-L4 巡检            │
+│  ├─ quick-query          → 快速 1-2 个命令查询         │
+│  ├─ deep-analysis        → 多步骤诊断                   │
+│  └─ config-backup        → 配置备份                     │
 │     [策略层 - HOW: 如何执行任务]                       │
 │                                                        │
-│  Layer 2: KNOWLEDGE (.olav/knowledge/*.md)            │
-│  ├─ aliases.md           → 设备别名映射               │
-│  ├─ topology.md          → 网络拓扑                    │
-│  └─ platform-commands.md → 多品牌命令库               │
-│     [知识层 - WHAT: 什么是事实]                        │
+│  第 2 层: KNOWLEDGE (.olav/knowledge/*.md)             │
+│  ├─ aliases.md           → 设备别名映射                │
+│  └─ topology.md          → 网络拓扑                     │
+│     [知识层 - WHAT: 是什么]                            │
 │                                                        │
-│  Layer 3: TOOLS/CAPABILITIES                          │
-│  ├─ Nornir               → SSH 批量执行               │
-│  ├─ DuckDB              → CLI/API/NETCONF 命令库      │
-│  ├─ Jinja2              → 报告模板生成               │
+│  第 3 层: TOOLS/CAPABILITIES                           │
+│  ├─ Nornir               → SSH 批量执行                │
+│  ├─ smart_query          → 统一查询工具                │
+│  ├─ DuckDB              → CLI/API/NETCONF 库           │
 │  └─ LangChain           → LLM 集成                     │
-│     [能力层 - CAN: 能做什么]                           │
+│     [能力层 - CAN: 我们能做什么]                       │
 │                                                        │
 └────────────────────────────────────────────────────────┘
 ```
@@ -269,51 +362,49 @@ Claude Code 提示词:
 用户输入
   ↓
 ┌─────────────────────────┐
-│ LLM Skill Router        │
+│ LLM Skill 路由器         │
 │ (意图识别 + 路由)        │
 └──────────┬──────────────┘
            ↓
       选择 Skill
            ↓
 ┌──────────────────────────┐
-│ Skill 执行引擎            │
-│ (解析范围 + 执行命令)     │
+│ Skill 执行引擎           │
+│ (解析范围 + 执行命令)    │
 └──────────┬───────────────┘
            ↓
     Nornir 批量执行
            ↓
 ┌──────────────────────────┐
 │ 报告生成                  │
-│ (Jinja2 模板 + HTML)      │
+│ (Jinja2 模板 + HTML)     │
 └──────────┬───────────────┘
-           ↓
-      输出到用户
 ```
 
 ---
 
-## 核心技术
+## 架构设计
 
-### 技术栈
+### 核心技术栈
 
 | 组件 | 技术 | 用途 |
-|------|------|------|
-| **框架** | DeepAgents | Agent 编排和 HITL |
+|-----|------|------|
+| **框架** | DeepAgents | 代理编排和 HITL |
 | **LLM** | OpenAI/Claude | 意图识别和路由 |
+| **CLI** | prompt-toolkit 3.0+ | 交互式命令界面 |
 | **网络** | Nornir 3.3 | 多设备批量执行 |
-| **数据库** | DuckDB 0.8 | 轻量能力库存储 |
+| **数据库** | DuckDB 0.8 | 轻量级能力库 |
 | **模板** | Jinja2 3.1 | HTML 报告生成 |
 | **包管理** | uv | 快速依赖管理 |
-| **代码质量** | Ruff | Linting + 格式化 |
 
 ### 关键特性
 
-✅ **小核心大生态** - 核心小，通过 Markdown 扩展  
-✅ **Claude Code 兼容** - `.olav/` 结构与 `.claude/` 完全对应  
+✅ **小核心，大生态** - 小核心通过 Markdown 扩展  
+✅ **Claude Code 兼容** - `.olav/` 结构与 `.claude/` 对齐  
 ✅ **多品牌支持** - Cisco/Huawei/Arista/Juniper 等  
-✅ **智能路由** - LLM 自动选择合适的 skill  
-✅ **生产就绪** - 完整测试、类型检查、错误处理  
-✅ **易于扩展** - 添加 Markdown 即可添加新功能  
+✅ **智能路由** - LLM 自动选择合适的 Skill  
+✅ **生产就绪** - 完整错误处理、类型提示、验证  
+✅ **易于扩展** - 通过添加 Markdown 文件添加新功能  
 
 ---
 
@@ -322,69 +413,92 @@ Claude Code 提示词:
 ```
 OLAV/
 ├── .olav/                     # OLAV 配置和知识库
-│   ├── OLAV.md               # 核心系统提示词
-│   ├── skills/               # 3个核心 skills (Markdown)
-│   │   ├── device-inspection.md
-│   │   ├── quick-query.md
-│   │   └── deep-analysis.md
+│   ├── OLAV.md               # 核心系统提示
+│   ├── skills/               # 核心 Skills (Markdown)
+│   │   ├── device-inspection.md      # L1-L4 巡检
+│   │   ├── quick-query.md            # 快速查询
+│   │   ├── deep-analysis.md          # 复杂诊断
+│   │   └── config-backup.md          # 配置备份
 │   ├── knowledge/            # 知识库
-│   │   ├── aliases.md        # 设备别名
+│   │   ├── aliases.md        # 设备别名映射
 │   │   └── topology.md       # 网络拓扑
-│   ├── config/nornir/        # Nornir 库存配置
+│   ├── config/nornir/        # Nornir 清单配置
+│   ├── data/
+│   │   └── configs/          # 备份存储目录
 │   ├── reports/              # 生成的 HTML 报告
 │   └── capabilities.db       # DuckDB 命令库
 │
 ├── src/olav/                 # 主源代码
-│   ├── agent.py             # DeepAgents 创建
+│   ├── agent.py             # DeepAgents 代理创建
+│   ├── main.py              # CLI 入口
 │   ├── core/                # 核心模块
-│   ├── tools/               # LangChain tools
-│   └── main.py              # CLI 入口
+│   └── tools/               # LangChain 工具
 │
 ├── i18n/                     # 国际化
 │   └── zh.md                # 中文指南
 │
+├── tests/                    # 测试套件
 ├── pyproject.toml           # 项目配置 (uv)
-└── README.md                # 英文指南
+└── README.md                # 说明文件
 ```
 
 ---
 
 ## 快速参考
 
-### 常用命令
+### 常见命令
 
 ```bash
-# 启动 OLAV CLI
+# 🚀 启动交互式 CLI
 uv run python -m olav.main
 
-# 执行设备巡检
-uv run python -m olav.main "巡检所有 lab 设备"
+# 📋 在 CLI 中 - 查看可用设备
+/devices
+/devices [group]
 
-# 查询单一设备
-uv run python -m olav.main "检查 R1 状态"
+# 📚 在 CLI 中 - 显示可用 Skills
+/skills
+/skills [skill_name]
 
-# 代码质量检查
-uv run ruff check src/ --fix
+# 🔍 在 CLI 中 - 快速巡检
+/inspect [layer|scope]
 
-# 类型检查
-uv run mypy src/ --strict
+# 📁 在 CLI 中 - 列出备份
+/backups
+
+# 📜 在 CLI 中 - 显示命令历史
+/history
+
+# 🧹 在 CLI 中 - 清除内存
+/clear
+
+# ❓ 在 CLI 中 - 帮助
+/help
+
+# 🚪 在 CLI 中 - 退出
+/quit
 ```
 
 ---
 
-## 获取帮助
+## 支持
 
-### 遇到问题？
+### 故障排查
 
-1. **查看日志**: `tail -f nornir.log`
-2. **检查配置**: `.env` 和 `.olav/config/nornir/`
-3. **运行诊断**: `uv run python -m olav.main "测试连接"`
+1. **找不到设备**: 检查 `.olav/config/nornir/hosts.yaml` 和 `.env` 中的凭证
+2. **命令超时**: 增加 Nornir 配置中的 SSH 超时时间
+3. **备份文件保存失败**: 验证 `.olav/data/configs/` 目录存在且可写
 
-### 反馈和贡献
+### 常见问题
 
-- **提交 Issue**: 描述问题和重现步骤
-- **提交 PR**: 确保代码质量
-- **讨论功能**: 分享你的想法
+**Q: 如何添加新设备?**
+A: 编辑 `.olav/config/nornir/hosts.yaml`，使用 group 和 role 信息添加设备条目。
+
+**Q: 我可以备份特定配置部分吗?**
+A: 在 Skill 中使用自然语言: "备份核心设备的接口配置" - Skill 会自动确定最佳方法。
+
+**Q: 备份文件如何组织?**
+A: 所有备份都保存到 `.olav/data/configs/`，格式为 `[设备]-[配置类型]-[时间戳].txt`
 
 ---
 
@@ -394,15 +508,5 @@ MIT License - 详见 LICENSE 文件
 
 ---
 
-## 致谢
-
-- **DeepAgents Framework**: 提供强大的 Agent 编排能力
-- **Claude Code**: 启发了三层知识架构设计
-- **Nornir**: 卓越的网络自动化框架
-- **LangChain**: 灵活的 LLM 集成
-
----
-
-**OLAV v0.8** - *Build Network Intelligence with AI*
-
+**OLAV v0.8** - *用 AI 构建网络智能*  
 **最后更新**: 2026-01-08 | **维护者**: GitHub Copilot + Claude Haiku 4.5

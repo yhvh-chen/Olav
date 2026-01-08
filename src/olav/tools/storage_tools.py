@@ -1,0 +1,276 @@
+"""Storage Tools - File read/write capabilities for OLAV agent.
+
+This module provides safe file storage operations for:
+- Device configurations (running-config, startup-config)
+- Show tech outputs
+- Logs and troubleshooting data
+- Knowledge base updates
+
+All write operations require HITL approval for safety.
+"""
+
+from datetime import datetime
+from pathlib import Path
+
+from langchain_core.tools import tool
+
+
+# Allowed directories for file operations
+ALLOWED_WRITE_DIRS = [
+    ".olav/data/configs",          # Device configurations
+    ".olav/data/logs",             # Logs and outputs
+    ".olav/knowledge/solutions",   # Troubleshooting solutions
+    ".olav/data/reports",          # Reports and analysis
+    ".olav/scratch",               # Temporary files
+]
+
+ALLOWED_READ_DIRS = [
+    ".olav/",                       # All .olav content
+]
+
+
+def _is_path_allowed(filepath: str, allowed_dirs: list[str]) -> bool:
+    """Check if a path is within allowed directories.
+    
+    Args:
+        filepath: Path to check
+        allowed_dirs: List of allowed directory prefixes
+        
+    Returns:
+        True if path is allowed, False otherwise
+    """
+    # Normalize path
+    path = Path(filepath)
+    
+    # Convert to relative path if absolute
+    try:
+        path = path.relative_to(Path.cwd())
+    except ValueError:
+        pass
+    
+    path_str = str(path).replace("\\", "/")
+    
+    for allowed in allowed_dirs:
+        if path_str.startswith(allowed):
+            return True
+    
+    return False
+
+
+@tool
+def write_file(
+    filepath: str,
+    content: str,
+    create_dirs: bool = True,
+) -> str:
+    """Write content to a file in the OLAV knowledge base.
+    
+    This tool saves data to the local filesystem. Allowed directories:
+    - .olav/data/configs/ - Device configurations
+    - .olav/data/logs/ - Logs and command outputs  
+    - .olav/knowledge/solutions/ - Troubleshooting solutions
+    - .olav/data/reports/ - Reports and analysis
+    - .olav/scratch/ - Temporary files
+    
+    IMPORTANT: This operation requires HITL approval.
+    
+    Args:
+        filepath: Path to write (relative to project root, e.g., ".olav/data/configs/R1-config.txt")
+        content: Content to write
+        create_dirs: Whether to create parent directories if they don't exist
+        
+    Returns:
+        Success message with filepath, or error message
+        
+    Examples:
+        write_file(".olav/data/configs/R1-running-config.txt", config_output)
+        write_file(".olav/knowledge/logs/R1-interface-errors-20260108.log", log_output)
+    """
+    # Validate path
+    if not _is_path_allowed(filepath, ALLOWED_WRITE_DIRS):
+        return f"❌ Error: Path '{filepath}' is not in allowed directories. Allowed: {ALLOWED_WRITE_DIRS}"
+    
+    try:
+        path = Path(filepath)
+        
+        # Create parent directories if needed
+        if create_dirs:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write content
+        path.write_text(content, encoding="utf-8")
+        
+        # Get file size
+        size = path.stat().st_size
+        
+        return f"✅ File saved: {filepath} ({size} bytes)"
+        
+    except Exception as e:
+        return f"❌ Error writing file: {str(e)}"
+
+
+@tool
+def read_file(
+    filepath: str,
+) -> str:
+    """Read content from a file in the OLAV knowledge base.
+    
+    This tool reads data from the local filesystem. Can read from any .olav/ directory.
+    
+    Args:
+        filepath: Path to read (relative to project root)
+        
+    Returns:
+        File content, or error message
+        
+    Examples:
+        read_file(".olav/data/configs/R1-running-config.txt")
+        read_file(".olav/skills/quick-query.md")
+    """
+    # Validate path
+    if not _is_path_allowed(filepath, ALLOWED_READ_DIRS):
+        return f"❌ Error: Path '{filepath}' is not in allowed directories."
+    
+    try:
+        path = Path(filepath)
+        
+        if not path.exists():
+            return f"❌ Error: File not found: {filepath}"
+        
+        content = path.read_text(encoding="utf-8")
+        return content
+        
+    except Exception as e:
+        return f"❌ Error reading file: {str(e)}"
+
+
+@tool
+def save_device_config(
+    device: str,
+    config_type: str,
+    content: str,
+) -> str:
+    """Save a device configuration to the knowledge base.
+    
+    This is a convenience tool for saving device configs with proper naming.
+    
+    Args:
+        device: Device name (e.g., "R1", "SW1")
+        config_type: Type of config ("running", "startup", "backup")
+        content: Configuration content
+        
+    Returns:
+        Success message with filepath
+        
+    Example:
+        save_device_config("R1", "running", show_run_output)
+    """
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{device}-{config_type}-config-{timestamp}.txt"
+    filepath = f".olav/data/configs/{filename}"
+    
+    # Add metadata header
+    header = f"""! Device: {device}
+! Config Type: {config_type}
+! Saved: {datetime.now().isoformat()}
+! Source: OLAV automated backup
+!
+"""
+    full_content = header + content
+    
+    try:
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(full_content, encoding="utf-8")
+        
+        size = path.stat().st_size
+        return f"✅ Config saved: {filepath} ({size} bytes)"
+        
+    except Exception as e:
+        return f"❌ Error saving config: {str(e)}"
+
+
+@tool  
+def save_tech_support(
+    device: str,
+    content: str,
+) -> str:
+    """Save show tech-support output to the knowledge base.
+    
+    Tech-support outputs are large and useful for TAC cases.
+    
+    Args:
+        device: Device name
+        content: Show tech-support output
+        
+    Returns:
+        Success message with filepath
+    """
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{device}-tech-support-{timestamp}.txt"
+    filepath = f".olav/data/reports/{filename}"
+    
+    header = f"""! Device: {device}
+! Type: show tech-support
+! Captured: {datetime.now().isoformat()}
+! Source: OLAV
+!
+"""
+    full_content = header + content
+    
+    try:
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(full_content, encoding="utf-8")
+        
+        size = path.stat().st_size
+        size_kb = size / 1024
+        return f"✅ Tech-support saved: {filepath} ({size_kb:.1f} KB)"
+        
+    except Exception as e:
+        return f"❌ Error saving tech-support: {str(e)}"
+
+
+@tool
+def list_saved_files(
+    directory: str = ".olav/knowledge",
+    pattern: str = "*",
+) -> str:
+    """List files saved in the OLAV knowledge base.
+    
+    Args:
+        directory: Directory to list (must be under .olav/)
+        pattern: Glob pattern to filter files (e.g., "*.txt", "R1-*")
+        
+    Returns:
+        List of files with sizes
+    """
+    if not _is_path_allowed(directory, ALLOWED_READ_DIRS):
+        return f"❌ Error: Directory '{directory}' is not accessible."
+    
+    try:
+        path = Path(directory)
+        
+        if not path.exists():
+            return f"📁 Directory '{directory}' does not exist yet."
+        
+        files = list(path.rglob(pattern))
+        
+        if not files:
+            return f"📁 No files matching '{pattern}' in {directory}"
+        
+        result = [f"📁 Files in {directory}:"]
+        for f in sorted(files):
+            if f.is_file():
+                size = f.stat().st_size
+                rel_path = f.relative_to(path)
+                if size > 1024:
+                    result.append(f"  - {rel_path} ({size/1024:.1f} KB)")
+                else:
+                    result.append(f"  - {rel_path} ({size} bytes)")
+        
+        return "\n".join(result)
+        
+    except Exception as e:
+        return f"❌ Error listing files: {str(e)}"
