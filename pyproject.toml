@@ -103,5 +103,9 @@ markers = [
     "integration: marks tests as integration tests",
     "phase2: marks tests as Phase 2 skill-based routing tests",
     "phase3: marks tests as Phase 3 subagent tests",
+    "phase5: marks tests as Phase 5 inspection tests",
+    "production: marks tests as production-grade tests",
     "real: marks tests that require real LLM and network devices",
+    "real_devices: marks tests that require real device connectivity via Nornir",
+    "real_llm: marks tests that require real LLM API calls",
 ]
