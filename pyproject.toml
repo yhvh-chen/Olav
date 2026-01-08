@@ -108,4 +108,6 @@ markers = [
     "real: marks tests that require real LLM and network devices",
     "real_devices: marks tests that require real device connectivity via Nornir",
     "real_llm: marks tests that require real LLM API calls",
+    "comprehensive_l1l4: marks tests for comprehensive L1-L4 network inspection",
+    "lab_inspection: marks tests for lab device group inspection",
 ]

@@ -2,172 +2,161 @@
 id: device-inspection
 intent: inspect
 complexity: medium
-description: "Device system health check, generate structured reports according to template"
+description: "Comprehensive L1-L4 network device inspection for all lab devices, generates detailed structured reports"
 examples:
-  - "Inspect R1 system status"
-  - "Device health check report"
-  - "Pre-deployment device check"
+  - "Inspect all lab devices"
+  - "Full L1-L4 health check lab"
+  - "Complete network device inspection"
 enabled: true
 ---
 
-# Device Inspection
+# Device Inspection - Comprehensive L1-L4
 
 ## Applicable Scenarios
-- Regular health checks
-- Pre-deployment checks
-- Post-fault verification
-- Change before/after comparison
+- Comprehensive network health assessment (all lab devices)
+- Full stack network inspection (L1-L4)
+- Network baseline establishment and verification
+- Pre-maintenance complete audit
 
 ## Identification Signals
-User questions contain: "inspect", "check", "health check", "baseline"
+User questions contain: "inspect", "comprehensive", "full check", "all devices", "L1-L4"
 
 ## Execution Strategy
-1. **Use write_todos to list check items**
-2. Execute step by step according to template
-3. Generate structured report
-4. Mark anomalies
+1. **List all devices in 'lab' group** using list_devices(group="lab")
+2. **For each device, execute comprehensive inspection** covering L1 (Physical), L2 (Data Link), L3 (Network), L4 (Transport)
+3. **Generate consolidated report** with device-by-device status
+4. **Flag anomalies** across all layers
 
-## Inspection Template
+## Comprehensive Inspection Template (L1-L4)
 
-### Basic Information
-- [ ] `show version` (uptime, version, model)
-- [ ] `show inventory` (hardware info, modules)
-- [ ] `show license` (license status)
+### L1 - Physical Layer
+- [ ] `show version` (Device model, serial, uptime)
+- [ ] `show inventory` (Hardware modules, power supplies, fans)
+- [ ] `show environment all` (Temperature, power status, fan status)
+- [ ] `show interfaces` (Physical port states, media types)
 
-### System Health
-- [ ] `show processes cpu history` (CPU trend)
-- [ ] `show memory statistics` (memory usage)
-- [ ] `show environment all` (temperature, power, fans)
+### L2 - Data Link Layer
+- [ ] `show vlan brief` (VLAN configuration and status)
+- [ ] `show spanning-tree summary` (STP topology, root bridge)
+- [ ] `show spanning-tree detail` (Port states, costs)
+- [ ] `show lldp neighbors` (LLDP neighbor discovery)
+- [ ] `show mac address-table` (MAC table status, count)
 
-### Interface Status
-- [ ] `show interfaces summary` (port status summary)
-- [ ] `show interfaces counters errors` (error counts)
-- [ ] `show interfaces status` (detailed status)
+### L3 - Network Layer
+- [ ] `show ip route summary` (Route count and protocol summary)
+- [ ] `show ip ospf neighbor` (OSPF neighbor status)
+- [ ] `show ip ospf interface brief` (OSPF interface states)
+- [ ] `show ip bgp summary` (BGP neighbor status)
+- [ ] `show ip bgp vpnv4 all summary` (VPNv4 status if applicable)
 
-### 路由状态
-- [ ] `show ip route summary` (路由汇总)
-- [ ] `show ip ospf neighbor` (OSPF 邻居)
-- [ ] `show ip bgp summary` (BGP 邻居)
+### L4 - Transport Layer & Services
+- [ ] `show tcp brief` (TCP session count)
+- [ ] `show processes cpu` (CPU utilization and process breakdown)
+- [ ] `show memory statistics` (Memory usage across memory pools)
+- [ ] `show interfaces counters errors` (Error counters on all interfaces)
+- [ ] `show interfaces counters dropped` (Dropped packet counters)
 
-### 二层状态
-- [ ] `show vlan brief` (VLAN 状态)
-- [ ] `show spanning-tree summary` (STP 状态)
-- [ ] `show lldp neighbors` (LLDP 邻居)
+## Report Format
 
-### 安全检查
-- [ ] `show access-lists summary` (ACL 配置)
-- [ ] `show login` (登录配置)
-- [ ] `show users` (当前会话)
-
-## 报告格式
-
-### 执行摘要
+### Executive Summary
 ```
-设备巡检报告 - R1 (10.1.1.1)
-检查时间: 2026-01-07 14:30:00
-运行时间: 45 days, 6 hours
+📋 Lab Network Comprehensive Inspection Report
+Inspection Time: 2026-01-08 14:30:00
+Total Devices: 8
+Overall Status: 2 devices OK, 5 devices WARNING, 1 device CRITICAL
 
-总体状态: ⚠️  2项异常
-```
-
-### 详细结果
-| 检查项 | 状态 | 详情 | 建议 |
-|--------|------|------|------|
-| CPU | ✅ 正常 | 平均 15%, 峰值 25% | - |
-| 内存 | ⚠️ 警告 | 使用 85% | 考虑升级内存 |
-| Gi0/1 | ❌ 异常 | CRC错误: 1234 | 检查光模块 |
-| OSPF | ✅ 正常 | 3个邻居全UP | - |
-| BGP | ✅ 正常 | 2个邻居全UP | - |
-
-### 异常详情
-```
-❌ 内存使用率过高
-当前: 85%
-阈值: >80%
-建议: 监控趋势，考虑升级内存
-
-❌ 接口 Gi0/1 CRC错误
-错误计数: 1234
-增长率: +10/分钟
-建议: 检查光模块和线缆
+Device Summary:
+├─ R1 (10.1.1.1) ✅ OK - L1:✅ L2:✅ L3:✅ L4:✅
+├─ R2 (10.1.1.2) ⚠️ WARNING - L1:⚠️ L2:✅ L3:✅ L4:✅
+├─ R3 (10.1.1.3) ⚠️ WARNING - L1:✅ L2:✅ L3:✅ L4:⚠️
+├─ R4 (10.1.1.4) ⚠️ WARNING - L1:⚠️ L2:✅ L3:✅ L4:✅
+├─ S1 (10.2.1.1) ✅ OK - L1:✅ L2:✅ L3:✅ L4:✅
+├─ S2 (10.2.1.2) ⚠️ WARNING - L1:✅ L2:⚠️ L3:✅ L4:✅
+├─ A1 (10.3.1.1) ⚠️ WARNING - L1:✅ L2:✅ L3:⚠️ L4:✅
+└─ A2 (10.3.1.2) ❌ CRITICAL - L1:❌ L2:✅ L3:✅ L4:⚠️
 ```
 
-## 快速巡检 vs 深度巡检
-
-### 快速巡检 (Quick Check)
-只检查关键指标:
-- CPU/内存
-- 接口状态
-- 路由汇总
-- 关键日志
-
-**时间**: 2-3分钟
-**适用**: 日常监控
-
-### 深度巡检 (Full Inspection)
-完整模板检查
-**时间**: 10-15分钟
-**适用**: 月度/季度检查
-
-## 对比分析
-
-### 变更前后对比
+### Device-by-Device Detailed Results
+Each device gets a full L1-L4 report:
 ```
-变更: 升级IOS版本
-变更前: v17.3.1a
-变更后: v17.3.2
+╔══════════════════════════════════════════════════════╗
+║ Device: R1 (10.1.1.1) - Core Router                 ║
+║ Platform: Cisco IOS XE                              ║
+║ Status: ✅ ALL SYSTEMS OK                           ║
+╚══════════════════════════════════════════════════════╝
 
-指标对比:
-- CPU: 20% → 18% ✅
-- 内存: 75% → 78% ⚠️
-- 错误率: 0.01% → 0% ✅
+Layer 1 (Physical):
+  CPU Utilization: 15% (5min avg) ✅
+  Memory Usage: 62% (available: 8.2GB) ✅
+  Temperature: 42°C (threshold: 70°C) ✅
+  Power Supplies: 2/2 ACTIVE ✅
+  Fans: 6/6 SPINNING ✅
 
-结论: 升级成功，性能略有改善
-```
+Layer 2 (Data Link):
+  VLAN Count: 45 ✅
+  Active Ports: 48/48 UP ✅
+  STP Root: YES (Priority: 24576) ✅
+  LLDP Neighbors: 4 discovered ✅
 
-### 历史趋势
-```
-内存使用趋势 (最近7天):
-Mon: 75% | Tue: 76% | Wed: 77% | Thu: 78%
-Fri: 79% | Sat: 80% | Sun: 85% ⚠️
+Layer 3 (Network):
+  IPv4 Routes: 2,847 routes ✅
+  OSPF Neighbors: 3 FULL ✅
+  BGP Neighbors: 2 ESTABLISHED ✅
+  Routing Errors: 0 ✅
 
-趋势: 上升
-预测: 3天内可能达到90%
+Layer 4 (Transport):
+  Interface Errors: 0 (24h avg) ✅
+  Dropped Packets: 0 (24h avg) ✅
+  TCP Sessions: 45 active ✅
+  UDP Flows: 128 active ✅
 ```
 
-## 巡检自动化
-
-### 批量巡检
-对多台设备执行相同检查:
+### Anomaly Details & Recommendations
 ```
-1. list_devices(role="core")
-2. 对每台设备执行巡检模板
-3. 生成汇总报告
-4. 标记异常设备
+⚠️ WARNING: R2 - Temperature trending high
+Current: 58°C | Trend: +2°C/hour | Threshold: 70°C
+Recommendation: Monitor closely, ensure adequate airflow
+
+❌ CRITICAL: A2 - Power supply #1 degraded
+Status: FAILED | Uptime before failure: 847 days
+Recommendation: Replace PSU immediately before other PSU fails
 ```
 
-### 定期巡检
-建议:
-- 核心设备: 每天快速巡检
-- 汇聚设备: 每周快速巡检
-- 接入设备: 每月深度巡检
-
-## 输出示例
+### Consolidated Findings
 ```
-==========================================
-设备巡检报告
-==========================================
-设备: R1 (10.1.1.1)
-平台: cisco_ios
-时间: 2026-01-07 14:30:00
-运行时间: 45 days
+Critical Issues (Immediate Action):
+1. A2 Power Supply Failure - Replace PSU
+2. A1 BGP Neighbor Flapping - Check link stability
 
-检查结果: 12项 ✅, 2项 ⚠️, 1项 ❌
+Warnings (Monitor):
+1. R2 Temperature trending up - Check cooling
+2. S2 STP Bridge Priority - May need rebalancing
+3. R3 Interface FCS Errors increasing - Check optics
 
-异常项:
-1. ❌ Gi0/1 CRC错误 (1234个)
-2. ⚠️ 内存使用率 85%
+Informational (Good Status):
+- All core devices operating normally
+- Lab network stable and well-managed
+```
 
-详细报告已保存到: knowledge/inspections/R1_20260107.md
-==========================================
+## Multi-Device Inspection Process
+
+1. **Device Collection**: Query all devices in 'lab' group
+2. **Parallel Execution**: Execute inspection template on each device
+3. **Data Aggregation**: Collect and normalize results
+4. **Analysis**: Compare against health baselines
+5. **Reporting**: Generate comprehensive multi-device report with:
+   - Overall network health score
+   - Device-by-device status
+   - Cross-layer dependency analysis
+   - Consolidated recommendations
+
+## Output Artifact
+```
+reports/lab-comprehensive-inspection-20260108-143000.html
+├─ Executive Summary Dashboard
+├─ Device Status Matrix
+├─ Layer-by-Layer Details (8 devices × 4 layers = 32 sections)
+├─ Anomaly Analysis
+├─ Historical Comparison (vs. previous inspection)
+└─ Recommendations & Actions
 ```
