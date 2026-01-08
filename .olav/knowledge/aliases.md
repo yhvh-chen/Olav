@@ -73,3 +73,13 @@ A group of devices can be represented as a list:
 - Avoid confusing aliases
 - Periodically clean up unused aliases
 - Keep in sync with actual network environment
+
+| 核心路由器 | R3, R4 | device | cisco_ios | core@lab |
+
+| 核心路由器 | R3,R4 | device | cisco_ios |  |
+
+| 核心路由器 | R3,R4 | device | cisco_ios | core@lab |
+
+| 核心路由器 | R3,R4 | device | cisco_ios |  |
+
+| 核心路由器 | R3,R4 | device | cisco_ios |  |

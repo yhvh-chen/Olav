@@ -187,9 +187,9 @@ def smart_query(
                 selected_command = cached[0]
             else:
                 return (
-                f"Error: No commands found for intent '{intent}' on platform "
-                f"'{platform}'.\nAvailable intents: interface, bgp, ospf, route, "
-                f"vlan, mac, arp, version, config"
+                    f"Error: No commands found for intent '{intent}' on platform "
+                    f"'{platform}'.\nAvailable intents: interface, bgp, ospf, route, "
+                    f"vlan, mac, arp, version, config"
                 )
 
     # Step 3: Execute command

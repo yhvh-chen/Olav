@@ -61,6 +61,7 @@ dev-dependencies = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0",
+    "pytest-xdist>=3.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
 ]
@@ -72,10 +73,15 @@ deepagents = { path = "archive/deepagents/libs/deepagents" }
 line-length = 100
 target-version = "py311"
 select = ["E", "F", "I", "N", "W", "UP", "ANN", "ASYNC", "S", "B"]
-ignore = ["ANN101", "ANN102"]
+ignore = ["ANN101", "ANN102", "E402"]  # E402: Intentional for dotenv loading
 
 [tool.ruff.per-file-ignores]
 "tests/**/*.py" = ["S101"]
+"src/olav/__main__.py" = ["E402"]
+"src/olav/cli.py" = ["E402"]
+"src/olav/main.py" = ["E402"]
+"src/olav/core/settings.py" = ["ANN401"]  # Settings must accept Any type values
+"src/olav/core/llm.py" = ["ANN401"]  # LLM factory needs **kwargs
 
 [tool.mypy]
 strict = true
@@ -93,4 +99,7 @@ markers = [
     "e2e: marks tests as end-to-end tests",
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
+    "phase2: marks tests as Phase 2 skill-based routing tests",
+    "phase3: marks tests as Phase 3 subagent tests",
+    "real: marks tests that require real LLM and network devices",
 ]

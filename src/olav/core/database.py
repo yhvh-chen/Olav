@@ -19,7 +19,7 @@ class OlavDatabase:
     - command_cache: Cached command outputs (optional, not used in MVP)
     """
 
-    def __init__(self, db_path: str | Path = ".olav/capabilities.db"):
+    def __init__(self, db_path: str | Path = ".olav/capabilities.db") -> None:
         """Initialize database connection.
 
         Args:
@@ -154,7 +154,7 @@ class OlavDatabase:
         results = self.conn.execute(sql, params).fetchall()
         columns = ["type", "platform", "name", "method", "description", "parameters", "is_write"]
 
-        return [dict(zip(columns, row)) for row in results]
+        return [dict(zip(columns, row, strict=False)) for row in results]
 
     def is_command_allowed(self, command: str, platform: str) -> bool:
         """Check if a command is in the whitelist.

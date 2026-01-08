@@ -550,16 +550,19 @@ def list_devices(
     role: str | None = None,
     site: str | None = None,
     platform: str | None = None,
+    alias: str | None = None,
 ) -> str:
     """List devices from the Nornir inventory.
 
     This tool queries the Nornir inventory to list available network devices.
-    Devices can be filtered by role, site, or platform.
+    Devices can be filtered by role, site, platform, or searched by alias.
 
     Args:
         role: Optional role filter (e.g., "core", "access")
         site: Optional site filter (e.g., "datacenter1")
         platform: Optional platform filter (e.g., "cisco_ios", "huawei_vrp")
+        alias: Optional alias search term (e.g., "核心路由器", "边界")
+               Searches device name, hostname, role, and aliases field
 
     Returns:
         List of devices with their properties
@@ -575,6 +578,10 @@ def list_devices(
         "Core devices:
         - R1 (10.1.1.1) - cisco_ios
         - R2 (10.1.1.2) - cisco_ios"
+
+        >>> list_devices(alias="核心路由器")
+        "Devices matching '核心路由器':
+        - R3 (10.1.1.3) - cisco_ios - core (alias: 核心路由器1)"
     """
     try:
         # P4: Use singleton Nornir instance
@@ -595,13 +602,49 @@ def list_devices(
             host_platform = host.platform or "unknown"
             host_role = host.get("role", "unknown")
             host_site = host.get("site", "unknown")
+            host_aliases = host.get("aliases", []) or []
 
-            devices.append(f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}")
+            # Alias search - match against name, hostname, role, or aliases
+            if alias:
+                alias_lower = alias.lower()
+                match_found = False
+                matched_alias = None
+
+                # Search in device name
+                if alias_lower in name.lower():
+                    match_found = True
+                # Search in hostname
+                elif alias_lower in hostname.lower():
+                    match_found = True
+                # Search in role
+                elif alias_lower in host_role.lower():
+                    match_found = True
+                # Search in aliases list
+                else:
+                    for a in host_aliases:
+                        if alias_lower in a.lower():
+                            match_found = True
+                            matched_alias = a
+                            break
+
+                if not match_found:
+                    continue
+
+                # Add matched alias info
+                alias_info = f" (alias: {matched_alias})" if matched_alias else ""
+                devices.append(
+                    f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}{alias_info}"
+                )
+            else:
+                devices.append(f"- {name} ({hostname}) - {host_platform} - {host_role}@{host_site}")
 
         if not devices:
+            if alias:
+                return f"No devices found matching alias '{alias}'."
             return "No devices found matching the criteria."
 
-        return "Available devices:\n" + "\n".join(devices)
+        header = f"Devices matching '{alias}':" if alias else "Available devices:"
+        return header + "\n" + "\n".join(devices)
 
     except Exception as e:
         import traceback

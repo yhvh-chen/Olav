@@ -10,10 +10,16 @@ from typing import TYPE_CHECKING, Any
 from deepagents import create_deep_agent
 from langchain_core.tools import BaseTool
 
+from config.settings import settings
 from olav.core.llm import LLMFactory
 from olav.core.skill_loader import get_skill_loader
+from olav.core.storage import get_storage_permissions
 from olav.core.subagent_manager import format_subagent_descriptions, get_subagent_middleware
 from olav.tools.capabilities import api_call, search_capabilities
+from olav.tools.learning_tools import (
+    save_solution_tool,
+    suggest_filename_tool,
+)
 from olav.tools.loader import reload_capabilities
 from olav.tools.network import list_devices, nornir_execute
 from olav.tools.smart_query import batch_query, smart_query
@@ -28,6 +34,7 @@ def create_olav_agent(
     debug: bool = False,
     enable_skill_routing: bool = True,
     enable_subagents: bool = True,
+    enable_hitl: bool | None = None,
 ) -> "CompiledStateGraph":
     """Create the OLAV DeepAgent.
 
@@ -45,10 +52,16 @@ def create_olav_agent(
         debug: Enable debug mode
         enable_skill_routing: Enable skill-based routing (default True)
         enable_subagents: Enable subagent delegation (default True)
+        enable_hitl: Enable HITL approval for write operations.
+                     If None, uses settings.enable_hitl (default True).
+                     Set to False for automated testing.
 
     Returns:
         Compiled DeepAgent ready to use
     """
+    # Use settings default if not explicitly provided
+    if enable_hitl is None:
+        enable_hitl = settings.enable_hitl
     # Initialize model from configuration or parameter
     if model is None:
         llm = LLMFactory.get_chat_model()
@@ -113,6 +126,12 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         subagent_desc = format_subagent_descriptions()
         system_prompt = f"{system_prompt}\n\n{subagent_desc}"
 
+    # Inject storage permissions (Phase 4)
+    # Note: Removed learning_guidance to reduce LLM exploration behavior
+    # Learning tools are still available but not actively guided
+    storage_permissions = get_storage_permissions()
+    system_prompt = f"{system_prompt}\n\n{storage_permissions}"
+
     # Define tools - smart_query and batch_query are primary (P0 optimization)
     # Secondary tools kept for edge cases
     tools: list[BaseTool] = [
@@ -123,6 +142,10 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         search_capabilities,  # Secondary: Manual command search
         nornir_execute,  # Secondary: Direct command execution
         api_call,  # Secondary: API calls
+        # Phase 4: Learning tools - self-learning capabilities
+        save_solution_tool,  # Save successful troubleshooting cases
+        suggest_filename_tool,  # Suggest solution filenames
+        # Note: update_aliases_tool removed - aliases managed via Nornir hosts.yaml
     ]
 
     # Configure HITL - interrupt only on filesystem operations
@@ -130,14 +153,21 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
     # 1. Whitelist of approved commands (by platform and device type)
     # 2. Blacklist of dangerous patterns (reload, erase, rewrite, etc)
     # All read-only operations proceed automatically. HITL interrupts disabled here.
-    interrupt_on = {
-        "smart_query": False,  # Safe: uses whitelist internally
-        "batch_query": False,  # Safe: uses whitelist internally
-        "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
-        "api_call": False,  # Safe: API validation in tool layer
-        "write_file": True,  # Filesystem operations require approval
-        "edit_file": True,  # Filesystem editing requires approval
-    }
+    if enable_hitl:
+        interrupt_on = {
+            "smart_query": False,  # Safe: uses whitelist internally
+            "batch_query": False,  # Safe: uses whitelist internally
+            "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
+            "api_call": False,  # Safe: API validation in tool layer
+            "save_solution": True,  # Phase 4: Learning - requires approval (writes to disk)
+            "update_aliases": True,  # Phase 4: Learning - requires approval (writes to disk)
+            "suggest_solution_filename": False,  # Phase 4: Learning - read-only helper
+            "write_file": True,  # Filesystem operations require approval
+            "edit_file": True,  # Filesystem editing requires approval
+        }
+    else:
+        # HITL disabled - all operations proceed without approval (for testing)
+        interrupt_on = None
 
     # Create agent
     agent = create_deep_agent(
@@ -152,8 +182,9 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
 
     # Add subagent middleware if enabled (Phase 3)
     if enable_subagents:
-        # Note: SubAgentMiddleware is created but the "task" tool registration
-        # is handled internally by DeepAgents framework
+        # Note: SubAgentMiddleware creates general-purpose subagents (DeepAgents limitation)
+        # but each is configured with a specialized system prompt to enable
+        # macro-analyzer and micro-analyzer functionality
         _ = get_subagent_middleware(tools=tools, default_model=llm)
 
     return agent
@@ -207,8 +238,66 @@ def create_subagent(
     }
 
 
-# Re-export from subagent_configs for backward compatibility
-from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer  # noqa: E402, F401
+# Subagent configuration functions are now in this module
+# Kept for backward compatibility with external code
+def get_macro_analyzer() -> dict[str, Any]:
+    """Get the macro-analyzer subagent configuration.
+
+    This subagent analyzes network topology, paths, and end-to-end connectivity.
+
+    Returns:
+        Subagent configuration
+    """
+    return create_subagent(
+        name="macro-analyzer",
+        description="Macro analysis: topology, paths, end-to-end connectivity",
+        system_prompt="""You are a network macro-analysis expert.
+
+Your responsibilities:
+1. Analyze network topology (LLDP/CDP/BGP neighbors)
+2. Trace data paths (traceroute, routing tables)
+3. Check end-to-end connectivity
+4. Identify failure domains (which area/device has issues)
+
+Working method: Start from a global view, progressively narrow down the scope.
+
+Available tools:
+- nornir_execute: Execute commands on network devices
+- list_devices: List available devices
+- search_capabilities: Find available commands
+""",
+        tools=[nornir_execute, list_devices, search_capabilities],
+    )
+
+
+def get_micro_analyzer() -> dict[str, Any]:
+    """Get the micro-analyzer subagent configuration.
+
+    This subagent performs TCP/IP layer-by-layer troubleshooting.
+
+    Returns:
+        Subagent configuration
+    """
+    return create_subagent(
+        name="micro-analyzer",
+        description="Micro analysis: TCP/IP layer-by-layer troubleshooting",
+        system_prompt="""You are a network micro-analysis expert, troubleshooting by TCP/IP layers.
+
+Troubleshooting order (bottom-up):
+1. **Physical Layer**: Port status, optical power, CRC errors
+2. **Data Link Layer**: VLAN, MAC table, STP state
+3. **Network Layer**: IP addresses, routing table, ARP
+4. **Transport Layer**: ACLs, NAT, port filtering
+5. **Application Layer**: DNS, service reachability
+
+Working method: Start from the physical layer, work upward layer by layer.
+
+Available tools:
+- nornir_execute: Execute commands on network devices
+- search_capabilities: Find available commands
+""",
+        tools=[nornir_execute, search_capabilities],
+    )
 
 
 def _format_skills_for_prompt(skills: dict[str, Any]) -> str:

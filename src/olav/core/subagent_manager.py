@@ -21,8 +21,11 @@ def get_subagent_middleware(
 
     This middleware enables the main agent to delegate complex analysis tasks
     to specialized subagents:
-    - macro-analyzer: Topology, paths, end-to-end connectivity
-    - micro-analyzer: TCP/IP layer-by-layer troubleshooting
+    - general-purpose (macro): Topology, paths, end-to-end connectivity
+    - general-purpose (micro): TCP/IP layer-by-layer troubleshooting
+
+    Note: DeepAgents currently only supports 'general-purpose' subagent type.
+    We configure specialized prompts to differentiate roles.
 
     Args:
         tools: List of tools available to subagents
@@ -34,15 +37,18 @@ def get_subagent_middleware(
     if default_model is None:
         default_model = LLMFactory.get_chat_model()
 
-    # Define subagents - pass tools directly to config functions
+    # Define subagents with 'general-purpose' type (required by DeepAgents)
+    # Differentiation happens via specialized system prompts
     subagents: list[SubAgent] = [
         {
             **get_macro_analyzer(tools=tools),
             "model": default_model,
+            "type": "general-purpose",  # DeepAgents requires this exact type
         },
         {
             **get_micro_analyzer(tools=tools),
             "model": default_model,
+            "type": "general-purpose",  # DeepAgents requires this exact type
         },
     ]
 
@@ -60,6 +66,9 @@ def get_available_subagents() -> dict[str, dict[str, str]]:
 
     Returns:
         Dictionary mapping subagent names to their descriptions
+        
+    Note: DeepAgents framework currently only registers these as 'general-purpose'
+    type, but they are invoked with specialized prompts based on intent.
     """
     return {
         "macro-analyzer": {
@@ -74,8 +83,7 @@ def get_available_subagents() -> dict[str, dict[str, str]]:
             "name": "micro-analyzer",
             "description": "Micro analysis: TCP/IP layer-by-layer troubleshooting",
             "use_case": (
-                "Use for: physical/data link/network/transport layer issues "
-                "on specific devices"
+                "Use for: physical/data link/network/transport layer issues on specific devices"
             ),
         },
     }

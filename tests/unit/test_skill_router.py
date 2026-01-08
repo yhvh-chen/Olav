@@ -32,18 +32,14 @@ def skill_loader() -> SkillLoader:
 class TestSkillRouter:
     """Test SkillRouter class."""
 
-    def test_router_creation(
-        self, mock_llm: MagicMock, skill_loader: SkillLoader
-    ) -> None:
+    def test_router_creation(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
         """Test creating a SkillRouter instance."""
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         assert router is not None
         assert router.llm is mock_llm
         assert router.skill_loader is skill_loader
 
-    def test_route_returns_dict(
-        self, mock_llm: MagicMock, skill_loader: SkillLoader
-    ) -> None:
+    def test_route_returns_dict(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
         """Test that route() returns a dictionary."""
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         result = router.route("查询 R1 接口状态")
@@ -65,9 +61,7 @@ class TestSkillRouter:
         for key in required_keys:
             assert key in result, f"Missing required key: {key}"
 
-    def test_route_with_network_query(
-        self, mock_llm: MagicMock, skill_loader: SkillLoader
-    ) -> None:
+    def test_route_with_network_query(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
         """Test routing a network-related query."""
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         result = router.route("查询 R1 BGP 状态")
@@ -85,9 +79,7 @@ class TestSkillRouter:
 class TestSkillRouterEdgeCases:
     """Test edge cases for SkillRouter."""
 
-    def test_route_empty_query(
-        self, mock_llm: MagicMock, skill_loader: SkillLoader
-    ) -> None:
+    def test_route_empty_query(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
         """Test routing with empty query."""
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         result = router.route("")
@@ -100,9 +92,7 @@ class TestSkillRouterEdgeCases:
             '{"skill_id": null, "confidence": 0.1, '
             '"reason": "Not network related", "is_network_related": false}'
         )
-        mock_llm.invoke = MagicMock(
-            return_value=MagicMock(content=mock_response)
-        )
+        mock_llm.invoke = MagicMock(return_value=MagicMock(content=mock_response))
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         result = router.route("今天天气怎么样?")
         # Should handle gracefully
@@ -115,9 +105,7 @@ class TestSkillRouterEdgeCases:
             '{"skill_id": "unknown", "confidence": 0.2, '
             '"reason": "Low confidence", "is_network_related": true}'
         )
-        mock_llm.invoke = MagicMock(
-            return_value=MagicMock(content=mock_response)
-        )
+        mock_llm.invoke = MagicMock(return_value=MagicMock(content=mock_response))
         router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
         result = router.route("一些模糊的查询")
         # Should use fallback

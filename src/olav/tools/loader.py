@@ -37,7 +37,7 @@ class APIEndpoint(BaseModel):
 class CapabilitiesLoader:
     """Load capabilities from imports/ directory into DuckDB."""
 
-    def __init__(self, imports_dir: Path, database: OlavDatabase | None = None):
+    def __init__(self, imports_dir: Path, database: OlavDatabase | None = None) -> None:
         """Initialize loader.
 
         Args:

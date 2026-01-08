@@ -3,7 +3,6 @@
 Tests the subagent configuration generation for macro and micro analyzers.
 """
 
-
 from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer
 
 
@@ -77,8 +76,7 @@ class TestMicroAnalyzer:
         # Should mention device-level or layer-by-layer analysis
         desc_lower = config["description"].lower()
         assert any(
-            keyword in desc_lower
-            for keyword in ["device", "layer", "tcp", "micro", "设备", "逐层"]
+            keyword in desc_lower for keyword in ["device", "layer", "tcp", "micro", "设备", "逐层"]
         )
 
     def test_micro_analyzer_system_prompt(self) -> None:

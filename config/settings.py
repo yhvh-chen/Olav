@@ -161,6 +161,8 @@ class Settings(BaseSettings):
     log_format: Literal["json", "text"] = "text"
     
     # HITL Configuration
+    # Master switch for Human-in-the-Loop - set to false for automated testing
+    enable_hitl: bool = True
     hitl_require_approval_for_write: bool = True
     hitl_require_approval_for_skill_update: bool = True
     hitl_approval_timeout_seconds: int = 300

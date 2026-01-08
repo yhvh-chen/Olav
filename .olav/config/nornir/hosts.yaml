@@ -1,5 +1,9 @@
 # Nornir Inventory - Device List
 # Example hosts - update with your actual devices
+#
+# Aliases field enables natural language device lookup:
+#   aliases: ["核心路由器", "core-router"]
+#   Allows: "查询核心路由器的BGP状态" → matches R3
 
 R1:
   hostname: 192.168.100.101
@@ -9,6 +13,9 @@ R1:
   data:
     role: border
     site: lab
+    aliases:
+      - 边界路由器1
+      - R1路由器
 
 R2:
   hostname: 192.168.100.102
@@ -18,6 +25,9 @@ R2:
   data:
     role: border
     site: lab
+    aliases:
+      - 边界路由器2
+      - R2路由器
 
 R3:
   hostname: 192.168.100.103
@@ -27,6 +37,9 @@ R3:
   data:
     role: core
     site: lab
+    aliases:
+      - 核心路由器1
+      - R3路由器
 
 R4:
   hostname: 192.168.100.104
@@ -36,6 +49,9 @@ R4:
   data:
     role: core
     site: lab
+    aliases:
+      - 核心路由器2
+      - R4路由器
 
 SW1:
   hostname: 192.168.100.105
@@ -45,6 +61,9 @@ SW1:
   data:
     role: access
     site: lab
+    aliases:
+      - 接入交换机1
+      - SW1交换机
 
 SW2:
   hostname: 192.168.100.106
@@ -54,3 +73,6 @@ SW2:
   data:
     role: access
     site: lab
+    aliases:
+      - 接入交换机2
+      - SW2交换机
