@@ -1,17 +1,19 @@
 ---
-name: config-backup
-description: Backup network device configurations with group/role/site filtering
-triggers:
-  - backup
-  - save config
-  - export config
-  - 备份
-  - 保存配置
-tools:
-  - list_devices
-  - nornir_execute
-  - save_device_config
-  - smart_query
+name: Config Backup
+description: Backup network device configurations with group/role/site filtering. Use when user asks to "backup config", "save configuration", "export configs", or needs to persist device configurations.
+version: 1.0.0
+
+# OLAV Extended Fields
+intent: backup
+complexity: simple
+
+# Output Configuration
+output:
+  format: markdown
+  language: auto
+  sections:
+    - summary
+    - details
 ---
 
 # Config Backup Skill

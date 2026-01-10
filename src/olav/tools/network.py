@@ -29,7 +29,7 @@ _nornir_instance: Nornir | None = None
 
 
 def get_nornir(
-    config_file: str | Path = ".olav/config/nornir/config.yaml",
+    config_file: str | Path | None = None,
 ) -> Nornir:
     """Get the global Nornir instance (singleton pattern).
 
@@ -37,7 +37,7 @@ def get_nornir(
     initialization overhead (~200-500ms per InitNornir call).
 
     Args:
-        config_file: Path to Nornir configuration file
+        config_file: Path to Nornir configuration file (defaults to agent_dir/config/nornir/config.yaml)
 
     Returns:
         Shared Nornir instance with credentials applied
@@ -45,6 +45,8 @@ def get_nornir(
     global _nornir_instance
 
     if _nornir_instance is None:
+        if config_file is None:
+            config_file = Path(settings.agent_dir) / "config" / "nornir" / "config.yaml"
         config_path = Path(config_file).resolve()
         _nornir_instance = InitNornir(config_file=str(config_path))
 
@@ -91,19 +93,24 @@ class NetworkExecutor:
 
     def __init__(
         self,
-        nornir_config: str | Path = ".olav/config/nornir/config.yaml",
-        blacklist_file: str | Path = ".olav/imports/commands/blacklist.txt",
+        nornir_config: str | Path | None = None,
+        blacklist_file: str | Path | None = None,
         username: str | None = None,
         password: str | None = None,
     ) -> None:
         """Initialize executor.
 
         Args:
-            nornir_config: Path to Nornir configuration
-            blacklist_file: Path to command blacklist file
+            nornir_config: Path to Nornir configuration (defaults to agent_dir/config/nornir/config.yaml)
+            blacklist_file: Path to command blacklist file (defaults to agent_dir/imports/commands/blacklist.txt)
             username: Device username (from .env if not provided)
             password: Device password (from .env if not provided)
         """
+        if nornir_config is None:
+            nornir_config = Path(settings.agent_dir) / "config" / "nornir" / "config.yaml"
+        if blacklist_file is None:
+            blacklist_file = Path(settings.agent_dir) / "imports" / "commands" / "blacklist.txt"
+
         self.nornir_config = Path(nornir_config)
         self.blacklist_file = Path(blacklist_file)
         self.username = username or getattr(settings, "device_username", "admin")
@@ -397,7 +404,7 @@ class NetworkExecutor:
                 )
 
         # Set custom TextFSM template directory if exists (higher priority)
-        custom_textfsm_dir = Path(".olav/config/textfsm")
+        custom_textfsm_dir = Path(settings.agent_dir) / "config" / "textfsm"
         if custom_textfsm_dir.exists() and (custom_textfsm_dir / "index").exists():
             os.environ["NET_TEXTFSM"] = str(custom_textfsm_dir.resolve())
 
@@ -596,7 +603,7 @@ def list_devices(
             host_role = host.get("role", "unknown")
             host_site = host.get("site", "unknown")
             host_aliases = host.get("aliases", []) or []
-            
+
             # Get groups as list of strings
             if hasattr(host.groups, 'keys'):
                 host_groups = list(host.groups.keys())

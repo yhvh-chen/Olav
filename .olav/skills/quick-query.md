@@ -1,13 +1,18 @@
 ---
-id: quick-query
+name: Quick Query
+description: Execute simple network status queries that require 1-2 commands. Use when user asks to "check device status", "show interface", "query routing table", "display BGP neighbors", or needs simple read-only information retrieval.
+version: 1.0.0
+
+# OLAV Extended Fields
 intent: query
 complexity: simple
-description: "Simple status query that can be completed with 1-2 commands, no task decomposition needed"
-examples:
-  - "R1 interface status"
-  - "Check R2 BGP neighbors"
-  - "Device version information"
-enabled: true
+
+# Output Configuration
+output:
+  format: markdown
+  language: auto
+  sections:
+    - summary
 ---
 
 # Quick Query

@@ -13,20 +13,20 @@ Uses Pydantic Settings to load configuration from:
 """
 
 import json
-from pathlib import Path
-from typing import Literal
-
-from dotenv import load_dotenv
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
 
 # =============================================================================
 # Project Paths
 # =============================================================================
-
 # Use absolute path to find project root
 # Navigate up: config/ -> project_root/
 import os as _os
+from pathlib import Path
+from typing import Literal
+
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 _this_file = _os.path.abspath(__file__)
 _config_dir = _os.path.dirname(_this_file)
 _project_root = _os.path.dirname(_config_dir)
@@ -36,12 +36,17 @@ ENV_FILE = PROJECT_ROOT / ".env"
 OLAV_DIR = PROJECT_ROOT / ".olav"
 DATA_DIR = PROJECT_ROOT / "data"
 
+# Agent directory configuration (can be .olav, .claude, .cursor, etc.)
+# Defaults to .olav for backward compatibility
+# Can be overridden via AGENT_DIR environment variable
+_agent_dir_name = os.getenv("AGENT_DIR", ".olav")
+AGENT_DIR = PROJECT_ROOT / _agent_dir_name
+
 # Load .env file first
 load_dotenv(ENV_FILE)
 
 # Ensure environment variables are properly set for pydantic-settings
 # This fixes issues where old values might be cached
-import os
 if not os.getenv('LLM_PROVIDER'):
     os.environ['LLM_PROVIDER'] = 'openai'
 if not os.getenv('EMBEDDING_PROVIDER'):
@@ -95,7 +100,20 @@ class Settings(BaseSettings):
     # DuckDB: Capability library (OLAP - analytical queries)
     #   Stores: CLI commands, APIs, NETCONF capabilities
     duckdb_path: str = str(OLAV_DIR / "capabilities.db")
-    
+
+    # Knowledge database: Vendor docs, team wiki, learned solutions
+    knowledge_db_path: str = str(OLAV_DIR / "data" / "knowledge.db")
+
+    # =========================================================================
+    # Agent Configuration (Claude Code Compatibility)
+    # =========================================================================
+    # Agent directory name (e.g., .olav, .claude, .cursor)
+    agent_dir: str = ".olav"
+    agent_name: str = "OLAV"
+
+    # Skills format: "auto" (detect), "legacy" (flat files), "claude-code" (SKILL.md)
+    skill_format: Literal["auto", "legacy", "claude-code"] = "auto"
+
     # SQLite: Agent session persistence (OLTP - transactional queries)
     #   Stores: DeepAgents checkpoints, conversation history
     #   Used in production mode; development uses in-memory storage
@@ -118,7 +136,7 @@ class Settings(BaseSettings):
     # Network Execution Configuration
     # =========================================================================
     nornir_ssh_port: int = 22
-    
+
     # NETCONF support planned for Phase 2+
     # netconf_port: int = 830  # Uncomment when NETCONF is needed
 
@@ -134,16 +152,16 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
-    
+
     # Network relevance guard - filters out non-network queries
     guard_enabled: bool = True
-    
+
     # =========================================================================
     # Skill Routing Configuration (from .olav/settings.json)
     # =========================================================================
     routing_confidence_threshold: float = 0.6
     routing_fallback_skill: str = "quick-query"
-    
+
     # =========================================================================
     # Diagnosis Configuration (from .olav/settings.json)
     # =========================================================================
@@ -159,7 +177,7 @@ class Settings(BaseSettings):
     session_token_max_age_hours: int = 168
     olav_api_token: str = ""
     log_format: Literal["json", "text"] = "text"
-    
+
     # HITL Configuration
     # Master switch for Human-in-the-Loop - set ENABLE_HITL=false in .env for yolo mode
     enable_hitl: bool = True  # Reads from ENABLE_HITL env var
@@ -187,21 +205,21 @@ class Settings(BaseSettings):
     # =========================================================================
     # postgres_uri validator removed - not needed in v0.8
     # All database operations use DuckDB via duckdb_path
-    
+
     def __init__(self, **kwargs):
         """Initialize settings and apply .olav/settings.json overrides."""
         super().__init__(**kwargs)
         self._apply_olav_settings()
-    
+
     def _apply_olav_settings(self) -> None:
         """Layer 2: Load and apply settings from .olav/settings.json."""
         settings_path = OLAV_DIR / "settings.json"
         if not settings_path.exists():
             return
-        
+
         try:
             olav_settings = json.loads(settings_path.read_text(encoding="utf-8"))
-            
+
             # Map JSON paths to Python attributes
             mapping = {
                 # LLM settings
@@ -211,7 +229,7 @@ class Settings(BaseSettings):
                 ("llm", "max_tokens"): "llm_max_tokens",
                 # Guard settings
                 ("guard", "enabled"): "guard_enabled",
-                # Routing settings  
+                # Routing settings
                 ("routing", "confidenceThreshold"): "routing_confidence_threshold",
                 ("routing", "fallbackSkill"): "routing_fallback_skill",
                 # Diagnosis settings
@@ -225,7 +243,7 @@ class Settings(BaseSettings):
                 # Logging
                 ("logging", "level"): "log_level",
             }
-            
+
             # Get environment variable names for checking if explicitly set
             env_var_map = {
                 "llm_provider": "LLM_PROVIDER",
@@ -235,7 +253,7 @@ class Settings(BaseSettings):
                 "guard_enabled": "GUARD_ENABLED",
                 "log_level": "LOG_LEVEL",
             }
-            
+
             for json_path, attr_name in mapping.items():
                 value = self._get_nested(olav_settings, json_path)
                 if value is not None:
@@ -246,11 +264,11 @@ class Settings(BaseSettings):
                         # Environment variable is set, skip settings.json override
                         continue
                     setattr(self, attr_name, value)
-                    
-        except (json.JSONDecodeError, OSError) as e:
+
+        except (json.JSONDecodeError, OSError):
             # Silently ignore invalid settings.json - use defaults
             pass
-    
+
     def _get_nested(self, d: dict, path: tuple) -> any:
         """Get nested value from dict using tuple path like ('llm', 'model')."""
         for key in path:

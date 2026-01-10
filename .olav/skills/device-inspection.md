@@ -1,13 +1,20 @@
 ---
-id: device-inspection
+name: Device Inspection
+description: Execute comprehensive L1-L4 network device inspection. Use when user asks to "inspect all devices", "run comprehensive health check", "full network audit", or needs systematic L1-L4 analysis across multiple devices.
+version: 1.0.0
+
+# OLAV Extended Fields
 intent: inspect
 complexity: medium
-description: "Comprehensive L1-L4 network device inspection for all test devices, generates detailed structured reports"
-examples:
-  - "Inspect all test devices"
-  - "Full L1-L4 health check test"
-  - "Complete network device inspection"
-enabled: true
+
+# Output Configuration
+output:
+  format: markdown
+  language: auto
+  sections:
+    - summary
+    - details
+    - recommendations
 ---
 
 # Device Inspection - Comprehensive L1-L4

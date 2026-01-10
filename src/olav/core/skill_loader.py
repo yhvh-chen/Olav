@@ -9,7 +9,12 @@ import yaml
 
 @dataclass
 class Skill:
-    """技能数据结构."""
+    """技能数据结构.
+
+    支持两种格式:
+    - OLAV 格式: id 字段
+    - Claude Code 格式: name 字段 (自动转换为 id)
+    """
 
     id: str
     intent: str  # query | diagnose | inspect | config
@@ -18,6 +23,7 @@ class Skill:
     examples: list[str]
     file_path: str
     content: str | None = None  # 延迟加载
+    frontmatter: dict[str, Any] | None = None  # Frontmatter 数据 (延迟加载)
 
 
 class SkillLoader:
@@ -29,23 +35,47 @@ class SkillLoader:
         self._content_cache: dict[str, str] = {}
 
     def load_all(self) -> dict[str, Skill]:
-        """扫描并加载所有技能索引."""
+        """扫描并加载所有技能索引 - 支持两种格式.
+
+        支持格式:
+        1. Claude Code 标准: skills/*/SKILL.md
+        2. OLAV 传统格式: skills/*.md
+        """
         if self._index:
             return self._index
 
+        # Format 1: Claude Code 标准 (skills/*/SKILL.md)
+        for skill_dir in self.skills_dir.iterdir():
+            if skill_dir.is_dir() and not skill_dir.name.startswith("_"):
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    skill = self._parse_skill_header(skill_file)
+                    if skill:
+                        self._index[skill.id] = skill
+
+        # Format 2: OLAV 传统 (skills/*.md)
         for md_file in self.skills_dir.glob("*.md"):
-            # 跳过禁用文件 (_ 前缀, .draft 后缀)
+            # 跳过已处理的 SKILL.md 和禁用文件
+            if md_file.name == "SKILL.md":
+                continue
             if md_file.name.startswith("_") or ".draft" in md_file.name:
                 continue
 
             skill = self._parse_skill_header(md_file)
             if skill:
-                self._index[skill.id] = skill
+                # 避免覆盖已加载的 Claude Code 格式技能
+                if skill.id not in self._index:
+                    self._index[skill.id] = skill
 
         return self._index
 
     def _parse_skill_header(self, file_path: Path) -> Skill | None:
-        """解析单个技能文件的 frontmatter (不加载完整内容)."""
+        """解析单个技能文件的 frontmatter (不加载完整内容).
+
+        支持两种格式:
+        - OLAV 格式: id 字段
+        - Claude Code 格式: name 字段 (自动转换为 id)
+        """
         try:
             content = file_path.read_text(encoding="utf-8")
 
@@ -54,21 +84,31 @@ class SkillLoader:
             if not fm:
                 return None
 
+            # 兼容 id 和 name 字段
+            skill_id = fm.get("id") or fm.get("name")
+            if not skill_id:
+                # 如果都没有，从文件名生成
+                skill_id = file_path.stem.replace("-", " ").replace("_", " ").lower().replace(" ", "-")
+
             # 验证必需字段
-            if not all(k in fm for k in ["id", "description"]):
+            if "description" not in fm:
                 return None
 
-            # 检查 enabled 标志
-            if not fm.get("enabled"):
+            # 检查 enabled 标志 - 默认启用（除非显式禁用）
+            if fm.get("enabled", True) is False:
                 return None
+
+            # Normalize skill_id: lowercase with hyphens
+            skill_id = skill_id.lower().replace(" ", "-").replace("_", "-")
 
             return Skill(
-                id=fm["id"],
+                id=skill_id,
                 intent=fm.get("intent", "unknown"),
                 complexity=fm.get("complexity", "medium"),
                 description=fm["description"],
-                examples=fm.get("examples", []),
+                examples=fm.get("examples", fm.get("triggers", [])),
                 file_path=str(file_path),
+                frontmatter=fm,  # Store frontmatter for output config access
             )
         except Exception as e:
             print(f"Error parsing skill {file_path}: {e}")

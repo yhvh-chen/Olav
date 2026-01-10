@@ -1,13 +1,20 @@
 ---
-id: deep-analysis
+name: Deep Analysis
+description: Perform complex fault analysis requiring multi-step diagnostics and subtask decomposition. Use when user asks to "troubleshoot", "analyze root cause", "why is network slow", "cannot access server", or needs systematic network fault diagnosis.
+version: 1.0.0
+
+# OLAV Extended Fields
 intent: diagnose
 complexity: complex
-description: "Complex fault analysis requiring multi-step diagnostics and subtask decomposition"
-examples:
-  - "Complete root cause analysis of network failures"
-  - "Cross-domain connectivity troubleshooting"
-  - "End-to-end path analysis"
-enabled: true
+
+# Output Configuration
+output:
+  format: markdown
+  language: auto
+  sections:
+    - summary
+    - details
+    - recommendations
 ---
 
 # Deep Analysis

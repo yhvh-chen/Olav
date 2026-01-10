@@ -3,22 +3,21 @@
 This module provides tools for device inspection workflows including:
 - nornir_bulk_execute: Execute commands on multiple devices in parallel
 - parse_inspection_scope: Parse device filter expressions
-- generate_report: Generate HTML reports using Jinja2 templates
+- generate_report: Generate Markdown reports using skill-defined templates
 """
 
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Template
 from langchain_core.tools import tool
 from nornir import InitNornir
-from nornir.core.task import AggregatedResult, Result
+from nornir.core.task import AggregatedResult
 from pydantic import BaseModel, Field
 
+from config.settings import settings
 from olav.core.skill_loader import get_skill_loader
-
+from olav.tools.report_formatter import format_report
 
 # =============================================================================
 # Data Models
@@ -105,7 +104,7 @@ def nornir_bulk_execute(
     """
     try:
         # Initialize Nornir
-        nr = InitNornir(config_file=".olav/config/nornir/config.yaml")
+        nr = InitNornir(config_file=str(Path(settings.agent_dir) / "config" / "nornir" / "config.yaml"))
 
         # Filter devices if specific list provided
         if devices != "all":
@@ -253,130 +252,68 @@ def parse_inspection_scope(
 
 @tool
 def generate_report(
-    template: str,
     results: dict[str, list[dict[str, Any]]],
+    skill_id: str = "device-inspection",
     output_path: str | None = None,
-    inspection_type: str = "custom",
+    inspection_type: str = "Network Inspection",
 ) -> str:
-    """Generate HTML inspection report using Jinja2 template.
+    """Generate inspection report using skill-defined format.
 
-    Generates professional HTML reports from inspection results using
-    Jinja2 templates. Templates are stored in `.olav/templates/`.
-
-    Available templates:
-    - "health-check": System health inspection report
-    - "bgp-audit": BGP peer and routing audit report
-    - "interface-errors": Interface error analysis report
-    - "security-baseline": Security configuration baseline report
-    - "custom": Generic template
+    The output format (markdown/json/table) and language are controlled
+    by the skill's frontmatter configuration. This replaces the previous
+    Jinja2 HTML template approach with Skill-controlled Markdown output.
 
     Args:
-        template: Template name (health-check, bgp-audit, etc.)
-        results: Results from nornir_bulk_execute
+        results: Raw inspection results from nornir_bulk_execute
+            Format: {device_name: [result1, result2, ...]}
+        skill_id: ID of the skill to use for format configuration
         output_path: Optional output file path (default: auto-generate)
-        inspection_type: Type of inspection for metadata
+        inspection_type: Type of inspection (e.g., "L1-L4 Inspection", "Health Check")
 
     Returns:
-        Path to generated HTML report file
+        Path to generated report file or the report content if no file specified
 
     Examples:
-        # Generate health check report
-        report_path = generate_report(
-            template="health-check",
+        # Generate Markdown report (default)
+        report = generate_report(
             results=inspection_results,
-            output_path=".olav/reports/health-check-20250108.html"
+            skill_id="device-inspection",
+            inspection_type="L1-L4 Inspection"
         )
 
-        # Auto-generate output path
+        # Save to file
         report_path = generate_report(
-            template="bgp-audit",
-            results=bgp_results
+            results=inspection_results,
+            output_path=".olav/reports/l1-inspection-20250108.md"
         )
     """
-    # Create reports directory if needed
-    reports_dir = Path(".olav/reports")
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    # Load skill configuration
+    skill_loader = get_skill_loader()
+    skill = skill_loader.load(skill_id)
 
-    # Generate output path if not provided
-    if output_path is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_path = reports_dir / f"{template}-{timestamp}.html"
+    if not skill:
+        # Use default configuration if skill not found
+        skill_config = {
+            "output": {
+                "format": "markdown",
+                "language": "en-US",
+                "sections": ["summary", "details", "recommendations"]
+            }
+        }
     else:
+        skill_config = skill.frontmatter if hasattr(skill, 'frontmatter') else {}
+
+    # Generate report based on skill config
+    report_content = format_report(results, skill_config, inspection_type)
+
+    # Save to file if path specified
+    if output_path:
         output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report_content, encoding="utf-8")
+        return f"Report saved to: {output_path}\n\n{report_content[:500]}..."
 
-    # Load Jinja2 template
-    template_path = Path(f".olav/inspect_templates/{template}.html.j2")
-
-    if template_path.exists():
-        template_content = template_path.read_text()
-        jinja_template = Template(template_content)
-    else:
-        # Fallback to basic template
-        jinja_template = Template(_get_default_template())
-
-    # Prepare template context
-    context = {
-        "inspection_type": inspection_type,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "devices": list(results.keys()) if isinstance(results, dict) else [],
-        "results": results,
-        "total_devices": len(results) if isinstance(results, dict) else 0,
-    }
-
-    # Render report
-    html_content = jinja_template.render(**context)
-
-    # Write report
-    output_path.write_text(html_content, encoding="utf-8")
-
-    return str(output_path)
-
-
-def _get_default_template() -> str:
-    """Get default Jinja2 template for reports."""
-    return """<!DOCTYPE html>
-<html>
-<head>
-    <title>{{ inspection_type|title }} Report</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h1 { color: #333; }
-        .summary { background: #f0f0f0; padding: 15px; border-radius: 5px; }
-        .device { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-        .success { color: green; }
-        .error { color: red; }
-    </style>
-</head>
-<body>
-    <h1>{{ inspection_type|title }} Report</h1>
-    <div class="summary">
-        <p><strong>Generated:</strong> {{ timestamp }}</p>
-        <p><strong>Devices Inspected:</strong> {{ total_devices }}</p>
-    </div>
-    {% for device, device_results in results.items() %}
-    <div class="device">
-        <h2>{{ device }}</h2>
-        {% for result in device_results %}
-        <p>
-            <strong>{{ result.command }}</strong>:
-            {% if result.success %}
-            <span class="success">✓ Success</span>
-            {% else %}
-            <span class="error">✗ Failed</span>
-            {% endif %}
-        </p>
-        {% if result.output %}
-        <pre>{{ result.output }}</pre>
-        {% endif %}
-        {% if result.error %}
-        <p class="error">Error: {{ result.error }}</p>
-        {% endif %}
-        {% endfor %}
-    </div>
-    {% endfor %}
-</body>
-</html>
-"""
+    return report_content
 
 
 # =============================================================================

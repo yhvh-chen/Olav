@@ -14,19 +14,40 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from config.settings import settings
 
-# Allowed directories for file operations
-ALLOWED_WRITE_DIRS = [
-    ".olav/data/configs",          # Device configurations
-    ".olav/data/logs",             # Logs and outputs
-    ".olav/knowledge/solutions",   # Troubleshooting solutions
-    ".olav/data/reports",          # Reports and analysis
-    ".olav/scratch",               # Temporary files
-]
 
-ALLOWED_READ_DIRS = [
-    ".olav/",                       # All .olav content
-]
+def _get_allowed_dirs() -> list[str]:
+    """Get allowed directories based on agent_dir configuration.
+
+    Returns:
+        List of allowed directory paths
+    """
+    agent_dir = settings.agent_dir
+    return [
+        f"{agent_dir}/data/configs",          # Device configurations
+        f"{agent_dir}/data/logs",             # Logs and outputs
+        f"{agent_dir}/knowledge/solutions",   # Troubleshooting solutions
+        f"{agent_dir}/data/reports",          # Reports and analysis
+        f"{agent_dir}/scratch",               # Temporary files
+    ]
+
+
+def _get_allowed_read_dirs() -> list[str]:
+    """Get allowed read directories based on agent_dir configuration.
+
+    Returns:
+        List of allowed read directory paths
+    """
+    agent_dir = settings.agent_dir
+    return [
+        f"{agent_dir}/",                       # All agent content
+    ]
+
+
+# Allowed directories for file operations (lazy evaluation)
+ALLOWED_WRITE_DIRS = _get_allowed_dirs()
+ALLOWED_READ_DIRS = _get_allowed_read_dirs()
 
 
 def _is_path_allowed(filepath: str, allowed_dirs: list[str]) -> bool:
@@ -41,19 +62,19 @@ def _is_path_allowed(filepath: str, allowed_dirs: list[str]) -> bool:
     """
     # Normalize path
     path = Path(filepath)
-    
+
     # Convert to relative path if absolute
     try:
         path = path.relative_to(Path.cwd())
     except ValueError:
         pass
-    
+
     path_str = str(path).replace("\\", "/")
-    
+
     for allowed in allowed_dirs:
         if path_str.startswith(allowed):
             return True
-    
+
     return False
 
 
@@ -89,22 +110,22 @@ def write_file(
     # Validate path
     if not _is_path_allowed(filepath, ALLOWED_WRITE_DIRS):
         return f"❌ Error: Path '{filepath}' is not in allowed directories. Allowed: {ALLOWED_WRITE_DIRS}"
-    
+
     try:
         path = Path(filepath)
-        
+
         # Create parent directories if needed
         if create_dirs:
             path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Write content
         path.write_text(content, encoding="utf-8")
-        
+
         # Get file size
         size = path.stat().st_size
-        
+
         return f"✅ File saved: {filepath} ({size} bytes)"
-        
+
     except Exception as e:
         return f"❌ Error writing file: {str(e)}"
 
@@ -130,16 +151,16 @@ def read_file(
     # Validate path
     if not _is_path_allowed(filepath, ALLOWED_READ_DIRS):
         return f"❌ Error: Path '{filepath}' is not in allowed directories."
-    
+
     try:
         path = Path(filepath)
-        
+
         if not path.exists():
             return f"❌ Error: File not found: {filepath}"
-        
+
         content = path.read_text(encoding="utf-8")
         return content
-        
+
     except Exception as e:
         return f"❌ Error reading file: {str(e)}"
 
@@ -169,7 +190,7 @@ def save_device_config(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"{device}-{config_type}-config-{timestamp}.txt"
     filepath = f".olav/data/configs/{filename}"
-    
+
     # Add metadata header
     header = f"""! Device: {device}
 ! Config Type: {config_type}
@@ -178,20 +199,20 @@ def save_device_config(
 !
 """
     full_content = header + content
-    
+
     try:
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(full_content, encoding="utf-8")
-        
+
         size = path.stat().st_size
         return f"✅ Config saved: {filepath} ({size} bytes)"
-        
+
     except Exception as e:
         return f"❌ Error saving config: {str(e)}"
 
 
-@tool  
+@tool
 def save_tech_support(
     device: str,
     content: str,
@@ -210,7 +231,7 @@ def save_tech_support(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"{device}-tech-support-{timestamp}.txt"
     filepath = f".olav/data/reports/{filename}"
-    
+
     header = f"""! Device: {device}
 ! Type: show tech-support
 ! Captured: {datetime.now().isoformat()}
@@ -218,16 +239,16 @@ def save_tech_support(
 !
 """
     full_content = header + content
-    
+
     try:
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(full_content, encoding="utf-8")
-        
+
         size = path.stat().st_size
         size_kb = size / 1024
         return f"✅ Tech-support saved: {filepath} ({size_kb:.1f} KB)"
-        
+
     except Exception as e:
         return f"❌ Error saving tech-support: {str(e)}"
 
@@ -248,18 +269,18 @@ def list_saved_files(
     """
     if not _is_path_allowed(directory, ALLOWED_READ_DIRS):
         return f"❌ Error: Directory '{directory}' is not accessible."
-    
+
     try:
         path = Path(directory)
-        
+
         if not path.exists():
             return f"📁 Directory '{directory}' does not exist yet."
-        
+
         files = list(path.rglob(pattern))
-        
+
         if not files:
             return f"📁 No files matching '{pattern}' in {directory}"
-        
+
         result = [f"📁 Files in {directory}:"]
         for f in sorted(files):
             if f.is_file():
@@ -269,8 +290,8 @@ def list_saved_files(
                     result.append(f"  - {rel_path} ({size/1024:.1f} KB)")
                 else:
                     result.append(f"  - {rel_path} ({size} bytes)")
-        
+
         return "\n".join(result)
-        
+
     except Exception as e:
         return f"❌ Error listing files: {str(e)}"
