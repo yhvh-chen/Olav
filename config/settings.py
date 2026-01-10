@@ -1,19 +1,26 @@
 """
 OLAV v0.8 Configuration Settings
 
-Three-layer configuration architecture (per DESIGN_V0.8.md §11.6):
+Three-layer configuration architecture (per DESIGN_V0.81.md §C.1-C.2):
 - Layer 1: .env (sensitive + connection) - human-maintained, never commit to git
 - Layer 2: .olav/settings.json (behavior + preferences) - user-editable, agent-readable
 - Layer 3: This file (loader + defaults) - code implementation
 
-Uses Pydantic Settings to load configuration from:
-1. Environment variables (.env file) - Layer 1
-2. .olav/settings.json - Layer 2
-3. Default values defined in this file - Layer 3
+Configuration Priority (high to low):
+1. Environment variables (export LLM_MODEL_NAME=gpt-4o)
+2. .env file (LLM_MODEL_NAME=gpt-4-turbo)
+3. .olav/settings.json ({"model": "gpt-4o"})
+4. Code defaults (llm_model_name: str = "gpt-4-turbo")
+
+True Source of Truth:
+- .env: Sensitive configuration (API Keys, passwords, tokens)
+- .olav/settings.json: Agent behavior (model, temperature, routing, HITL)
+- This file: Code defaults and validation only (NOT true source)
 """
 
 import json
 import os
+import re
 
 # =============================================================================
 # Project Paths
@@ -22,9 +29,10 @@ import os
 # Navigate up: config/ -> project_root/
 import os as _os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Optional
 
 from dotenv import load_dotenv
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _this_file = _os.path.abspath(__file__)
@@ -50,9 +58,91 @@ load_dotenv(ENV_FILE)
 if not os.getenv('LLM_PROVIDER'):
     os.environ['LLM_PROVIDER'] = 'openai'
 if not os.getenv('EMBEDDING_PROVIDER'):
-    os.environ['EMBEDDING_PROVIDER'] = 'openai'
+    os.environ['EMBEDDING_PROVIDER'] = 'ollama'  # Default to Ollama (free local embeddings)
 if not os.getenv('OLAV_MODE'):
     os.environ['OLAV_MODE'] = 'QuickTest'
+
+
+# =============================================================================
+# Nested Configuration Classes (Pydantic v2)
+# =============================================================================
+
+class GuardSettings(BaseSettings):
+    """Guard 意图过滤器配置"""
+    enabled: bool = Field(
+        default=True,
+        description="是否启用 Guard 过滤"
+    )
+    strict_mode: bool = Field(
+        default=False,
+        description="严格模式：只允许明确的网络运维请求"
+    )
+
+
+class RoutingSettings(BaseSettings):
+    """Skill 路由配置"""
+    confidence_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Skill 匹配置信度阈值"
+    )
+    fallback_skill: str = Field(
+        default="quick-query",
+        description="降级目标 Skill ID"
+    )
+
+
+class HITLSettings(BaseSettings):
+    """Human-in-the-Loop 配置"""
+    require_approval_for_write: bool = Field(
+        default=True,
+        description="写操作是否需要审批"
+    )
+    require_approval_for_skill_update: bool = Field(
+        default=True,
+        description="Skill/Knowledge 更新是否需要审批"
+    )
+    approval_timeout_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="审批超时时间 (秒)"
+    )
+
+
+class DiagnosisSettings(BaseSettings):
+    """诊断模块配置"""
+    macro_max_confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="宏观分析置信度上限"
+    )
+    micro_target_confidence: float = Field(
+        default=0.9,
+        ge=0.0,
+        le=1.0,
+        description="微观分析目标置信度"
+    )
+    max_diagnosis_iterations: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="单轮诊断最大迭代次数"
+    )
+
+
+class LoggingSettings(BaseSettings):
+    """日志配置"""
+    level: str = Field(
+        default="INFO",
+        description="日志级别"
+    )
+    audit_enabled: bool = Field(
+        default=True,
+        description="是否记录审计日志"
+    )
 
 
 # =============================================================================
@@ -60,7 +150,18 @@ if not os.getenv('OLAV_MODE'):
 # =============================================================================
 
 class Settings(BaseSettings):
-    """OLAV Configuration Settings
+    """OLAV Configuration Settings - Three-Layer Architecture
+    
+    This is NOT the true source of truth, but a loader with defaults:
+    - Layer 1 (.env): True source for sensitive config (API Keys, passwords)
+    - Layer 2 (.olav/settings.json): True source for agent behavior config
+    - Layer 3 (this file): Code defaults and validation only
+    
+    Configuration Priority (high to low):
+    1. Environment variables (export MY_VAR=value)
+    2. .env file (MY_VAR=value)
+    3. .olav/settings.json ({"myField": value})
+    4. Code defaults (field: type = default_value)
     
     Supports three-layer configuration:
     - Environment variables (highest priority)
@@ -87,12 +188,49 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
 
     # =========================================================================
-    # Embedding Configuration
+    # Skill Configuration (Phase C-1)
     # =========================================================================
-    embedding_provider: Literal["openai", "ollama"] = "openai"
-    embedding_api_key: str = ""
-    embedding_model: str = "text-embedding-3-small"
-    embedding_base_url: str = ""
+    enabled_skills: list[str] = Field(
+        default_factory=list,
+        description="启用的 Skill ID 列表 (空表示全部启用)"
+    )
+    disabled_skills: list[str] = Field(
+        default_factory=list,
+        description="禁用的 Skill ID 列表"
+    )
+
+    # =========================================================================
+    # Embedding Configuration (Phase 4: Knowledge Base Integration)
+    # =========================================================================
+    enable_embedding: bool = True
+    embedding_provider: Literal["ollama", "openai", "none"] = "ollama"  # Default to Ollama (free local)
+    embedding_model: str = "nomic-embed-text"  # Ollama model (768 dimensions)
+    embedding_base_url: str = "http://localhost:11434"  # Ollama default URL
+    embedding_api_key: str = ""  # Only needed for OpenAI embeddings
+
+    # =========================================================================
+    # Nested Configuration Objects (Phase C-1)
+    # =========================================================================
+    guard: GuardSettings = Field(
+        default_factory=GuardSettings,
+        description="Guard 过滤器配置"
+    )
+    routing: RoutingSettings = Field(
+        default_factory=RoutingSettings,
+        description="Skill 路由配置"
+    )
+    hitl: HITLSettings = Field(
+        default_factory=HITLSettings,
+        description="HITL 审批配置"
+    )
+    diagnosis: DiagnosisSettings = Field(
+        default_factory=DiagnosisSettings,
+        description="诊断配置"
+    )
+    logging_settings: LoggingSettings = Field(
+        default_factory=LoggingSettings,
+        description="日志配置"
+    )
 
     # =========================================================================
     # Database Configuration
@@ -207,12 +345,15 @@ class Settings(BaseSettings):
     # All database operations use DuckDB via duckdb_path
 
     def __init__(self, **kwargs):
-        """Initialize settings and apply .olav/settings.json overrides."""
+        """Initialize settings and apply .olav/settings.json overrides (Layer 2)."""
         super().__init__(**kwargs)
         self._apply_olav_settings()
 
     def _apply_olav_settings(self) -> None:
-        """Layer 2: Load and apply settings from .olav/settings.json."""
+        """Layer 2: Load and apply settings from .olav/settings.json.
+        
+        Priority: Environment variable > .env > .olav/settings.json > code defaults
+        """
         settings_path = OLAV_DIR / "settings.json"
         if not settings_path.exists():
             return
@@ -220,33 +361,16 @@ class Settings(BaseSettings):
         try:
             olav_settings = json.loads(settings_path.read_text(encoding="utf-8"))
 
-            # Map JSON paths to Python attributes
-            mapping = {
-                # LLM settings
-                ("llm", "provider"): "llm_provider",
-                ("llm", "model"): "llm_model_name",
-                ("llm", "temperature"): "llm_temperature",
-                ("llm", "max_tokens"): "llm_max_tokens",
-                # Guard settings
-                ("guard", "enabled"): "guard_enabled",
-                # Routing settings
-                ("routing", "confidenceThreshold"): "routing_confidence_threshold",
-                ("routing", "fallbackSkill"): "routing_fallback_skill",
-                # Diagnosis settings
-                ("diagnosis", "macroMaxConfidence"): "diagnosis_macro_max_confidence",
-                ("diagnosis", "microTargetConfidence"): "diagnosis_micro_target_confidence",
-                ("diagnosis", "maxDiagnosisIterations"): "diagnosis_max_iterations",
-                # HITL settings
-                ("hitl", "requireApprovalForWrite"): "hitl_require_approval_for_write",
-                ("hitl", "requireApprovalForSkillUpdate"): "hitl_require_approval_for_skill_update",
-                ("hitl", "approvalTimeoutSeconds"): "hitl_approval_timeout_seconds",
-                # Logging
-                ("logging", "level"): "log_level",
+            # Map JSON paths to Python attributes (simple fields)
+            simple_mapping = {
+                "model": "llm_model_name",
+                "temperature": "llm_temperature",
+                "enabledSkills": "enabled_skills",
+                "disabledSkills": "disabled_skills",
             }
 
             # Get environment variable names for checking if explicitly set
             env_var_map = {
-                "llm_provider": "LLM_PROVIDER",
                 "llm_model_name": "LLM_MODEL_NAME",
                 "llm_temperature": "LLM_TEMPERATURE",
                 "llm_max_tokens": "LLM_MAX_TOKENS",
@@ -254,29 +378,114 @@ class Settings(BaseSettings):
                 "log_level": "LOG_LEVEL",
             }
 
-            for json_path, attr_name in mapping.items():
-                value = self._get_nested(olav_settings, json_path)
-                if value is not None:
+            # Apply simple field mappings
+            for json_key, attr_name in simple_mapping.items():
+                if json_key in olav_settings:
+                    value = olav_settings[json_key]
                     # Only override if NOT already set by environment variable
-                    # Environment variables take priority over settings.json
                     env_var = env_var_map.get(attr_name)
                     if env_var and os.getenv(env_var):
-                        # Environment variable is set, skip settings.json override
-                        continue
+                        continue  # Environment variable takes priority
                     setattr(self, attr_name, value)
+
+            # Apply nested configuration mappings
+            nested_mapping = {
+                "guard": ("guard", GuardSettings),
+                "routing": ("routing", RoutingSettings),
+                "hitl": ("hitl", HITLSettings),
+                "diagnosis": ("diagnosis", DiagnosisSettings),
+                "logging": ("logging_settings", LoggingSettings),
+            }
+
+            for json_key, (attr_name, cls) in nested_mapping.items():
+                if json_key in olav_settings:
+                    nested_data = olav_settings[json_key]
+                    if isinstance(nested_data, dict):
+                        try:
+                            # Convert camelCase keys to snake_case for Pydantic
+                            converted_data = {}
+                            for k, v in nested_data.items():
+                                snake_key = self._camel_to_snake(k)
+                                converted_data[snake_key] = v
+                            # Create new nested object from converted JSON data
+                            nested_obj = cls(**converted_data)
+                            setattr(self, attr_name, nested_obj)
+                        except Exception:
+                            # If validation fails, keep default
+                            pass
 
         except (json.JSONDecodeError, OSError):
             # Silently ignore invalid settings.json - use defaults
             pass
 
-    def _get_nested(self, d: dict, path: tuple) -> any:
-        """Get nested value from dict using tuple path like ('llm', 'model')."""
-        for key in path:
-            if isinstance(d, dict) and key in d:
-                d = d[key]
-            else:
-                return None
-        return d
+    @staticmethod
+    def _camel_to_snake(name: str) -> str:
+        """Convert camelCase to snake_case."""
+        s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Export configuration as dictionary (for serialization)."""
+        return self.model_dump()
+
+    def save_to_json(self, path: Optional[Path] = None) -> None:
+        """Save configuration to JSON file.
+        
+        Args:
+            path: Target file path. Defaults to .olav/settings.json
+        """
+        if path is None:
+            path = OLAV_DIR / "settings.json"
+
+        # Convert nested objects to dictionaries with camelCase keys
+        def snake_to_camel(name: str) -> str:
+            components = name.split("_")
+            return components[0] + "".join(x.title() for x in components[1:])
+
+        routing_dict = self.routing.model_dump()
+        routing_dict_camel = {
+            snake_to_camel(k): v for k, v in routing_dict.items()
+        }
+
+        hitl_dict = self.hitl.model_dump()
+        hitl_dict_camel = {
+            snake_to_camel(k): v for k, v in hitl_dict.items()
+        }
+
+        diagnosis_dict = self.diagnosis.model_dump()
+        diagnosis_dict_camel = {
+            snake_to_camel(k): v for k, v in diagnosis_dict.items()
+        }
+
+        data = {
+            "model": self.llm_model_name,
+            "temperature": self.llm_temperature,
+            "enabledSkills": self.enabled_skills,
+            "disabledSkills": self.disabled_skills,
+            "guard": self.guard.model_dump(),
+            "routing": routing_dict_camel,
+            "hitl": hitl_dict_camel,
+            "diagnosis": diagnosis_dict_camel,
+            "logging": self.logging_settings.model_dump(),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    @field_validator("llm_model_name")
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        """Validate LLM model name."""
+        if not v or len(v.strip()) == 0:
+            raise ValueError("llm_model_name cannot be empty")
+        return v.strip()
+
+    @field_validator("llm_temperature")
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        """Validate LLM temperature parameter."""
+        if not (0.0 <= v <= 2.0):
+            raise ValueError("llm_temperature must be between 0.0 and 2.0")
+        return v
 
 
 # =============================================================================
