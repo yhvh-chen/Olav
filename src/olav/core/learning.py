@@ -2,10 +2,15 @@
 
 This module provides functions for the agent to learn from interactions
 and update its own knowledge base.
+
+Phase 7: Auto-embedding of solutions to knowledge base for semantic search.
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def save_solution(
@@ -16,12 +21,15 @@ def save_solution(
     solution: str,
     commands: list[str],
     tags: list[str],
-    knowledge_dir: Path = Path(".olav/knowledge/solutions"),
+    knowledge_dir: Path = None,
 ) -> str:
     """Save a successful troubleshooting case to the knowledge base.
 
     This enables the agent to learn from past successes and build a solutions
     library over time.
+
+    Args:
+        knowledge_dir: Directory to save solutions (defaults to agent_dir/knowledge/solutions)
 
     Args:
         title: Case title (filename-safe)
@@ -47,6 +55,10 @@ def save_solution(
         ...     ["#物理层", "#CRC", "#光模块"]
         ... )
     """
+    if knowledge_dir is None:
+        from config.settings import settings
+        knowledge_dir = Path(settings.agent_dir) / "knowledge" / "solutions"
+
     knowledge_dir = Path(knowledge_dir)
     knowledge_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +111,80 @@ def save_solution(
     # Write file
     filepath.write_text(content, encoding="utf-8")
 
+    # Phase 7: Auto-embed solution to knowledge base for semantic search
+    _auto_embed_solution(str(filepath))
+
     return str(filepath)
+
+
+def _auto_embed_solution(filepath: str) -> None:
+    """Auto-embed solution markdown to knowledge base (Phase 7).
+
+    This function is called automatically after save_solution writes a solution
+    file. It embeds the solution to the DuckDB vector store for semantic search.
+
+    Args:
+        filepath: Path to the solution markdown file
+
+    Phase 7: Learning loop auto-trigger - solutions are automatically indexed
+    """
+    try:
+        from olav.tools.knowledge_embedder import KnowledgeEmbedder
+
+        path = Path(filepath)
+
+        # Only auto-embed solutions in knowledge/solutions/
+        if "knowledge/solutions" not in str(path):
+            return
+
+        if not path.exists():
+            logger.warning(f"Solution file not found: {filepath}")
+            return
+
+        # Embed to knowledge base with source_id=2 (solution)
+        embedder = KnowledgeEmbedder()
+        count = embedder.embed_file(path, source_id=2, platform="solution")
+
+        logger.info(f"✅ Auto-embedded solution {path.name}: {count} chunks")
+
+    except Exception as e:
+        # Non-blocking: log warning but don't interrupt solution saving
+        logger.warning(f"Auto-embedding failed for solution {filepath}: {e}")
+
+
+def _auto_embed_aliases(filepath: str) -> None:
+    """Auto-embed aliases knowledge file to vector store (Phase 7).
+
+    This function is called automatically after update_aliases modifies the
+    aliases file. It re-embeds the entire aliases file for semantic search.
+
+    Args:
+        filepath: Path to the aliases.md file
+
+    Phase 7: Learning loop auto-trigger - aliases are automatically updated
+    """
+    try:
+        from olav.tools.knowledge_embedder import KnowledgeEmbedder
+
+        path = Path(filepath)
+
+        # Only auto-embed aliases.md in knowledge/
+        if "knowledge/aliases.md" not in str(path):
+            return
+
+        if not path.exists():
+            logger.warning(f"Aliases file not found: {filepath}")
+            return
+
+        # Embed aliases to knowledge base
+        embedder = KnowledgeEmbedder()
+        count = embedder.embed_file(path, source_id=2, platform="aliases")
+
+        logger.info(f"✅ Auto-embedded aliases {path.name}: {count} chunks")
+
+    except Exception as e:
+        # Non-blocking: log warning but don't interrupt alias updates
+        logger.warning(f"Auto-embedding failed for aliases {filepath}: {e}")
 
 
 def update_aliases(
@@ -108,11 +193,12 @@ def update_aliases(
     alias_type: str,
     platform: str = "unknown",
     notes: str = "",
-    aliases_file: Path = Path(".olav/knowledge/aliases.md"),
+    aliases_file: Path = None,
 ) -> bool:
     """Update the aliases knowledge base with a new alias.
 
     Args:
+        aliases_file: Path to aliases file (defaults to agent_dir/knowledge/aliases.md)
         alias: The alias (e.g., "核心路由器")
         actual_value: What it maps to (e.g., "R1, R2, R3, R4")
         alias_type: Type of alias (device, interface, vlan, etc.)
@@ -132,6 +218,12 @@ def update_aliases(
         ...     "三层交换机"
         ... )
     """
+    if aliases_file is None:
+        from config.settings import settings
+        aliases_file = Path(settings.agent_dir) / "knowledge" / "aliases.md"
+
+    aliases_file = Path(aliases_file)
+
     try:
         content = aliases_file.read_text(encoding="utf-8")
 
@@ -155,11 +247,15 @@ def update_aliases(
             lines.insert(table_end, new_entry)
             updated_content = "\n".join(lines)
             aliases_file.write_text(updated_content, encoding="utf-8")
+            # Phase 7: Auto-embed updated aliases
+            _auto_embed_aliases(str(aliases_file))
             return True
         else:
             # No table found, append to end
             new_content = content + f"\n{new_entry}\n"
             aliases_file.write_text(new_content, encoding="utf-8")
+            # Phase 7: Auto-embed updated aliases
+            _auto_embed_aliases(str(aliases_file))
             return True
 
     except Exception as e:
@@ -171,7 +267,7 @@ def learn_from_interaction(
     query: str,
     response: str,
     success: bool,
-    knowledge_dir: Path = Path(".olav/knowledge"),
+    knowledge_dir: Path = None,
 ) -> dict[str, str]:
     """Analyze an interaction and extract learnings.
 
@@ -182,7 +278,7 @@ def learn_from_interaction(
         query: The user's query
         response: The agent's response
         success: Whether the interaction was successful
-        knowledge_dir: Knowledge base directory
+        knowledge_dir: Knowledge base directory (defaults to agent_dir/knowledge)
 
     Returns:
         Dictionary with actions taken:
@@ -190,6 +286,10 @@ def learn_from_interaction(
         - "updated_aliases": True if updated
         - "learnings": Count of learnings extracted
     """
+    if knowledge_dir is None:
+        from config.settings import settings
+        knowledge_dir = Path(settings.agent_dir) / "knowledge"
+
     actions = {}
     learnings = 0
 
@@ -259,14 +359,14 @@ def get_learning_guidance() -> str:
 ### 知识库权限
 
 你可以读写:
-- `.olav/knowledge/aliases.md` (设备别名)
-- `.olav/knowledge/solutions/*.md` (案例库)
-- `.olav/skills/*.md` (技能模式)
+- `agent_dir/knowledge/aliases.md` (设备别名)
+- `agent_dir/knowledge/solutions/*.md` (案例库)
+- `agent_dir/skills/*.md` (技能模式)
 
 你应该谨慎:
-- `.olav/imports/` (能力定义 - 由人类维护)
+- `agent_dir/imports/` (能力定义 - 由人类维护)
 - `.env` (敏感配置 - 不可访问)
-- `.olav/OLAV.md` (核心规则 - 由人类维护)
+- Root CLAUDE.md (核心规则 - 由人类维护)
 """
 
 

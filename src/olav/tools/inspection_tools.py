@@ -284,7 +284,7 @@ def generate_report(
         # Save to file
         report_path = generate_report(
             results=inspection_results,
-            output_path=".olav/reports/l1-inspection-20250108.md"
+            output_path="reports/l1-inspection-20250108.md"
         )
     """
     # Load skill configuration

@@ -10,13 +10,15 @@ Supports:
 
 import asyncio
 import sys
-from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
+
+if TYPE_CHECKING:
+    from olav.cli.memory import AgentMemory
+    from olav.cli.session import OlavPromptSession
 
 # Lazy imports to speed up --help
 console = Console()
@@ -28,60 +30,62 @@ app = typer.Typer(
 )
 
 
-async def stream_agent_response(agent, messages: list[dict]) -> str:
+async def stream_agent_response(agent: Any, messages: list[dict]) -> str:
     """Stream agent response with real-time token output.
-    
+
     P7 Enhancement: Reduces perceived latency by showing tokens as generated.
-    
+
     Args:
         agent: OLAV agent instance
         messages: Conversation messages
-        
+
     Returns:
         Complete response text
     """
     full_response = ""
     current_content = ""
-    
-    # Stream tokens as they arrive
-    async for event in agent.astream({"messages": messages}):
-        # Handle 'agent' events from LangGraph
-        if "agent" in event:
-            agent_output = event.get("agent", {})
-            if "messages" in agent_output:
-                for msg in agent_output["messages"]:
-                    if hasattr(msg, "content") and msg.content:
-                        new_content = msg.content
-                        if new_content and new_content != current_content:
-                            # Print only new characters (delta)
-                            delta = new_content[len(current_content):]
-                            print(delta, end="", flush=True)
-                            current_content = new_content
-        
-        # Handle direct 'messages' in event (alternative format)
-        if "messages" in event and "agent" not in event:
-            for msg in event["messages"]:
-                if hasattr(msg, "content") and msg.content:
-                    new_content = msg.content
+
+    def extract_ai_content(msg: Any) -> str:
+        """Extract content from AIMessage, ignoring tool calls."""
+        if hasattr(msg, "content") and msg.content:
+            # Skip AIMessages that only have tool calls (empty content)
+            if hasattr(msg, "tool_calls") and msg.tool_calls and not msg.content:
+                return ""
+            return msg.content
+        return ""
+
+    # Stream tokens as they arrive - use stream_mode="values" for consistent format
+    async for event in agent.astream({"messages": messages}, stream_mode="values"):
+        # Handle 'messages' list in values stream
+        if "messages" in event:
+            msgs = event["messages"]
+            # Check the last message for AI response
+            if msgs:
+                last_msg = msgs[-1]
+                # Only process AIMessage responses (not HumanMessage or ToolMessage)
+                msg_type = type(last_msg).__name__
+                if msg_type == "AIMessage":
+                    new_content = extract_ai_content(last_msg)
                     if new_content and new_content != current_content:
-                        delta = new_content[len(current_content):]
+                        # Print only new characters (delta)
+                        delta = new_content[len(current_content) :]
                         print(delta, end="", flush=True)
                         current_content = new_content
-    
+
     # Final newline
     print()
     full_response = current_content
-    
+
     return full_response
 
 
 def run_interactive_loop(
     memory: "AgentMemory",
     session: "OlavPromptSession",
-    agent,
+    agent: Any,
 ) -> None:
     """Run the OLAV CLI (synchronous main loop).
-    
+
     Args:
         memory: Agent memory manager
         session: Prompt session
@@ -89,17 +93,17 @@ def run_interactive_loop(
     """
     from olav.cli.commands import execute_command
     from olav.cli.input_parser import parse_input
-    
+
     print("Type /help for available commands or just ask a question.\n")
 
     while True:
         try:
             # Get user input (synchronous - prompt-toolkit handles its own event loop)
             user_input = session.prompt_sync("OLAV> ")
-            
+
             # Strip BOM and whitespace (PowerShell on Windows adds BOM to piped input)
-            user_input = user_input.lstrip('\ufeff').strip()
-            
+            user_input = user_input.lstrip("\ufeff").strip()
+
             if not user_input:
                 continue
 
@@ -107,11 +111,13 @@ def run_interactive_loop(
             if user_input.startswith("/"):
                 try:
                     # Run async command handler synchronously
-                    result = asyncio.run(execute_command(
-                        user_input,
-                        agent=agent,
-                        memory=memory,
-                    ))
+                    result = asyncio.run(
+                        execute_command(
+                            user_input,
+                            agent=agent,
+                            memory=memory,
+                        )
+                    )
                     if result:
                         print(result)
                 except EOFError:
@@ -127,6 +133,7 @@ def run_interactive_loop(
             # Handle shell commands
             if is_shell_cmd and shell_cmd:
                 import subprocess
+
                 try:
                     result = subprocess.run(
                         shell_cmd,
@@ -144,22 +151,22 @@ def run_interactive_loop(
                 except Exception as e:
                     print(f"❌ Error executing command: {e}")
                 continue
-            
+
             # Handle normal queries
             # Store in memory
             memory.add("user", processed_text)
-            
+
             # P7: Stream agent response for real-time output
             print("🔍 Processing...", flush=True)
             try:
                 messages = [{"role": "user", "content": processed_text}]
                 output = asyncio.run(stream_agent_response(agent, messages))
-                
+
                 if output:
                     memory.add("assistant", output)
                 else:
                     print("\n⚠️ No response from agent\n")
-                
+
             except Exception as e:
                 print(f"❌ Error: {str(e)}")
 
@@ -181,29 +188,30 @@ def query(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
 ) -> None:
     """Execute a single network operations query.
-    
+
     Examples:
         olav query "查看 R1 的接口状态"
         olav query "R1 的 BGP 邻居" --debug
     """
     from olav.agent import create_olav_agent
-    
+
     console.print(Panel(f"[bold cyan]Query[/bold cyan]: {query_text}", border_style="cyan"))
-    
+
     try:
         agent = create_olav_agent(debug=debug)
         messages = [{"role": "user", "content": query_text}]
-        
+
         console.print("[dim]🔍 Processing...[/dim]")
         output = asyncio.run(stream_agent_response(agent, messages))
-        
+
         if not output:
             console.print("[yellow]No response received[/yellow]")
-            
+
     except Exception as e:
         console.print(f"[bold red]❌ Error: {str(e)}[/bold red]")
         if debug:
             import traceback
+
             traceback.print_exc()
         raise typer.Exit(1) from None
 
@@ -212,11 +220,13 @@ def query(
 def devices() -> None:
     """List all managed network devices."""
     from olav.tools.network import list_devices as nornir_list_devices
-    
+
     console.print("[bold cyan]Loading network devices...[/bold cyan]")
     try:
         result = nornir_list_devices.invoke({})
-        console.print(Panel(result, title="[bold cyan]Network Devices[/bold cyan]", border_style="cyan"))
+        console.print(
+            Panel(result, title="[bold cyan]Network Devices[/bold cyan]", border_style="cyan")
+        )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}[/bold red]")
         raise typer.Exit(1) from None
@@ -225,12 +235,14 @@ def devices() -> None:
 @app.command()
 def version() -> None:
     """Show OLAV version and information."""
-    console.print(Panel(
-        "[bold cyan]OLAV v0.8[/bold cyan]\n"
-        "Network Operations AI Assistant\n"
-        "Powered by DeepAgents + LangChain",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            "[bold cyan]OLAV v0.8[/bold cyan]\n"
+            "Network Operations AI Assistant\n"
+            "Powered by DeepAgents + LangChain",
+            border_style="cyan",
+        )
+    )
 
 
 @app.callback(invoke_without_command=True)
@@ -239,30 +251,37 @@ def interactive_mode(ctx: typer.Context) -> None:
     # If a subcommand was invoked, skip interactive mode
     if ctx.invoked_subcommand is not None:
         return
-    
+
     # Import heavy modules only when needed
     from olav.agent import create_olav_agent
-    from olav.cli.session import OlavPromptSession
+    from olav.cli.display import BannerType, display_banner
     from olav.cli.memory import AgentMemory
-    from olav.cli.display import display_banner, BannerType
-    
+    from olav.cli.session import OlavPromptSession
+
     is_interactive = sys.stdin.isatty()
-    
+
     try:
         console.print("\n" + "=" * 60)
         console.print("💬 OLAV Interactive CLI - v0.8")
         console.print("=" * 60 + "\n")
 
         # Create memory manager
+        from pathlib import Path
+
+        from config.settings import settings
+
+        memory_file = str(Path(settings.agent_dir) / ".agent_memory.json")
+        history_file = str(Path(settings.agent_dir) / ".cli_history")
+
         memory = AgentMemory(
             max_messages=100,
-            memory_file=".olav/.agent_memory.json",
+            memory_file=memory_file,
         )
 
         # Create CLI session
         try:
             session = OlavPromptSession(
-                history_file=".olav/.cli_history",
+                history_file=history_file,
                 enable_completion=is_interactive,
                 enable_history=is_interactive,
                 multiline=False,
@@ -270,7 +289,7 @@ def interactive_mode(ctx: typer.Context) -> None:
         except Exception as e:
             console.print(f"[yellow]⚠️ Warning: {e}[/yellow]")
             session = OlavPromptSession(
-                history_file=".olav/.cli_history",
+                history_file=history_file,
                 enable_completion=False,
                 enable_history=False,
                 multiline=False,

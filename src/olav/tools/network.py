@@ -525,7 +525,7 @@ def nornir_execute(device: str, command: str, timeout: int = 30) -> str:
     """Execute a command on a network device using Nornir.
 
     This tool executes CLI commands on network devices through Nornir/Netmiko.
-    Commands must be in the whitelist (defined in .olav/imports/commands/*.txt).
+    Commands must be in the whitelist (defined in agent_dir/imports/commands/*.txt).
     Dangerous commands in the blacklist will be rejected.
 
     Args:

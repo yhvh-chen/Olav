@@ -1,0 +1,25 @@
+Building configuration...
+
+Current configuration : 7320 bytes
+!
+! Last configuration change at 20:15:49 UTC Mon Jan 5 2026
+!
+version 17.1
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service call-home
+platform qfp utilization monitor load 80
+platform punt-keepalive disable-kernel-core
+platform console serial
+!
+hostname R2
+!
+boot-start-marker
+boot-end-marker
+!
+!
+!
+no aaa new-model
+call-home
+ ! If contact email address in call-home is configured as sch-smart-licensin
+... (truncated)

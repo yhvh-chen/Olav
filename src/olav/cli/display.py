@@ -134,7 +134,7 @@ def load_banner_from_config(settings_path: Path | None = None) -> BannerType:
     """Load banner type from settings configuration.
 
     Args:
-        settings_path: Path to settings.json (default: .olav/settings.json)
+        settings_path: Path to settings.json (default: agent_dir/settings.json)
 
     Returns:
         BannerType enum value
@@ -142,7 +142,8 @@ def load_banner_from_config(settings_path: Path | None = None) -> BannerType:
     import json
 
     if settings_path is None:
-        settings_path = Path(".olav/settings.json")
+        from config.settings import settings as cfg
+        settings_path = Path(cfg.agent_dir) / "settings.json"
 
     if not settings_path.exists():
         return BannerType.SNOWMAN  # Default

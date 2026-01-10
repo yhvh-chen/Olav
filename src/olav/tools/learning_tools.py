@@ -2,16 +2,22 @@
 
 This module wraps the learning functions in LangChain BaseTool wrappers
 so they can be used by the agent.
+
+Phase 7: Includes agentic embedding tools for reports and skills.
 """
+
+from pathlib import Path
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
+from config.settings import settings
 from olav.core.learning import (
     save_solution,
     suggest_solution_filename,
     update_aliases,
 )
+from olav.tools.knowledge_embedder import KnowledgeEmbedder
 
 
 class SaveSolutionInput(BaseModel):
@@ -32,14 +38,14 @@ class SaveSolutionTool(BaseTool):
     """Save a successful troubleshooting case to the knowledge base.
 
     This tool enables the agent to learn from past successes and build a
-    solutions library over time. Cases are saved to .olav/knowledge/solutions/.
+    solutions library over time. Cases are saved to agent_dir/knowledge/solutions/.
     """
 
     name: str = "save_solution"
     description: str = """Save a successful troubleshooting case to the knowledge base.
 
     Use this tool AFTER successfully resolving a problem. The case will be saved
-    to .olav/knowledge/solutions/ as a markdown file for future reference.
+    to agent_dir/knowledge/solutions/ as a markdown file for future reference.
 
     Important: Only save REAL, VERIFIED solutions. Do not save hypothetical cases.
     """
@@ -66,7 +72,11 @@ class SaveSolutionTool(BaseTool):
                 commands=commands,
                 tags=tags,
             )
-            return f"✅ Solution case saved to: {filepath}"
+            # Phase 7: Auto-embedding is done in save_solution()
+            return (
+                f"✅ Solution case saved to: {filepath}\n"
+                f"📚 Auto-embedded to knowledge base for semantic search"
+            )
         except Exception as e:
             return f"❌ Failed to save solution: {e}"
 
@@ -98,7 +108,7 @@ class UpdateAliasesTool(BaseTool):
     - User: "核心路由器是R1和R2"
     - You should: update_aliases(alias="核心路由器", actual_value="R1, R2", alias_type="device")
 
-    The alias is saved to .olav/knowledge/aliases.md.
+    The alias is saved to agent_dir/knowledge/aliases.md.
     """
     args_schema: type[BaseModel] = UpdateAliasesInput
 
@@ -120,7 +130,11 @@ class UpdateAliasesTool(BaseTool):
                 notes=notes,
             )
             if success:
-                return f"✅ Alias '{alias}' -> '{actual_value}' saved to knowledge base"
+                # Phase 7: Auto-embedding is done in update_aliases()
+                return (
+                    f"✅ Alias '{alias}' -> '{actual_value}' saved to knowledge base\n"
+                    f"📚 Auto-embedded to knowledge base for semantic search"
+                )
             else:
                 return f"❌ Failed to update alias '{alias}'"
         except Exception as e:
@@ -167,13 +181,109 @@ class SuggestSolutionFilenameTool(BaseTool):
         return f"Suggested filename: {filename}.md"
 
 
+class EmbedKnowledgeInput(BaseModel):
+    """Input schema for embed_knowledge tool."""
+
+    file_path: str = Field(description="Path to markdown file to embed (relative or absolute)")
+    source_type: str = Field(
+        default="report",
+        description="Type of source: 'report', 'skill', 'solution', or 'knowledge'",
+    )
+    platform: str = Field(
+        default=None,
+        description="Optional platform tag (e.g., 'cisco_ios', 'huawei_vrp', 'report')",
+    )
+
+
+class EmbedKnowledgeTool(BaseTool):
+    """Embed a markdown file or directory to the knowledge vector database.
+
+    Phase 7: Agentic embedding for reports and skills. This tool enables
+    the agent to index new knowledge to the DuckDB vector store.
+    """
+
+    name: str = "embed_knowledge"
+    description: str = """Embed a markdown file or directory to the knowledge vector database.
+
+    Use this tool to index new reports, skills, or knowledge files to make them
+    available for semantic search and agentic retrieval.
+
+    Examples:
+    - embed_knowledge(file_path="data/reports/network-analysis-2026-01-10.md", source_type="report")
+    - embed_knowledge(file_path=".olav/skills/inspection/", source_type="skill")
+
+    Returns: Summary of indexed chunks and any errors.
+    """
+    args_schema: type[BaseModel] = EmbedKnowledgeInput
+
+    def _run(
+        self,
+        file_path: str,
+        source_type: str = "report",
+        platform: str = None,
+    ) -> str:
+        """Execute the tool."""
+        try:
+            embedder = KnowledgeEmbedder()
+
+            path = Path(file_path)
+
+            # Resolve path (handle relative paths)
+            if not path.is_absolute():
+                if path.exists():
+                    pass  # Relative path exists in cwd
+                else:
+                    # Try relative to agent_dir
+                    agent_path = Path(settings.agent_dir) / path
+                    if agent_path.exists():
+                        path = agent_path
+
+            if not path.exists():
+                return f"❌ Error: File or directory not found: {file_path}"
+
+            # Map source_type to source_id
+            source_type_map = {
+                "skill": 1,
+                "knowledge": 2,
+                "report": 3,
+                "solution": 2,
+            }
+            source_id = source_type_map.get(source_type, 3)
+
+            # Embed single file or directory
+            if path.is_file():
+                if not path.suffix.lower() == ".md":
+                    return f"❌ Error: Only markdown files (.md) are supported. Got: {path.suffix}"
+
+                count = embedder.embed_file(path, source_id=source_id, platform=platform)
+                if count > 0:
+                    return f"✅ Embedded {path.name}: {count} chunks indexed"
+                else:
+                    return f"⚠️ File already indexed or empty: {path.name}"
+            else:
+                # Embed directory
+                stats = embedder.embed_directory(path, source_id=source_id, platform=platform)
+                total = stats["indexed"]
+                if total > 0:
+                    return (
+                        f"✅ Embedded directory: {total} chunks indexed, {stats['skipped']} skipped"
+                    )
+                else:
+                    return f"⚠️ No new files to embed in directory: {path}"
+
+        except Exception as e:
+            return f"❌ Error embedding knowledge: {e}"
+
+
 # Export tool instances
 save_solution_tool = SaveSolutionTool()
 update_aliases_tool = UpdateAliasesTool()
 suggest_filename_tool = SuggestSolutionFilenameTool()
+embed_knowledge_tool = EmbedKnowledgeTool()
 
 __all__ = [
     "save_solution_tool",
     "update_aliases_tool",
     "suggest_filename_tool",
+    "embed_knowledge_tool",
 ]

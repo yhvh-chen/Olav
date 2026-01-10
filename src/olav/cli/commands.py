@@ -160,18 +160,97 @@ async def cmd_inspect(args: str) -> str:
     """Run quick inspection on devices.
 
     Usage:
-        /inspect <scope>
+        /inspect [scope] [--layer L1|L2|L3|L4|all] [--report]
 
     Examples:
-        /inspect all core routers
+        /inspect all
         /inspect R1, R2, R5
-    """
-    if not args:
-        return "Usage: /inspect <scope>\nExample: /inspect all core routers"
+        /inspect role:core --layer L3
+        /inspect all --report
 
-    # This would trigger InspectorAgent
-    # For now, return a message
-    return f"Inspection queued for: {args}\n(Use agent query for full inspection)"
+    Layers:
+        L1    - Physical layer (interfaces, inventory)
+        L2    - Data link (VLANs, STP, MAC)
+        L3    - Network (routing, OSPF, BGP)
+        L4    - Transport (CPU, memory, errors)
+        all   - All layers (default)
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    try:
+        from config.settings import settings
+        # Use network_inspect.py to avoid shadowing Python's built-in inspect module
+        inspect_script = Path(settings.agent_dir) / "commands" / "network_inspect.py"
+
+        cmd_args = args.split() if args else ["all"]
+        result = subprocess.run(
+            [sys.executable, str(inspect_script)] + cmd_args,
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd())
+        )
+
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+
+        return output if output.strip() else "Inspection complete."
+
+    except Exception as e:
+        return f"Error executing inspect: {str(e)}"
+
+
+@register_command("query")
+async def cmd_query(args: str) -> str:
+    """Execute quick network query.
+
+    Usage:
+        /query [device] [query]
+
+    Examples:
+        /query R1 interface status
+        /query S1 version
+        /query R1 bgp neighbors
+        /query all cpu
+
+    Common Queries:
+        interface status   - Show interface status
+        version           - Show device version
+        bgp               - Show BGP summary
+        ospf              - Show OSPF neighbors
+        route             - Show routing table
+        vlan              - Show VLAN configuration
+        cpu               - Show CPU usage
+        memory            - Show memory stats
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if not args:
+        return "Usage: /query <device> <query>\nExample: /query R1 interface status"
+
+    try:
+        from config.settings import settings
+        query_script = Path(settings.agent_dir) / "commands" / "query.py"
+
+        result = subprocess.run(
+            [sys.executable, str(query_script)] + args.split(),
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd())
+        )
+
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+
+        return output if output.strip() else "Query complete."
+
+    except Exception as e:
+        return f"Error executing query: {str(e)}"
 
 
 @register_command("reload")
@@ -250,10 +329,17 @@ async def cmd_help(args: str) -> str:
         # Show general help
         return """OLAV CLI Commands:
 
-  Slash Commands:
+  Workflow Commands:
+    /backup [filter] [type] [options]  - Backup device configurations
+    /analyze [src] [dst] [options]     - Analyze network path
+    /inspect [scope] [--layer] [--report] - Device inspection
+    /query [device] [query]            - Quick device query
+
+  Device Commands:
     /devices [filter]   - List devices (e.g., /devices role:core)
     /skills [name]      - List skills or view skill details
-    /inspect <scope>    - Run quick inspection
+
+  Session Commands:
     /reload             - Reload skills and capabilities
     /clear              - Clear session memory
     /history            - Show session statistics
@@ -266,11 +352,105 @@ async def cmd_help(args: str) -> str:
     Multi-line          - Press Enter twice to submit
 
   Examples:
-    olav> /devices role:core
+    olav> /backup role:core running
+    olav> /analyze R1 R3 --error "packet loss"
+    olav> /inspect all --layer L3
+    olav> /query R1 bgp neighbors
     olav> @config.txt analyze this configuration
     olav> !ping 8.8.8.8
-    olav> Check R1 interface status
 """
+
+
+@register_command("backup")
+async def cmd_backup(args: str) -> str:
+    """Execute backup workflow.
+
+    Usage:
+        /backup [filter] [type] [--commands "cmd1,cmd2"]
+
+    Examples:
+        /backup role:core running
+        /backup site:lab all
+        /backup R1,R2 running
+        /backup all custom --commands "show version"
+
+    Filters:
+        role:core    - Devices with role="core"
+        site:lab     - Devices at site="lab"
+        group:test   - Devices in "test" group
+        R1,R2,R3     - Specific device list
+        all          - All devices
+
+    Backup Types:
+        running      - show running-config
+        startup      - show startup-config
+        all          - Both running and startup
+        custom       - Use --commands parameter
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    try:
+        from config.settings import settings
+        backup_script = Path(settings.agent_dir) / "commands" / "backup.py"
+        result = subprocess.run(
+            [sys.executable, str(backup_script)] + args.split(),
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd())
+        )
+
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+
+        return output
+
+    except Exception as e:
+        return f"Error executing backup: {str(e)}"
+
+
+@register_command("analyze")
+async def cmd_analyze(args: str) -> str:
+    """Execute network path analysis workflow.
+
+    Usage:
+        /analyze [source] [destination] [--error "desc"] [--plan] [--interactive]
+
+    Examples:
+        /analyze R1 R3
+        /analyze R1 R3 --error "high latency"
+        /analyze R1 R3 --plan
+        /analyze R1 R3 --interactive
+
+    Performs deep analysis using:
+        - Phase 1: Macro analysis (path tracing, fault domain)
+        - Phase 2: Micro analysis (layer-by-layer troubleshooting)
+        - Phase 3: Synthesis (root cause, recommendations)
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    try:
+        from config.settings import settings
+        analyze_script = Path(settings.agent_dir) / "commands" / "analyze.py"
+        result = subprocess.run(
+            [sys.executable, str(analyze_script)] + args.split(),
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd())
+        )
+
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+
+        return output
+
+    except Exception as e:
+        return f"Error executing analyze: {str(e)}"
 
 
 @register_command("quit")

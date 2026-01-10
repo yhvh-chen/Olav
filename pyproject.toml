@@ -22,6 +22,7 @@ dependencies = [
     "langchain-openai>=0.0.1",
     "langchain-ollama>=0.1.0",
     "langchain-core>=0.1.0",
+    "langchain-text-splitters>=0.2.0",  # Phase 4: Knowledge base text chunking
     # DeepAgents Framework
     # Note: Will be added from archive/deepagents/
     # Data Processing
@@ -88,7 +89,7 @@ ignore = ["ANN101", "ANN102", "E402"]  # E402: Intentional for dotenv loading
 "tests/**/*.py" = ["S101"]
 "src/olav/__main__.py" = ["E402"]
 "src/olav/main.py" = ["E402"]
-"src/olav/cli/cli_main.py" = ["E402"]
+"src/olav/cli/cli_main.py" = ["E402", "ANN401", "S602", "S112"]  # ANN401: agent types, S602/S112: shell command handling
 "src/olav/core/settings.py" = ["ANN401"]  # Settings must accept Any type values
 "src/olav/core/llm.py" = ["ANN401"]  # LLM factory needs **kwargs
 
@@ -100,7 +101,11 @@ disallow_incomplete_defs = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["tests/unit", "tests/e2e"]
+testpaths = ["tests/unit"]
+# Note: E2E tests require real API/device access. Run explicitly:
+#   pytest tests/e2e/ --timeout=120  
+# Integration tests:
+#   pytest tests/integration/ -m integration
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -120,9 +125,10 @@ markers = [
     "llm: Tests requiring real LLM API calls",
     "network: Tests requiring network device access",
     "slow: Slow-running tests",
+    "manual: Manual tests requiring interactive setup",
 ]
 asyncio_mode = "auto"
-timeout = 300  # 5 minutes default timeout
+timeout = 60  # 60 second default timeout (was 300, too long)
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",

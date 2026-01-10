@@ -18,6 +18,7 @@ from olav.core.subagent_manager import format_subagent_descriptions, get_subagen
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.inspection_tools import generate_report
 from olav.tools.learning_tools import (
+    embed_knowledge_tool,
     save_solution_tool,
     suggest_filename_tool,
 )
@@ -31,6 +32,7 @@ from olav.tools.storage_tools import (
     save_tech_support,
     write_file,
 )
+from olav.tools.task_tools import delegate_task
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -79,7 +81,7 @@ def create_olav_agent(
         llm = model
 
     # Load base system prompt from OLAV.md or use default
-    olav_md_path = Path(".olav/OLAV.md")
+    olav_md_path = Path(settings.agent_dir) / "OLAV.md"
     if olav_md_path.exists():
         base_prompt = olav_md_path.read_text(encoding="utf-8")
     else:
@@ -154,12 +156,16 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         # Phase 4: Learning tools - self-learning capabilities
         save_solution_tool,  # Save successful troubleshooting cases
         suggest_filename_tool,  # Suggest solution filenames
+        # Phase 7: Agentic embedding - embed reports/skills to knowledge base
+        embed_knowledge_tool,  # Embed markdown files to vector knowledge base
         # Phase 6: Storage tools - file operations with HITL
         write_file,  # Generic file write (requires HITL)
-        read_file,  # Read files from .olav/
+        read_file,  # Read files from agent_dir/
         save_device_config,  # Save device configs (requires HITL)
         save_tech_support,  # Save tech-support output (requires HITL)
         list_saved_files,  # List saved files
+        # Workflow commands support
+        delegate_task,  # Subagent delegation for /analyze workflow
         # Note: Batch backup by group/role/site is skill-driven, not tool-driven
         # Agent uses list_devices + nornir_execute + save_device_config combo
     ]
@@ -177,6 +183,7 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
             "save_solution": True,  # Phase 4: Learning - requires approval (writes to disk)
             "update_aliases": True,  # Phase 4: Learning - requires approval (writes to disk)
             "suggest_solution_filename": False,  # Phase 4: Learning - read-only helper
+            "embed_knowledge": False,  # Phase 7: Embedding - read-only KB update (safe)
             # Phase 6: Storage tools - file operations
             "write_file": True,  # Filesystem write requires approval
             "read_file": False,  # Read-only is safe
@@ -221,8 +228,9 @@ def initialize_olav() -> "CompiledStateGraph":
         Compiled OLAV DeepAgent
     """
     # Reload capabilities
-    print("Loading capabilities from .olav/imports/...")
-    counts = reload_capabilities(imports_dir=".olav/imports")
+    imports_dir = Path(settings.agent_dir) / "imports"
+    print(f"Loading capabilities from {imports_dir}/...")
+    counts = reload_capabilities(imports_dir=str(imports_dir))
     print(
         f"Loaded {counts['commands']} commands and {counts['apis']} API endpoints "
         f"(total: {counts['total']})"
@@ -331,53 +339,18 @@ def get_inspector_agent() -> dict[str, Any]:
     Returns:
         Subagent configuration
     """
+    # Note: Phase B will implement nornir_bulk_execute and parse_inspection_scope tools
+    # For now, return basic inspector subagent
     return create_subagent(
         name="inspector-agent",
         description="Device inspection specialist: health checks, audits, security analysis",
-        system_prompt="""You are the Network Inspector Agent, specialized in device inspection workflows.
+        system_prompt="""You are the Network Inspector Agent, specialized in device inspection.
 
-Your expertise includes:
-1. **Health Checks**: System resources, CPU, memory, uptime
-2. **BGP Audits**: BGP peer status, route tables, AS paths
-3. **Interface Analysis**: Error counters, utilization, CRC errors
-4. **Security Baseline**: ACL checks, password complexity, NTP/SNMP config
+Your expertise includes health checks, audits, and security analysis.
 
-## Inspection Workflow
-
-When given an inspection task:
-
-1. **Parse Scope**: Identify which devices to inspect
-   - Use `parse_inspection_scope()` to parse device filters
-   - Examples: "all core routers", "R1-R5", "devices with tag:production"
-
-2. **Plan Commands**: Based on inspection type, select commands
-   - Health check: show version, show processes cpu, show memory statistics
-   - BGP audit: show ip bgp summary, show ip bgp neighbors
-   - Interface errors: show interfaces counters errors
-   - Security: show access-lists, show running-config | section ntp
-
-3. **Bulk Execute**: Use `nornir_bulk_execute()` for efficiency
-   - Pass all devices and commands at once
-   - Returns structured results per device
-
-4. **Analyze Results**: Identify issues and patterns
-   - Look for errors, warnings, anomalies
-   - Compare against baselines
-
-5. **Generate Report**: Use `generate_report()` for structured output
-   - HTML format for detailed analysis
-   - Actionable recommendations
-
-Available tools:
-- nornir_bulk_execute: Execute commands on multiple devices in parallel
-- parse_inspection_scope: Parse device filter expressions
-- generate_report: Generate HTML inspection reports
-- nornir_execute: Execute commands on individual devices
-- search_capabilities: Find available inspection commands
+Available tools: generate_report, nornir_execute, search_capabilities
 """,
         tools=[
-            nornir_bulk_execute,
-            parse_inspection_scope,
             generate_report,
             nornir_execute,
             search_capabilities,

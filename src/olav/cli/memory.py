@@ -12,20 +12,28 @@ class AgentMemory:
     """Session memory persistence for OLAV agent.
 
     Stores conversation history and context between CLI sessions.
-    Memory is persisted to .olav/.agent_memory.json
+    Memory is persisted to agent_dir/.agent_memory.json
     """
 
-    MEMORY_FILE = Path(".olav/.agent_memory.json")
+    MEMORY_FILE = None  # Set dynamically in __init__
 
     def __init__(self, max_messages: int = 100, memory_file: str | Path | None = None):
         """Initialize agent memory.
 
         Args:
             max_messages: Maximum number of messages to keep
-            memory_file: Custom memory file path (optional)
+            memory_file: Custom memory file path (defaults to agent_dir/.agent_memory.json)
         """
         self.max_messages = max_messages
-        self.memory_file = Path(memory_file) if memory_file else self.MEMORY_FILE
+        
+        if memory_file:
+            self.memory_file = Path(memory_file)
+        elif self.MEMORY_FILE:
+            self.memory_file = self.MEMORY_FILE
+        else:
+            from config.settings import settings
+            self.memory_file = Path(settings.agent_dir) / ".agent_memory.json"
+        
         self.messages: List[Dict[str, Any]] = []
         self.metadata: Dict[str, Any] = {}
         self._load()

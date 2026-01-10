@@ -24,7 +24,7 @@ class OlavPromptSession:
     """Enhanced OLAV prompt session with prompt-toolkit features.
 
     Features:
-    - Persistent command history (.olav/.cli_history)
+    - Persistent command history (agent_dir/.cli_history)
     - Auto-completion for commands and file names
     - Multi-line input support
     - History search with Ctrl+R
@@ -33,7 +33,7 @@ class OlavPromptSession:
 
     def __init__(
         self,
-        history_file: str | Path = ".olav/.cli_history",
+        history_file: str | Path = None,
         enable_completion: bool = True,
         enable_history: bool = True,
         multiline: bool = True,
@@ -41,11 +41,15 @@ class OlavPromptSession:
         """Initialize the prompt session.
 
         Args:
-            history_file: Path to history file
+            history_file: Path to history file (defaults to agent_dir/.cli_history)
             enable_completion: Enable auto-completion
             enable_history: Enable history persistence
             multiline: Enable multi-line input
         """
+        if history_file is None:
+            from config.settings import settings
+            history_file = Path(settings.agent_dir) / ".cli_history"
+        
         self.history_file = Path(history_file)
         self.enable_completion = enable_completion
         self.enable_history = enable_history

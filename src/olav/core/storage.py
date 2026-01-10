@@ -50,13 +50,14 @@ def get_storage_backend(project_root: Path | None = None):
     if project_root is None:
         project_root = Path.cwd()
 
-    olav_dir = project_root / ".olav"
+    from config.settings import settings
+    agent_dir = Path(settings.agent_dir)
 
     # Configure persistent storage paths (Agent can write)
     persistent_paths = [
-        olav_dir / "skills",
-        olav_dir / "knowledge",
-        olav_dir / "imports" / "commands",
+        agent_dir / "skills",
+        agent_dir / "knowledge",
+        agent_dir / "imports" / "commands",
     ]
 
     # Configure read-only paths
@@ -105,22 +106,22 @@ def get_storage_permissions() -> str:
 你可以访问以下路径:
 
 ### ✅ 可读写 (用于自学习)
-- `.olav/skills/*.md` - 技能策略 (可以学习新模式)
-- `.olav/knowledge/*` - 知识库 (可以积累新知识)
-  - `.olav/knowledge/aliases.md` - 设备别名
-  - `.olav/knowledge/solutions/*.md` - 成功案例
-- `.olav/imports/commands/*.txt` - 命令白名单 (可以添加只读命令)
+- `agent_dir/skills/*.md` - 技能策略 (可以学习新模式)
+- `agent_dir/knowledge/*` - 知识库 (可以积累新知识)
+  - `agent_dir/knowledge/aliases.md` - 设备别名
+  - `agent_dir/knowledge/solutions/*.md` - 成功案例
+- `agent_dir/imports/commands/*.txt` - 命令白名单 (可以添加只读命令)
 
 ### ⚠️ 只读 (人类维护)
-- `.olav/imports/apis/*.yaml` - API定义
-- `.olav/OLAV.md` - 核心规则
+- `agent_dir/imports/apis/*.yaml` - API定义
+- Root CLAUDE.md - 核心规则
 
 ### ❌ 不可访问
 - `.env` - 敏感配置
 - `config/` - 运行配置
 
 ### 🔒 临时存储 (会话内有效)
-- `.olav/scratch/*` - 临时文件 (会话结束后删除)
+- `agent_dir/scratch/*` - 临时文件 (会话结束后删除)
 
 ### 学习原则
 1. 只在确认成功后保存解决方案

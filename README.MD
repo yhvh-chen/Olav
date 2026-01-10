@@ -129,6 +129,37 @@ Examples:
 
 ---
 
+### 🔧 Claude Code & Multi-Platform Support
+
+OLAV supports **Claude Code**, **Cursor IDE**, and other agent platforms with:
+
+- ✅ **Automated Migration Tool** - One-command conversion: `python scripts/migrate_olav_to_agent.py --platform claude`
+- ✅ **Dual Format Support** - Works with both `.olav/skills/*.md` (legacy) and `skills/*/SKILL.md` (new)
+- ✅ **Knowledge Management** - Search, reload, and sync with hybrid FTS + vector search
+- ✅ **Compatibility Verification** - Automated checking with `verify_claude_compatibility.py`
+- ✅ **Safe Migration** - Automatic backup before any changes, dry-run mode available
+- ✅ **80+ Test Cases** - Comprehensive testing for reliability
+
+**Quick Migration**:
+```bash
+# Test first (no changes)
+python scripts/migrate_olav_to_agent.py --platform claude --dry-run
+
+# Execute (with auto-backup)
+python scripts/migrate_olav_to_agent.py --platform claude
+
+# Verify
+python scripts/verify_claude_compatibility.py .
+```
+
+**Available Tools**:
+- `search-knowledge.py` - Hybrid knowledge search
+- `reload-knowledge.py` - Update knowledge base
+- `sync-knowledge.py` - Database synchronization
+- See [AGENT_MIGRATION_GUIDE.md](AGENT_MIGRATION_GUIDE.md) for complete documentation
+
+---
+
 ## Installation
 
 ### Prerequisites
@@ -327,6 +358,8 @@ git log --oneline | head -10
 
 ## Advanced Usage
 
+## Advanced Usage
+
 ### Three-Layer Knowledge Architecture
 
 ```
@@ -334,7 +367,7 @@ git log --oneline | head -10
 │          OLAV Three-Layer Knowledge Architecture        │
 ├────────────────────────────────────────────────────────┤
 │                                                        │
-│  Layer 1: SKILLS (.olav/skills/*.md)                  │
+│  Layer 1: SKILLS (.olav/skills/*.md or */SKILL.md)    │
 │  ├─ device-inspection    → Comprehensive L1-L4 check  │
 │  ├─ quick-query          → Fast 1-2 command queries   │
 │  ├─ deep-analysis        → Multi-step diagnostics     │
@@ -343,12 +376,13 @@ git log --oneline | head -10
 │                                                        │
 │  Layer 2: KNOWLEDGE (.olav/knowledge/*.md)            │
 │  ├─ aliases.md           → Device alias mapping       │
-│  └─ topology.md          → Network topology           │
+│  ├─ topology.md          → Network topology           │
+│  └─ solutions/           → Solutions & patterns       │
 │     [Knowledge Layer - WHAT: What are facts]          │
 │                                                        │
 │  Layer 3: TOOLS/CAPABILITIES                          │
 │  ├─ Nornir               → SSH batch execution        │
-│  ├─ smart_query          → Unified query tool         │
+│  ├─ search-knowledge     → Unified search tool        │
 │  ├─ DuckDB              → CLI/API/NETCONF library     │
 │  └─ LangChain           → LLM integration             │
 │     [Capability Layer - CAN: What we can do]          │
@@ -503,6 +537,95 @@ A: Use natural language in the skill: "Backup interface configs from core device
 **Q: How are backups organized?**
 A: All backups go to `.olav/data/configs/` with format `[device]-[config-type]-[timestamp].txt`
 
+**Q: How do I migrate to Claude Code?**
+A: Run `python scripts/migrate_olav_to_agent.py --platform claude` - it's automated and creates backups automatically!
+
+**Q: What if migration fails?**
+A: Use `--dry-run` first to preview, or restore from `.backup_*` directory if needed. See [AGENT_MIGRATION_GUIDE.md](AGENT_MIGRATION_GUIDE.md).
+
+---
+
+## Quick Reference - All Commands
+
+### Migration & Setup
+```bash
+# Migrate to Claude Code
+python scripts/migrate_olav_to_agent.py --platform claude
+
+# Preview migration first (recommended)
+python scripts/migrate_olav_to_agent.py --platform claude --dry-run
+
+# Migrate to all platforms
+python scripts/migrate_olav_to_agent.py --platform all
+
+# Verify migration results
+python scripts/verify_claude_compatibility.py .
+pytest tests/ -v
+```
+
+### Knowledge Management
+```bash
+# Search knowledge base (hybrid: full-text + semantic)
+python .olav/commands/search-knowledge.py "BGP configuration" --type hybrid
+
+# Reload/update knowledge base
+python .olav/commands/reload-knowledge.py --incremental
+
+# Sync knowledge database
+python .olav/commands/sync-knowledge.py --cleanup
+
+# Get detailed report
+python .olav/commands/reload-knowledge.py --incremental --report
+```
+
+### Testing
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/unit/test_skill_loader.py -v
+
+# Run with coverage report
+pytest tests/ --cov=src/olav --cov-report=html
+
+# Run only unit tests (fast)
+pytest tests/unit/ -v
+```
+
+### Development Tools
+```bash
+# Code formatting (Ruff)
+uv run ruff format .
+
+# Code linting and fixing
+uv run ruff check . --fix
+
+# Type checking (Pyright)
+uv run pyright
+
+# Pre-commit check
+uv run pre-commit run --all-files
+
+# Verify entire project
+python scripts/verify_migration_complete.py .
+```
+
+---
+
+## New Features Checklist (v0.8.1)
+
+- ✅ One-command migration to Claude Code: `python scripts/migrate_olav_to_agent.py --platform claude`
+- ✅ Automatic backup before migration
+- ✅ Dry-run mode for safe testing: `--dry-run`
+- ✅ Support for multiple platforms: Claude, Cursor, others
+- ✅ Knowledge base search with hybrid FTS + vector search
+- ✅ Knowledge reload/sync utilities
+- ✅ 80+ test cases covering all functionality
+- ✅ Automated compatibility verification
+- ✅ Comprehensive documentation (Chinese + English)
+- ✅ Migration reports in JSON format
+
 ---
 
 ## License
@@ -512,4 +635,48 @@ MIT License - See LICENSE file for details
 ---
 
 **OLAV v0.8** - *Build Network Intelligence with AI*  
-**Last Updated**: 2026-01-08 | **Maintained by**: GitHub Copilot + Claude Haiku 4.5
+**Last Updated**: 2026-01-09 | **Maintained by**: GitHub Copilot + Claude Haiku 4.5
+
+---
+
+## 中文快速指南 (Chinese Quick Guide)
+
+### Claude Code 集成
+
+OLAV 现已完全支持 **Claude Code**、**Cursor IDE** 等 Agent 平台！快速迁移命令：
+
+```bash
+# 1️⃣ 测试迁移（不修改文件）
+python scripts/migrate_olav_to_agent.py --platform claude --dry-run
+
+# 2️⃣ 执行迁移（自动备份）
+python scripts/migrate_olav_to_agent.py --platform claude
+
+# 3️⃣ 验证迁移结果
+python scripts/verify_claude_compatibility.py .
+pytest tests/ -v
+```
+
+### 主要特性
+
+✨ **一键迁移脚本** - 自动转换为 Claude Code/Cursor 格式  
+✨ **知识库搜索** - 混合搜索（全文 FTS + 向量语义）  
+✨ **自动备份系统** - 迁移前自动备份原始文件  
+✨ **兼容性验证** - 自动检查 Claude Code 格式兼容性  
+✨ **完整测试套件** - 80+ 个测试用例确保质量  
+
+### 新增工具
+
+| 工具 | 功能 | 命令 |
+|------|------|------|
+| migrate_olav_to_agent.py | 一键迁移 | `python scripts/migrate_olav_to_agent.py --platform claude` |
+| search-knowledge | 知识库搜索 | `python .olav/commands/search-knowledge.py "查询"` |
+| reload-knowledge | 知识库更新 | `python .olav/commands/reload-knowledge.py --incremental` |
+| sync-knowledge | 知识库同步 | `python .olav/commands/sync-knowledge.py --cleanup` |
+
+### 详细中文文档
+
+- [AGENT_MIGRATION_GUIDE.md](AGENT_MIGRATION_GUIDE.md) - 完整的迁移操作指南
+- [CLAUDE_CODE_QUICK_START.md](CLAUDE_CODE_QUICK_START.md) - Claude Code 用户快速入门
+
+---

@@ -242,30 +242,38 @@ class CapabilitiesLoader:
 
 
 def reload_capabilities(
-    imports_dir: str | Path = ".olav/imports",
+    imports_dir: str | Path = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """Convenience function to reload capabilities.
 
     Args:
-        imports_dir: Path to imports/ directory
+        imports_dir: Path to imports/ directory (defaults to agent_dir/imports)
         dry_run: If True, only validate without loading
 
     Returns:
         Dictionary with counts
     """
+    if imports_dir is None:
+        from config.settings import settings
+        imports_dir = str(Path(settings.agent_dir) / "imports")
+    
     loader = CapabilitiesLoader(Path(imports_dir))
     return loader.reload(dry_run=dry_run)
 
 
-def validate_capabilities(imports_dir: str | Path = ".olav/imports") -> list[str]:
+def validate_capabilities(imports_dir: str | Path = None) -> list[str]:
     """Convenience function to validate capabilities.
 
     Args:
-        imports_dir: Path to imports/ directory
+        imports_dir: Path to imports/ directory (defaults to agent_dir/imports)
 
     Returns:
         List of error messages
     """
+    if imports_dir is None:
+        from config.settings import settings
+        imports_dir = str(Path(settings.agent_dir) / "imports")
+    
     loader = CapabilitiesLoader(Path(imports_dir))
     return loader.validate()

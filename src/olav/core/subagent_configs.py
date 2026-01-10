@@ -165,8 +165,8 @@ When given an inspection task:
 
 - Always use `nornir_bulk_execute()` for multiple devices (efficient)
 - Use `parse_inspection_scope()` before executing commands
-- Always generate a report using Jinja2 templates
-- Reports are saved to `.olav/reports/` directory
+- Always generate a report using Markdown templates
+- Reports are saved to `agent_dir/reports/` directory
 - Include actionable recommendations in your reports
 
 ## Tool Usage
@@ -186,7 +186,7 @@ results = nornir_bulk_execute(
 report_path = generate_report(
     template="health-check",
     results=results,
-    output_path=".olav/reports/health-check-20250108.html"
+    output_path="reports/health-check-20250108.md"
 )
 ```
 

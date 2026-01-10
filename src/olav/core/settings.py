@@ -1,6 +1,6 @@
 """OLAV Settings Configuration Manager.
 
-This module manages OLAV configuration from .olav/settings.json.
+This module manages OLAV configuration from agent_dir/settings.json.
 Provides centralized access to all configuration options with validation.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 class OlavSettings:
     """OLAV Settings Manager.
 
-    Manages configuration from .olav/settings.json with defaults and validation.
+    Manages configuration from agent_dir/settings.json with defaults and validation.
     """
 
     DEFAULT_SETTINGS = {
