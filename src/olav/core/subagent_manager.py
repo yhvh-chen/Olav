@@ -11,8 +11,9 @@ except ImportError:
     DEEPAGENTS_AVAILABLE = False
     SubAgentMiddleware = None  # type: ignore[misc, assignment]
 
-from langchain_core.tools import BaseTool
 from typing import Any
+
+from langchain_core.tools import BaseTool
 
 from olav.core.llm import LLMFactory
 

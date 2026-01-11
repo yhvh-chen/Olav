@@ -189,7 +189,7 @@ class TestNetworkExecutorTextFSM:
         mock_aggregated_result.__getitem__ = MagicMock(return_value=mock_host_result)
 
         # Mock get_nornir
-        with patch("olav.tools.network.get_nornir") as mock_get_nornir:
+        with patch("olav.tools.network_executor.get_nornir") as mock_get_nornir:
             mock_nr = MagicMock()
             mock_nr_filtered = MagicMock()
             mock_nr_filtered.inventory.hosts = {"R1": MagicMock()}

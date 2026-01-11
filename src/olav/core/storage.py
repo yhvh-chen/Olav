@@ -15,7 +15,7 @@ Based on DESIGN_V0.8.md Section 7.4:
 from pathlib import Path
 
 try:
-    from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
+    from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
     DEEPAGENTS_HAS_STORAGE = True
     # Note: StoreBackend renamed to FilesystemBackend in official API
     StoreBackend = FilesystemBackend
@@ -69,13 +69,13 @@ def get_storage_backend(project_root: Path | None = None):
 
     # Configure read-only paths
     read_only_paths = [
-        olav_dir / "imports" / "apis",
-        olav_dir / "OLAV.md",
+        agent_dir / "imports" / "apis",
+        agent_dir / "OLAV.md",
     ]
 
     # Configure temporary paths (session-only)
     temp_paths = [
-        olav_dir / "scratch",
+        agent_dir / "scratch",
     ]
 
     # Create persistent backend
