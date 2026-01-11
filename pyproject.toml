@@ -9,7 +9,7 @@ packages = ["src/olav", "config"]
 name = "olav"
 version = "0.8.0"
 description = "OLAV - Network Operations AI Assistant with DeepAgents"
-readme = "README.md"
+readme = "README.MD"
 requires-python = ">=3.11"
 authors = [
     {name = "OLAV Team"}
