@@ -2,16 +2,21 @@
 
 Provides tools to delegate tasks to specialized subagents.
 """
+from typing import TYPE_CHECKING, Any
+
 from langchain_core.tools import tool
 
 from olav.core.subagent_manager import get_subagent_middleware
 from olav.tools.network import list_devices, nornir_execute
 
+if TYPE_CHECKING:
+    pass
+
 # Global subagent middleware instance
-_subagent_middleware = None
+_subagent_middleware: Any = None
 
 
-def get_task_middleware():
+def get_task_middleware() -> Any:
     """Get or create subagent middleware instance."""
     global _subagent_middleware
 

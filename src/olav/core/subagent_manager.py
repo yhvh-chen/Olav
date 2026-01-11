@@ -75,7 +75,7 @@ def get_available_subagents() -> dict[str, dict[str, str]]:
 
     Returns:
         Dictionary mapping subagent names to their descriptions
-        
+
     Note: DeepAgents framework currently only registers these as 'general-purpose'
     type, but they are invoked with specialized prompts based on intent.
     """

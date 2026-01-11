@@ -80,7 +80,7 @@ def register_source(conn, source_name: str, source_path: Path, platform: str = N
     return source_id
 
 
-def main():
+def main() -> None:
     """Main entry point for knowledge indexing."""
     parser = argparse.ArgumentParser(
         description="Index markdown files into the knowledge database",

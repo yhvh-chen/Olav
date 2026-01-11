@@ -402,7 +402,7 @@ def get_database(db_path: str | None = None) -> OlavDatabase:
 
 def reset_database() -> None:
     """Reset the global database instance.
-    
+
     Use this in tests to ensure clean state between test runs.
     """
     global _db_instance

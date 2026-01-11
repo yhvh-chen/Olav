@@ -333,7 +333,7 @@ class Settings(BaseSettings):
     # postgres_uri validator removed - not needed in v0.8
     # All database operations use DuckDB via duckdb_path
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         """Initialize settings and apply .olav/settings.json overrides (Layer 2)."""
         super().__init__(**kwargs)
         self._apply_olav_settings()

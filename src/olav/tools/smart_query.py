@@ -142,7 +142,7 @@ def smart_query(
 
     Supports both single and multiple devices:
     - Single: "R1"
-    - Multiple: "R1,R2,R3" 
+    - Multiple: "R1,R2,R3"
     - All: "all"
     - Filter: "role:core", "site:lab", "group:test"
 
@@ -244,7 +244,7 @@ def _batch_query_internal(
     command: str | None = None,
 ) -> str:
     """Internal batch query implementation.
-    
+
     Handles: "R1,R2", "all", "role:core", "site:lab", "group:test"
     """
     from nornir_netmiko.tasks import netmiko_send_command
@@ -342,7 +342,10 @@ def _batch_query_internal(
 
     for command, cmd_devices_list in command_devices.items():
         # Filter Nornir to these devices
-        nr_filtered = nr.filter(filter_func=lambda h: h.name in cmd_devices_list)
+        # Use default argument to capture loop variable
+        nr_filtered = nr.filter(
+            filter_func=lambda h, devices=cmd_devices_list: h.name in devices
+        )
 
         # Execute command in parallel (Nornir handles threading)
         agg_result = nr_filtered.run(

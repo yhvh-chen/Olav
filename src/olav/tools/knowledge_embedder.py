@@ -31,7 +31,7 @@ class KnowledgeEmbedder:
         >>> embedder.embed_directory(Path("docs/"), source_id=2)
     """
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | None = None) -> None:
         """Initialize the embedder.
 
         Args:

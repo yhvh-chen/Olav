@@ -10,10 +10,10 @@ Usage:
 Examples:
     # Default migration (agent name: claude)
     uv run python scripts/migrate_to_claude_code.py
-    
+
     # Custom agent name
     uv run python scripts/migrate_to_claude_code.py --agent-name cursor
-    
+
     # Dry run (preview only)
     uv run python scripts/migrate_to_claude_code.py --dry-run
 """
@@ -506,7 +506,7 @@ These documents will be available when using the {skill_name} skill.
     return created
 
 
-def main():
+def main() -> int:
     """Run migration."""
     parser = argparse.ArgumentParser(
         description="Migrate .olav to Claude Code Skill standard"

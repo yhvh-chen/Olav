@@ -22,9 +22,9 @@ from config.settings import Settings
 class ConfigCommand:
     """Handle 'olav config' commands for configuration management."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings) -> None:
         """Initialize ConfigCommand.
-        
+
         Args:
             settings: Settings instance from Phase C-1
         """
@@ -32,7 +32,7 @@ class ConfigCommand:
 
     def show(self, key: str | None = None) -> str:
         """Show configuration value(s).
-        
+
         Args:
             key: Specific config key to show (optional)
                 - 'llm': LLM configuration
@@ -41,7 +41,7 @@ class ConfigCommand:
                 - 'diagnosis': Diagnosis parameters
                 - 'logging': Logging configuration
                 - None: Show all (non-sensitive) settings
-        
+
         Returns:
             Formatted configuration display
         """
@@ -91,14 +91,14 @@ class ConfigCommand:
 
     def set(self, key_value: str) -> str:
         """Set configuration value.
-        
+
         Args:
             key_value: Format: "key=value"
                 Examples:
                 - llm.model=gpt-4o
                 - routing.confidence_threshold=0.7
                 - hitl.require_approval_for_write=false
-        
+
         Returns:
             Status message
         """
@@ -149,7 +149,7 @@ class ConfigCommand:
 
     def validate(self) -> str:
         """Validate configuration integrity.
-        
+
         Returns:
             Validation report
         """
@@ -211,9 +211,9 @@ class ConfigCommand:
 class SkillCommand:
     """Handle 'olav skill' commands for skill management."""
 
-    def __init__(self, olav_dir: Path | None = None):
+    def __init__(self, olav_dir: Path | None = None) -> None:
         """Initialize SkillCommand.
-        
+
         Args:
             olav_dir: Path to .olav directory
         """
@@ -223,10 +223,10 @@ class SkillCommand:
 
     def list_skills(self, category: str | None = None) -> str:
         """List available skills.
-        
+
         Args:
             category: Filter by category (e.g., "inspection")
-        
+
         Returns:
             Formatted skill list
         """
@@ -254,10 +254,10 @@ class SkillCommand:
 
     def show_skill(self, skill_name: str) -> str:
         """Show skill details.
-        
+
         Args:
             skill_name: Skill name (without .md extension)
-        
+
         Returns:
             Skill content or error message
         """
@@ -276,10 +276,10 @@ class SkillCommand:
 
     def search_skills(self, query: str) -> str:
         """Search skills by name or description.
-        
+
         Args:
             query: Search query (case-insensitive)
-        
+
         Returns:
             Matching skills
         """
@@ -316,9 +316,9 @@ class SkillCommand:
 class KnowledgeCommand:
     """Handle 'olav knowledge' commands for knowledge base operations."""
 
-    def __init__(self, olav_dir: Path | None = None):
+    def __init__(self, olav_dir: Path | None = None) -> None:
         """Initialize KnowledgeCommand.
-        
+
         Args:
             olav_dir: Path to .olav directory
         """
@@ -328,10 +328,10 @@ class KnowledgeCommand:
 
     def list_knowledge(self, category: str | None = None) -> str:
         """List knowledge base items.
-        
+
         Args:
             category: Filter by category (e.g., "solutions")
-        
+
         Returns:
             Formatted knowledge list
         """
@@ -366,10 +366,10 @@ class KnowledgeCommand:
 
     def search_knowledge(self, query: str) -> str:
         """Search knowledge base.
-        
+
         Args:
             query: Search query
-        
+
         Returns:
             Search results
         """
@@ -401,10 +401,10 @@ class KnowledgeCommand:
 
     def add_solution(self, name: str) -> str:
         """Add a new solution to knowledge base.
-        
+
         Args:
             name: Solution name
-        
+
         Returns:
             Status message
         """
@@ -459,9 +459,9 @@ How to prevent this issue in the future.
 class ValidateCommand:
     """Handle 'olav validate' commands for file integrity checks."""
 
-    def __init__(self, olav_dir: Path | None = None):
+    def __init__(self, olav_dir: Path | None = None) -> None:
         """Initialize ValidateCommand.
-        
+
         Args:
             olav_dir: Path to .olav directory
         """
@@ -470,7 +470,7 @@ class ValidateCommand:
 
     def validate_all(self) -> str:
         """Validate all OLAV files.
-        
+
         Returns:
             Comprehensive validation report
         """
@@ -538,9 +538,9 @@ class ValidateCommand:
 class CLICommandFactory:
     """Factory for creating CLI command handlers."""
 
-    def __init__(self, settings: Settings, olav_dir: Path | None = None):
+    def __init__(self, settings: Settings, olav_dir: Path | None = None) -> None:
         """Initialize command factory.
-        
+
         Args:
             settings: Settings instance
             olav_dir: Path to .olav directory (optional)

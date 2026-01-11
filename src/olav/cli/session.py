@@ -38,7 +38,7 @@ class OlavPromptSession:
         enable_completion: bool = True,
         enable_history: bool = True,
         multiline: bool = True,
-    ):
+    ) -> None:
         """Initialize the prompt session.
 
         Args:
@@ -117,12 +117,12 @@ class OlavPromptSession:
             kb = KeyBindings()
 
             @kb.add("c-c")
-            def _(event):
+            def _(event) -> None:
                 """Ctrl+C exits."""
                 event.app.exit(exception=EOFError, style="class:abort")
 
             @kb.add("c-d")
-            def _(event):
+            def _(event) -> None:
                 """Ctrl+D exits."""
                 event.app.exit(exception=EOFError)
 

@@ -39,7 +39,7 @@ class MigrationConfig:
 class OlavMigrator:
     """OLAV迁移工具"""
 
-    def __init__(self, workspace: Path, config: MigrationConfig):
+    def __init__(self, workspace: Path, config: MigrationConfig) -> None:
         self.workspace = Path(workspace)
         self.config = config
         self.agent_dir = self.workspace / config.agent_dir
@@ -196,7 +196,6 @@ class OlavMigrator:
             return True
 
         python_files = list((self.workspace / "src").rglob("*.py"))
-        agent_dir_str = f'"{self.config.agent_dir}"'
 
         updated_count = 0
         for py_file in python_files:
@@ -236,14 +235,14 @@ class OlavMigrator:
         }
 
         if self.config.platform == "all":
-            for platform, creator in configs.items():
+            for _platform, creator in configs.items():
                 creator()
         elif self.config.platform in configs:
             configs[self.config.platform]()
 
         return True
 
-    def _create_claude_config(self):
+    def _create_claude_config(self) -> None:
         """创建Claude Code配置文件"""
         config = {
             "platform": "Claude Code",
@@ -265,7 +264,7 @@ class OlavMigrator:
         config_file.write_text(json.dumps(config, indent=2, ensure_ascii=False))
         logger.info("   ✓ .claude-code-config.json 创建")
 
-    def _create_cursor_config(self):
+    def _create_cursor_config(self) -> None:
         """创建Cursor IDE配置文件"""
         config = {
             "platform": "Cursor IDE",
@@ -340,7 +339,7 @@ description: {description}
 """
         return md_content
 
-    def _log_action(self, action: str, source: str, target: str):
+    def _log_action(self, action: str, source: str, target: str) -> None:
         """记录迁移动作"""
         self.migration_log.append({
             "action": action,
@@ -350,7 +349,7 @@ description: {description}
         })
 
 
-def main():
+def main() -> int:
     """主函数"""
     parser = argparse.ArgumentParser(
         description="OLAV to Agent Platform Skill 迁移工具",
@@ -359,13 +358,13 @@ def main():
 示例:
   # 测试迁移 (不实际修改文件)
   python scripts/migrate_olav_to_agent.py --platform claude --dry-run
-  
+
   # 执行Claude Code迁移
   python scripts/migrate_olav_to_agent.py --platform claude
-  
+
   # 迁移到所有平台
   python scripts/migrate_olav_to_agent.py --platform all
-  
+
   # 不备份地迁移
   python scripts/migrate_olav_to_agent.py --platform claude --no-backup
         """

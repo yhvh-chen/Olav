@@ -76,16 +76,22 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "N", "W", "UP", "ANN", "ASYNC", "S", "B"]
-ignore = ["ANN101", "ANN102", "E402"]  # E402: Intentional for dotenv loading
 
-[tool.ruff.per-file-ignores]
-"tests/**/*.py" = ["S101"]
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "ANN", "ASYNC", "S", "B"]
+ignore = ["E402", "E501"]  # E402: dotenv loading, E501: line length in docstrings
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "ANN"]
 "src/olav/__main__.py" = ["E402"]
 "src/olav/main.py" = ["E402"]
-"src/olav/cli/cli_main.py" = ["E402", "ANN401", "S602", "S112"]  # ANN401: agent types, S602/S112: shell command handling
-"src/olav/core/settings.py" = ["ANN401"]  # Settings must accept Any type values
-"src/olav/core/llm.py" = ["ANN401"]  # LLM factory needs **kwargs
+"src/olav/cli/cli_main.py" = ["E402", "ANN401", "S602", "S112"]
+"src/olav/core/settings.py" = ["ANN401"]
+"src/olav/core/llm.py" = ["ANN401"]
+"src/olav/cli/input_parser.py" = ["S602"]
+"src/olav/tools/task_tools.py" = ["ANN401"]  # Middleware returns dynamic type
+"src/olav/tools/network_executor.py" = ["E501"]  # Docstring line length
+".olav/commands/*.py" = ["ANN201", "ANN001"]
 
 [tool.mypy]
 strict = true

@@ -236,7 +236,7 @@ def main():
         if args.report:
             from config.settings import settings
             report_path = Path(settings.agent_dir) / "data" / "reports" / f"inspection-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
-            report = generate_report(all_results, layers, report_path)
+            generate_report(all_results, layers, report_path)
             print(f"\n📄 Report saved: {report_path}")
         else:
             # Print summary

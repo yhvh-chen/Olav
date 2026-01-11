@@ -17,7 +17,7 @@ class AgentMemory:
 
     MEMORY_FILE = None  # Set dynamically in __init__
 
-    def __init__(self, max_messages: int = 100, memory_file: str | Path | None = None):
+    def __init__(self, max_messages: int = 100, memory_file: str | Path | None = None) -> None:
         """Initialize agent memory.
 
         Args:
