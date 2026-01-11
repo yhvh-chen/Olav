@@ -133,9 +133,7 @@ class DiagnosisSettings(BaseSettings):
     web_search_max_results: int = Field(
         default=3, ge=1, le=10, description="每次网络搜索的最大结果数"
     )
-    web_search_timeout: int = Field(
-        default=10, ge=5, le=30, description="网络搜索超时时间（秒）"
-    )
+    web_search_timeout: int = Field(default=10, ge=5, le=30, description="网络搜索超时时间（秒）")
 
 
 class LoggingSettings(BaseSettings):
@@ -276,6 +274,14 @@ class Settings(BaseSettings):
 
     server_host: str = "0.0.0.0"
     server_port: int = 8000
+
+    # =========================================================================
+    # CLI Display Settings
+    # =========================================================================
+    # Display LLM thinking process during streaming output
+    # When enabled: Shows "🤔 Thinking..." spinner and verbose thinking in verbose mode
+    # When disabled: Only shows tool calls and final results
+    display_thinking: bool = True
 
     # Logging
     log_level: str = "INFO"

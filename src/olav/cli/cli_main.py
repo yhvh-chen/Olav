@@ -39,7 +39,7 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
     Displays in compact mode (default):
     - Tool calls: Highlighted panels showing device/command
     - Results: Standard formatted output
-    - Progress: Spinner while LLM is thinking
+    - Progress: Spinner while LLM is thinking (if display_thinking enabled)
 
     Displays in verbose mode (--verbose flag):
     - Full LLM thinking process as it streams
@@ -54,9 +54,12 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
     Returns:
         Complete response text (final result only)
     """
+    from config.settings import settings
     from olav.cli.display import StreamingDisplay
 
-    display = StreamingDisplay(verbose=verbose, show_spinner=True)
+    # Use display_thinking config unless verbose mode overrides
+    show_thinking = settings.display_thinking or verbose
+    display = StreamingDisplay(verbose=verbose, show_spinner=show_thinking)
 
     full_response = ""
     current_content = ""
@@ -148,8 +151,13 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
                             # Stream only new characters (delta)
                             delta = new_content[len(current_content) :]
 
-                            # Start spinner on first content in compact mode
-                            if not first_content_seen and not verbose and delta.strip():
+                            # Start spinner on first content if display_thinking enabled
+                            if (
+                                not first_content_seen
+                                and show_thinking
+                                and not verbose
+                                and delta.strip()
+                            ):
                                 first_content_seen = True
                                 if not spinner_started:
                                     display.show_processing_status(
@@ -205,8 +213,13 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
                     if msg_type == "AIMessage":
                         new_content = extract_ai_content(last_msg)
                         if new_content and new_content != current_content:
-                            # Start spinner on first content in compact mode
-                            if not first_content_seen and not verbose and new_content.strip():
+                            # Start spinner on first content if display_thinking enabled
+                            if (
+                                not first_content_seen
+                                and show_thinking
+                                and not verbose
+                                and new_content.strip()
+                            ):
                                 first_content_seen = True
                                 if not spinner_started:
                                     display.show_processing_status(
