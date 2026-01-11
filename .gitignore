@@ -72,7 +72,6 @@ config/inventory.csv
 # Build/Packaging
 uv.lock
 
-# Archives & Legacy (Excluded from Release)
-archive/
+# Archives & Legacy
 docs/dev_archive/
 claude-code-migration/
