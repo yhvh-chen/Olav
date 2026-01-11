@@ -160,7 +160,7 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
                         ):
                             first_content_seen = True
                             if not spinner_started:
-                                display.show_processing_status("🤔 Thinking...", show_spinner=True)
+                                display.show_processing_status("🤔 Thinking...")
                                 spinner_started = True
 
                         if verbose and delta.strip():
