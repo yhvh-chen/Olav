@@ -107,137 +107,80 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
         except (AttributeError, TypeError):
             return None
 
-    # Stream tokens as they arrive - try stream_mode="updates" for real-time tokens
-    # If not available, fall back to stream_mode="values"
-    try:
-        stream_mode = "updates"
-        async for event in agent.astream({"messages": messages}, stream_mode=stream_mode):
-            # Handle 'messages' updates (delta tokens from LLM)
-            if "messages" in event:
-                msgs = event["messages"]
-                if msgs:
-                    last_msg = msgs[-1]
-                    msg_type = type(last_msg).__name__
+    # Stream tokens as they arrive - use stream_mode="values" for consistent format
+    # "values" mode provides full state snapshots with messages array
+    event_count = 0
+    async for event in agent.astream({"messages": messages}, stream_mode="values"):
+        event_count += 1
+        # Handle 'messages' list in values stream
+        if "messages" in event:
+            msgs = event["messages"]
+            if msgs:
+                last_msg = msgs[-1]
+                msg_type = type(last_msg).__name__
 
-                    # Handle tool calls (AIMessage with tool_calls)
-                    if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls"):
-                        if last_msg.tool_calls:
-                            # Stop spinner before showing tool calls
-                            if spinner_started and not verbose:
-                                display.stop_processing_status()
-                                spinner_started = False
+                # Handle tool calls (AIMessage with tool_calls)
+                if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls"):
+                    if last_msg.tool_calls:
+                        # Stop spinner before showing tool calls
+                        if spinner_started and not verbose:
+                            display.stop_processing_status()
+                            spinner_started = False
 
-                            for tool_call in last_msg.tool_calls:
-                                # Avoid duplicate display of same tool
-                                tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
-                                if tool_id == previous_tool:
-                                    continue
+                        for tool_call in last_msg.tool_calls:
+                            # Avoid duplicate display of same tool
+                            tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
+                            if tool_id == previous_tool:
+                                continue
 
-                                parsed = parse_tool_call(tool_call)
-                                if parsed:
-                                    tool_name, device, command = parsed
-                                    display.show_tool_call(
-                                        tool_name=tool_name,
-                                        device=device,
-                                        command=command,
-                                        status="executing",
-                                    )
-                                    previous_tool = tool_id
+                            parsed = parse_tool_call(tool_call)
+                            if parsed:
+                                tool_name, device, command = parsed
+                                display.show_tool_call(
+                                    tool_name=tool_name,
+                                    device=device,
+                                    command=command,
+                                    status="executing",
+                                )
+                                previous_tool = tool_id
 
-                    # Handle AI response content - stream it in real-time
-                    if msg_type == "AIMessage":
-                        new_content = extract_ai_content(last_msg)
-                        if new_content and new_content != current_content:
-                            # Stream only new characters (delta)
-                            delta = new_content[len(current_content) :]
+                # Handle AI response content - stream it in real-time
+                if msg_type == "AIMessage":
+                    new_content = extract_ai_content(last_msg)
+                    if new_content and new_content != current_content:
+                        # Stream only new characters (delta)
+                        delta = new_content[len(current_content) :]
 
-                            # Start spinner on first content if display_thinking enabled
-                            if (
-                                not first_content_seen
-                                and show_thinking
-                                and not verbose
-                                and delta.strip()
-                            ):
-                                first_content_seen = True
-                                if not spinner_started:
-                                    display.show_processing_status(
-                                        "🤔 Thinking...", show_spinner=True
-                                    )
-                                    spinner_started = True
+                        # Start spinner on first content if display_thinking enabled
+                        if (
+                            not first_content_seen
+                            and show_thinking
+                            and not verbose
+                            and delta.strip()
+                        ):
+                            first_content_seen = True
+                            if not spinner_started:
+                                display.show_processing_status("🤔 Thinking...", show_spinner=True)
+                                spinner_started = True
 
-                            if verbose and delta.strip():
-                                # In verbose mode, show thinking as it arrives
-                                display.show_thinking(delta, end="")
-                            elif not verbose and delta.strip():
-                                # In compact mode, show final result (buffer in spinner)
-                                pass  # Keep spinner showing while thinking
+                        if verbose and delta.strip():
+                            # In verbose mode, show thinking as it arrives
+                            display.show_thinking(delta, end="")
+                        elif not verbose and delta.strip():
+                            # In compact mode, buffer but ensure we have content
+                            pass  # Content will be displayed at the end
 
-                            current_content = new_content
-    except Exception:
-        # Fall back to values mode if updates not supported
-        async for event in agent.astream({"messages": messages}, stream_mode="values"):
-            # Handle 'messages' list in values stream
-            if "messages" in event:
-                msgs = event["messages"]
-                # Check the last message for AI response
-                if msgs:
-                    last_msg = msgs[-1]
-                    msg_type = type(last_msg).__name__
+                        current_content = new_content
 
-                    # Handle tool calls (AIMessage with tool_calls)
-                    if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls"):
-                        if last_msg.tool_calls:
-                            # Stop spinner before showing tool calls
-                            if spinner_started and not verbose:
-                                display.stop_processing_status()
-                                spinner_started = False
-
-                            for tool_call in last_msg.tool_calls:
-                                # Avoid duplicate display of same tool
-                                tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
-                                if tool_id == previous_tool:
-                                    continue
-
-                                parsed = parse_tool_call(tool_call)
-                                if parsed:
-                                    tool_name, device, command = parsed
-                                    display.show_tool_call(
-                                        tool_name=tool_name,
-                                        device=device,
-                                        command=command,
-                                        status="executing",
-                                    )
-                                    previous_tool = tool_id
-
-                    # Handle final AI response (text content)
-                    if msg_type == "AIMessage":
-                        new_content = extract_ai_content(last_msg)
-                        if new_content and new_content != current_content:
-                            # Start spinner on first content if display_thinking enabled
-                            if (
-                                not first_content_seen
-                                and show_thinking
-                                and not verbose
-                                and new_content.strip()
-                            ):
-                                first_content_seen = True
-                                if not spinner_started:
-                                    display.show_processing_status(
-                                        "🤔 Thinking...", show_spinner=True
-                                    )
-                                    spinner_started = True
-
-                            # Stream only new characters (delta)
-                            delta = new_content[len(current_content) :]
-                            if verbose and delta.strip():
-                                # In verbose mode, show all content
-                                display.show_thinking(delta, end="")
-                            # In compact mode, buffer content until tool calls
-                            current_content = new_content
+    if verbose:
+        console.print(f"[dim]Debug: Processed {event_count} events[/]")
 
     # Stop spinner if still running
     if spinner_started:
         display.stop_processing_status()
+
+    if verbose:
+        console.print(f"[dim]Debug: Final content length: {len(current_content)}[/]")
 
     # Display final result
     if current_content and current_content.strip():
