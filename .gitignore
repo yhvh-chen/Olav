@@ -72,33 +72,7 @@ config/inventory.csv
 # Build/Packaging
 uv.lock
 
-# Archives & Legacy (only exclude these subdirectories, NOT archive/ itself)
+# Archives & Legacy (Excluded from Release)
+archive/
 docs/dev_archive/
 claude-code-migration/
-archive/baseline_collector.py
-archive/cli_command_generator.py
-archive/cli_query_command_deprecated.py
-archive/cli_tool.py
-archive/setup.ps1.*
-archive/setup.sh.*
-archive/test_*.py
-archive/config/
-archive/data/
-archive/deprecated_agents/
-archive/deprecated_checklist/
-archive/deprecated_core/
-archive/dev_tools_*/
-archive/docs-legacy/
-archive/docs_archived_*/
-archive/langchain/
-archive/legacy_agent_scripts/
-archive/open_deep_research/
-archive/progress-logs/
-archive/prompts/
-archive/scripts/
-archive/scripts_tests/
-archive/strategies/
-archive/v0.5/
-
-# But KEEP deepagents and its subdirectories for development
-!archive/deepagents/

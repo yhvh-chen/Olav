@@ -15,15 +15,22 @@ Based on DESIGN_V0.8.md Section 7.4:
 from pathlib import Path
 
 try:
-    from deepagents.storage import CompositeBackend, StateBackend, StoreBackend
+    from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
     DEEPAGENTS_HAS_STORAGE = True
+    # Note: StoreBackend renamed to FilesystemBackend in official API
+    StoreBackend = FilesystemBackend
 except ImportError:
-    # DeepAgents may not have these exact classes
-    # Fallback to basic filesystem access
-    DEEPAGENTS_HAS_STORAGE = False
-    StoreBackend = None
-    StateBackend = None
-    CompositeBackend = None
+    try:
+        # Fallback: try old import path
+        from deepagents.storage import CompositeBackend, StateBackend, StoreBackend
+        DEEPAGENTS_HAS_STORAGE = True
+    except ImportError:
+        # DeepAgents may not have these exact classes
+        # Fallback to basic filesystem access
+        DEEPAGENTS_HAS_STORAGE = False
+        StoreBackend = None  # type: ignore[misc, assignment]
+        StateBackend = None  # type: ignore[misc, assignment]
+        CompositeBackend = None  # type: ignore[misc, assignment]
 
 
 def get_storage_backend(project_root: Path | None = None):

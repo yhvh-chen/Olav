@@ -4,8 +4,15 @@ This module provides integration with DeepAgents' SubAgentMiddleware to enable
 specialized subagents for macro and micro network analysis.
 """
 
-from deepagents.middleware.subagents import SubAgent, SubAgentMiddleware
+try:
+    from deepagents.middleware.subagents import SubAgentMiddleware
+    DEEPAGENTS_AVAILABLE = True
+except ImportError:
+    DEEPAGENTS_AVAILABLE = False
+    SubAgentMiddleware = None  # type: ignore[misc, assignment]
+
 from langchain_core.tools import BaseTool
+from typing import Any
 
 from olav.core.llm import LLMFactory
 
@@ -16,7 +23,7 @@ from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer
 def get_subagent_middleware(
     tools: list[BaseTool],
     default_model: object | None = None,
-) -> SubAgentMiddleware:
+) -> Any:
     """Create and configure SubAgentMiddleware with OLAV's specialized analyzers.
 
     This middleware enables the main agent to delegate complex analysis tasks
@@ -32,23 +39,24 @@ def get_subagent_middleware(
         default_model: Default LLM model for subagents (uses LLMFactory if None)
 
     Returns:
-        Configured SubAgentMiddleware instance
+        Configured SubAgentMiddleware instance, or None if DeepAgents not available
     """
+    if not DEEPAGENTS_AVAILABLE or SubAgentMiddleware is None:
+        return None
+
     if default_model is None:
         default_model = LLMFactory.get_chat_model()
 
-    # Define subagents with 'general-purpose' type (required by DeepAgents)
-    # Differentiation happens via specialized system prompts
-    subagents: list[SubAgent] = [
+    # Define subagents using official DeepAgents API format
+    # See: https://github.com/langchain-ai/deepagents
+    subagents: list[dict[str, Any]] = [
         {
             **get_macro_analyzer(tools=tools),
             "model": default_model,
-            "type": "general-purpose",  # DeepAgents requires this exact type
         },
         {
             **get_micro_analyzer(tools=tools),
             "model": default_model,
-            "type": "general-purpose",  # DeepAgents requires this exact type
         },
     ]
 
