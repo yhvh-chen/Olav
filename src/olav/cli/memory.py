@@ -143,3 +143,55 @@ class AgentMemory:
             "max_messages": self.max_messages,
             "memory_file": str(self.memory_file),
         }
+
+    def get_conversation_messages(
+        self, 
+        max_turns: int = 10,
+        max_chars: int = 8000,
+    ) -> list[tuple[str, str]]:
+        """Get recent conversation messages formatted for LangChain.
+
+        Implements automatic context compression by:
+        1. Limiting to recent N turns
+        2. Truncating long messages
+        3. Summarizing old context if needed
+
+        Args:
+            max_turns: Maximum conversation turns to include
+            max_chars: Maximum total characters for context
+
+        Returns:
+            List of (role, content) tuples for LangChain
+        """
+        # Get recent messages (user + assistant pairs = turns)
+        recent = self.messages[-(max_turns * 2):]
+        
+        result = []
+        total_chars = 0
+        
+        for msg in recent:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            # Skip tool messages (not useful for context)
+            if role == "tool":
+                continue
+            
+            # Truncate long messages
+            if len(content) > 2000:
+                content = content[:1800] + "\n... [truncated]"
+            
+            # Check total character limit
+            if total_chars + len(content) > max_chars:
+                # Add summary of older context instead
+                if result:
+                    result.insert(0, (
+                        "system", 
+                        "[Earlier conversation context was truncated to save tokens]"
+                    ))
+                break
+            
+            result.append((role, content))
+            total_chars += len(content)
+        
+        return result

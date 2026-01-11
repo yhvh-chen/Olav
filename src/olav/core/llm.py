@@ -43,6 +43,7 @@ class LLMFactory:
         config: dict[str, Any] = {
             "temperature": temp,
             "max_tokens": settings.llm_max_tokens,
+            "streaming": True,  # Enable token-level streaming
         }
 
         if provider == "ollama":

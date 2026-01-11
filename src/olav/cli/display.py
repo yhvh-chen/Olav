@@ -174,13 +174,14 @@ class StreamingDisplay:
         if not RICH_AVAILABLE:
             raise ImportError("Rich library required for StreamingDisplay")
 
-        self.console = console or Console()
+        # Create console with force_terminal and no_color for better streaming
+        self.console = console or Console(force_terminal=True, force_interactive=False)
         self.verbose = verbose
         self.show_spinner = show_spinner
         self._current_spinner = None
 
     def show_thinking(self, text: str, end: str = "") -> None:
-        """Display LLM thinking/reasoning in dim text.
+        """Display LLM thinking/reasoning (streaming tokens).
 
         Args:
             text: Thinking content to display
@@ -189,8 +190,23 @@ class StreamingDisplay:
         if not self.verbose:
             return
 
-        # Use dim style for thinking process
-        self.console.print(f"[dim]{text}[/]", end=end, highlight=False)
+        # Stream tokens in normal color (not dim)
+        self.console.print(text, end=end, highlight=False)
+        # Force flush to show streaming tokens immediately
+        self.console.file.flush()
+
+    def show_tool_compact(self, tool_name: str, detail: str | None = None) -> None:
+        """Display tool call in compact single-line format.
+
+        Args:
+            tool_name: Name of the tool being called
+            detail: Optional detail (device, query, etc.)
+        """
+        if detail:
+            self.console.print(f"[dim]  → {tool_name}[/dim] [cyan]{detail}[/cyan]")
+        else:
+            self.console.print(f"[dim]  → {tool_name}...[/dim]")
+        self.console.file.flush()
 
     def show_tool_call(
         self,
@@ -198,6 +214,7 @@ class StreamingDisplay:
         device: str | None = None,
         command: str | None = None,
         status: str = "executing",
+        compact: bool = False,
     ) -> None:
         """Display tool call in highlighted Panel format.
 
@@ -206,7 +223,14 @@ class StreamingDisplay:
             device: Target device (optional)
             command: Command being executed (optional)
             status: Status string ('executing', 'completed', 'failed')
+            compact: If True, use compact single-line display
         """
+        # Use compact display for less important tools
+        if compact:
+            detail = device or command or None
+            self.show_tool_compact(tool_name, detail)
+            return
+
         from rich.panel import Panel
 
         # Build title with status indicator
@@ -235,14 +259,22 @@ class StreamingDisplay:
         )
         self.console.print(panel)
 
-    def show_result(self, text: str, end: str = "") -> None:
+    def show_result(self, text: str, end: str = "", markdown: bool = False) -> None:
         """Display final result in standard format.
 
         Args:
             text: Result content to display
             end: End character (empty string for delta, newline for finalized)
+            markdown: If True, render text as Markdown with syntax highlighting
         """
-        self.console.print(text, end=end, highlight=False)
+        if markdown and text.strip():
+            from rich.markdown import Markdown
+            md = Markdown(text)
+            self.console.print(md)
+        else:
+            self.console.print(text, end=end, highlight=False)
+        # Force flush to show streaming tokens immediately
+        self.console.file.flush()
 
     def show_processing_status(self, message: str = "Processing...") -> None:
         """Show processing status indicator.

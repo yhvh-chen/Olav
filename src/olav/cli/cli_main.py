@@ -30,7 +30,12 @@ app = typer.Typer(
 )
 
 
-async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool = False) -> str:
+async def stream_agent_response(
+    agent: Any, 
+    messages: list[dict], 
+    verbose: bool = False,
+    memory: "AgentMemory | None" = None,
+) -> str:
     """Stream agent response with hierarchical output display.
 
     P8 Enhancement: Added layered streaming with tool call visibility and
@@ -57,15 +62,21 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
     from config.settings import settings
     from olav.cli.display import StreamingDisplay
 
-    # Use display_thinking config unless verbose mode overrides
+    # Use display_thinking config - if true, show streaming tokens
     show_thinking = settings.display_thinking or verbose
-    display = StreamingDisplay(verbose=verbose, show_spinner=show_thinking)
+    # Enable streaming display when display_thinking is on
+    stream_tokens = show_thinking
+    display = StreamingDisplay(verbose=stream_tokens, show_spinner=not stream_tokens)
 
     full_response = ""
-    current_content = ""
+    accumulated_content = ""
     previous_tool = None
+    displayed_tool_types: set[str] = set()  # Track displayed tool types
     first_content_seen = False
     spinner_started = False
+
+    # Tools that deserve full panel display
+    IMPORTANT_TOOLS = {"nornir_execute", "smart_query", "api_call"}
 
     def extract_ai_content(msg: Any) -> str:
         """Extract content from AIMessage, ignoring tool calls."""
@@ -107,86 +118,100 @@ async def stream_agent_response(agent: Any, messages: list[dict], verbose: bool 
         except (AttributeError, TypeError):
             return None
 
-    # Stream tokens as they arrive - use stream_mode="values" for consistent format
-    # "values" mode provides full state snapshots with messages array
+    # Stream tokens as they arrive - use stream_mode="messages" for token-level streaming
+    # "messages" mode provides incremental token updates (real streaming)
     event_count = 0
-    async for event in agent.astream({"messages": messages}, stream_mode="values"):
+    accumulated_content = ""
+
+    async for chunk in agent.astream({"messages": messages}, stream_mode="messages"):
         event_count += 1
-        # Handle 'messages' list in values stream
-        if "messages" in event:
-            msgs = event["messages"]
-            if msgs:
-                last_msg = msgs[-1]
-                msg_type = type(last_msg).__name__
 
-                # Handle tool calls (AIMessage with tool_calls)
-                if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls"):
-                    if last_msg.tool_calls:
-                        # Stop spinner before showing tool calls
-                        if spinner_started and not verbose:
-                            display.stop_processing_status()
-                            spinner_started = False
+        # messages mode returns (message, metadata) tuples
+        if isinstance(chunk, tuple) and len(chunk) >= 1:
+            msg = chunk[0]  # First element is the message
+            msg_type = type(msg).__name__
 
-                        for tool_call in last_msg.tool_calls:
-                            # Avoid duplicate display of same tool
-                            tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
-                            if tool_id == previous_tool:
-                                continue
+            # Handle tool calls (AIMessage/AIMessageChunk with tool_calls)
+            if msg_type in ("AIMessage", "AIMessageChunk") and hasattr(msg, "tool_calls"):
+                if msg.tool_calls:
+                    # Stop spinner before showing tool calls
+                    if spinner_started:
+                        display.stop_processing_status()
+                        spinner_started = False
+                    
+                    for tool_call in msg.tool_calls:
+                        # Avoid duplicate display of same tool call
+                        tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
+                        if tool_id == previous_tool:
+                            continue
 
-                            parsed = parse_tool_call(tool_call)
-                            if parsed:
-                                tool_name, device, command = parsed
+                        parsed = parse_tool_call(tool_call)
+                        if parsed:
+                            tool_name, device, command = parsed
+                            
+                            # Important tools get full panel
+                            if tool_name in IMPORTANT_TOOLS:
                                 display.show_tool_call(
                                     tool_name=tool_name,
                                     device=device,
                                     command=command,
                                     status="executing",
                                 )
-                                previous_tool = tool_id
+                            else:
+                                # Other tools: show compact, but only first time per type
+                                if tool_name not in displayed_tool_types:
+                                    display.show_tool_call(
+                                        tool_name=tool_name,
+                                        device=device,
+                                        command=command,
+                                        status="executing",
+                                        compact=True,
+                                    )
+                                    displayed_tool_types.add(tool_name)
+                            
+                            previous_tool = tool_id
 
-                # Handle AI response content - stream it in real-time
-                if msg_type == "AIMessage":
-                    new_content = extract_ai_content(last_msg)
-                    if new_content and new_content != current_content:
-                        # Stream only new characters (delta)
-                        delta = new_content[len(current_content) :]
+            # Handle AI response content - stream it token by token
+            if msg_type in ("AIMessage", "AIMessageChunk") and hasattr(msg, "content"):
+                content_chunk = msg.content
+                # Accept empty strings too (they still count as chunks)
+                if content_chunk is not None:
+                    # This is a delta token from the LLM
+                    if not first_content_seen and content_chunk:
+                        first_content_seen = True
+                        # Only show spinner in compact mode (non-streaming)
+                        if not spinner_started and not stream_tokens:
+                            display.show_processing_status("🤔 Thinking...")
+                            spinner_started = True
 
-                        # Start spinner on first content if display_thinking enabled
-                        if (
-                            not first_content_seen
-                            and show_thinking
-                            and not verbose
-                            and delta.strip()
-                        ):
-                            first_content_seen = True
-                            if not spinner_started:
-                                display.show_processing_status("🤔 Thinking...")
-                                spinner_started = True
-
-                        if verbose and delta.strip():
-                            # In verbose mode, show thinking as it arrives
-                            display.show_thinking(delta, end="")
-                        elif not verbose and delta.strip():
-                            # In compact mode, buffer but ensure we have content
-                            pass  # Content will be displayed at the end
-
-                        current_content = new_content
-
-    if verbose:
-        console.print(f"[dim]Debug: Processed {event_count} events[/]")
+                    # Accumulate and display content deltas
+                    if content_chunk:
+                        accumulated_content += content_chunk
+                    
+                        if stream_tokens:
+                            # Stream mode: show each token as it arrives
+                            display.show_thinking(content_chunk, end="")
+                        elif spinner_started:
+                            # Compact mode with spinner, just accumulate for now
+                            pass
+                        else:
+                            # Compact mode without spinner, stream directly
+                            display.show_result(content_chunk, end="")
 
     # Stop spinner if still running
     if spinner_started:
         display.stop_processing_status()
+        # In compact mode with spinner, show accumulated result with Markdown
+        if accumulated_content.strip():
+            display.show_result(accumulated_content, markdown=True)
+    elif stream_tokens and accumulated_content.strip():
+        # After streaming tokens, just add newline (content already shown)
+        display.show_result("\n")
+    elif accumulated_content.strip():
+        # Compact mode without streaming, show with Markdown
+        display.show_result(accumulated_content, markdown=True)
 
-    if verbose:
-        console.print(f"[dim]Debug: Final content length: {len(current_content)}[/]")
-
-    # Display final result
-    if current_content and current_content.strip():
-        display.show_result(current_content, end="\n")
-
-    full_response = current_content
+    full_response = accumulated_content
 
     return full_response
 
@@ -203,6 +228,7 @@ def run_interactive_loop(
         session: Prompt session
         agent: OLAV agent instance
     """
+    from config.settings import settings
     from olav.cli.commands import execute_command
     from olav.cli.input_parser import parse_input
 
@@ -271,9 +297,16 @@ def run_interactive_loop(
             # P8: Stream agent response with layered output
             print("🔍 Processing...", flush=True)
             try:
-                messages = [{"role": "user", "content": processed_text}]
-                # Default to non-verbose in interactive mode for cleaner output
-                output = asyncio.run(stream_agent_response(agent, messages, verbose=False))
+                # Build messages with conversation history
+                history = memory.get_conversation_messages(max_turns=10, max_chars=8000)
+                # Format: history + current message
+                messages = list(history) + [("user", processed_text)]
+                
+                # Use verbose mode only if DISPLAY_THINKING=true
+                use_verbose = settings.display_thinking
+                output = asyncio.run(stream_agent_response(
+                    agent, messages, verbose=use_verbose, memory=memory
+                ))
 
                 if output:
                     memory.add("assistant", output)
