@@ -14,9 +14,8 @@ Options:
     --platform    Filter by platform (cisco_ios, huawei_vrp, etc.)
     --type        Filter by type (command, api)
 """
-import sys
-import json
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -25,6 +24,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -38,9 +38,9 @@ def main():
     parser.add_argument("--platform", "-p", help="Filter by platform (e.g., 'cisco_ios')")
     parser.add_argument("--type", "-t", dest="cap_type", help="Filter by type ('command' or 'api')")
     parser.add_argument("--limit", "-l", type=int, default=10, help="Maximum results (default: 10)")
-    
+
     args = parser.parse_args()
-    
+
     try:
         from olav.tools.capabilities import search_capabilities
         result = search_capabilities.invoke({

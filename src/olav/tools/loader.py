@@ -257,7 +257,7 @@ def reload_capabilities(
     if imports_dir is None:
         from config.settings import settings
         imports_dir = str(Path(settings.agent_dir) / "imports")
-    
+
     loader = CapabilitiesLoader(Path(imports_dir))
     return loader.reload(dry_run=dry_run)
 
@@ -274,6 +274,6 @@ def validate_capabilities(imports_dir: str | Path = None) -> list[str]:
     if imports_dir is None:
         from config.settings import settings
         imports_dir = str(Path(settings.agent_dir) / "imports")
-    
+
     loader = CapabilitiesLoader(Path(imports_dir))
     return loader.validate()

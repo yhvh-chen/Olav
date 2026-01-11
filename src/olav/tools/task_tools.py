@@ -7,7 +7,6 @@ from langchain_core.tools import tool
 from olav.core.subagent_manager import get_subagent_middleware
 from olav.tools.network import list_devices, nornir_execute
 
-
 # Global subagent middleware instance
 _subagent_middleware = None
 

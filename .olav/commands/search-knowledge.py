@@ -18,9 +18,8 @@ Options:
     --type        Search type: knowledge, solution, or both (default: both)
     --limit       Maximum results to return (default: 5)
 """
-import sys
-import json
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -29,6 +28,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -54,21 +54,21 @@ def main():
         default=5,
         help="Maximum results to return (default: 5)"
     )
-    
+
     args = parser.parse_args()
-    
+
     try:
         from olav.tools.capabilities import search_knowledge
-        
+
         result = search_knowledge.invoke({
             "query": args.query,
             "search_type": args.search_type,
             "limit": args.limit,
         })
-        
+
         print(result)
         return 0
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

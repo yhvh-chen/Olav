@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from olav.core.database import get_database
-from olav.core.settings import get_settings
 
 # ============================================================================
 # P4: Nornir Connection Pool Singleton
@@ -324,11 +323,9 @@ class NetworkExecutor:
             >>> print(result.structured)  # True if parsed successfully
             >>> print(result.tokens_saved)  # Token savings count
         """
-        settings_instance = get_settings()
-
         # Determine if TextFSM should be used
         if use_textfsm is None:
-            use_textfsm = settings_instance.execution_use_textfsm
+            use_textfsm = settings.execution.use_textfsm
 
         # Try TextFSM parsing if enabled
         if use_textfsm:
@@ -340,7 +337,7 @@ class NetworkExecutor:
                 )
             except Exception as e:
                 # Check if fallback is enabled
-                if settings_instance.execution_textfsm_fallback:
+                if settings.execution.textfsm_fallback_to_raw:
                     print(f"TextFSM parsing failed: {e}, falling back to raw text")
                     return self.execute(device, command, timeout)
                 else:

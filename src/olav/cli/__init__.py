@@ -10,18 +10,21 @@ This module provides an enhanced CLI experience using prompt-toolkit:
 """
 
 from olav.cli.cli_main import main
-from olav.cli.session import OlavPromptSession
-from olav.cli.memory import AgentMemory
 from olav.cli.commands import (
     SLASH_COMMANDS,
-    register_command,
     execute_command,
+    register_command,
 )
 from olav.cli.display import (
     display_banner,
     get_banner,
-    BannerType,
+    load_banner_from_config,
+    print_error,
+    print_success,
+    print_welcome,
 )
+from olav.cli.memory import AgentMemory
+from olav.cli.session import OlavPromptSession
 
 __all__ = [
     "main",
@@ -32,5 +35,8 @@ __all__ = [
     "execute_command",
     "display_banner",
     "get_banner",
-    "BannerType",
+    "load_banner_from_config",
+    "print_welcome",
+    "print_error",
+    "print_success",
 ]

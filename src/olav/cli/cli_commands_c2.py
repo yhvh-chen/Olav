@@ -12,10 +12,8 @@ All commands integrated with the Phase C-1 configuration system.
 
 import json
 from pathlib import Path
-from typing import Any, Optional
 
 from config.settings import Settings
-
 
 # =============================================================================
 # Configuration Commands
@@ -32,7 +30,7 @@ class ConfigCommand:
         """
         self.settings = settings
 
-    def show(self, key: Optional[str] = None) -> str:
+    def show(self, key: str | None = None) -> str:
         """Show configuration value(s).
         
         Args:
@@ -213,7 +211,7 @@ class ConfigCommand:
 class SkillCommand:
     """Handle 'olav skill' commands for skill management."""
 
-    def __init__(self, olav_dir: Optional[Path] = None):
+    def __init__(self, olav_dir: Path | None = None):
         """Initialize SkillCommand.
         
         Args:
@@ -223,7 +221,7 @@ class SkillCommand:
         self.olav_dir = olav_dir or OLAV_DIR
         self.skills_dir = self.olav_dir / "skills"
 
-    def list_skills(self, category: Optional[str] = None) -> str:
+    def list_skills(self, category: str | None = None) -> str:
         """List available skills.
         
         Args:
@@ -272,9 +270,7 @@ class SkillCommand:
             content = skill_file.read_text(encoding="utf-8")
             # Show first 50 lines
             lines = content.split("\n")[:50]
-            return "\n".join(lines) + "\n\n... (use 'cat .olav/skills/{}.md' for full content)".format(
-                skill_name
-            )
+            return "\n".join(lines) + f"\n\n... (use 'cat .olav/skills/{skill_name}.md' for full content)"
         except Exception as e:
             return f"Error reading skill: {e}"
 
@@ -320,7 +316,7 @@ class SkillCommand:
 class KnowledgeCommand:
     """Handle 'olav knowledge' commands for knowledge base operations."""
 
-    def __init__(self, olav_dir: Optional[Path] = None):
+    def __init__(self, olav_dir: Path | None = None):
         """Initialize KnowledgeCommand.
         
         Args:
@@ -330,7 +326,7 @@ class KnowledgeCommand:
         self.olav_dir = olav_dir or OLAV_DIR
         self.knowledge_dir = self.olav_dir / "knowledge"
 
-    def list_knowledge(self, category: Optional[str] = None) -> str:
+    def list_knowledge(self, category: str | None = None) -> str:
         """List knowledge base items.
         
         Args:
@@ -463,7 +459,7 @@ How to prevent this issue in the future.
 class ValidateCommand:
     """Handle 'olav validate' commands for file integrity checks."""
 
-    def __init__(self, olav_dir: Optional[Path] = None):
+    def __init__(self, olav_dir: Path | None = None):
         """Initialize ValidateCommand.
         
         Args:
@@ -518,12 +514,12 @@ class ValidateCommand:
         if settings_file.exists():
             try:
                 json.loads(settings_file.read_text())
-                lines.append(f"  ✓ settings.json (valid JSON)")
+                lines.append("  ✓ settings.json (valid JSON)")
             except json.JSONDecodeError as e:
                 lines.append(f"  ❌ settings.json (invalid JSON: {e})")
                 issues.append(f"Invalid JSON in settings.json: {e}")
         else:
-            lines.append(f"  ⚠ settings.json (not found, using defaults)")
+            lines.append("  ⚠ settings.json (not found, using defaults)")
 
         lines.append("\n" + "=" * 70)
         if issues:
@@ -542,7 +538,7 @@ class ValidateCommand:
 class CLICommandFactory:
     """Factory for creating CLI command handlers."""
 
-    def __init__(self, settings: Settings, olav_dir: Optional[Path] = None):
+    def __init__(self, settings: Settings, olav_dir: Path | None = None):
         """Initialize command factory.
         
         Args:

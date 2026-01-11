@@ -1,8 +1,7 @@
 """Skill-controlled Markdown report formatter.
 
 This module provides functionality to generate formatted reports in Markdown
-based on skill frontmatter configuration, replacing the previous Jinja2 HTML
-template approach.
+based on skill frontmatter configuration.
 """
 
 from datetime import datetime
@@ -161,7 +160,9 @@ def _format_summary(results: dict[str, list[dict[str, Any]]], strings: dict[str,
         else:
             status = "❌"
 
-        lines.append(f"| {device} | {status} | {success_count}/{len(device_results)} | {error_count} |")
+        lines.append(
+            f"| {device} | {status} | {success_count}/{len(device_results)} | {error_count} |"
+        )
 
     # Overall status
     overall_status = "✅" if total_errors == 0 else ("⚠️" if total_success > 0 else "❌")
@@ -267,7 +268,9 @@ def _format_recommendations(
     return "\n".join(lines)
 
 
-def format_json_report(results: dict[str, list[dict[str, Any]]], skill_config: dict[str, Any]) -> str:
+def format_json_report(
+    results: dict[str, list[dict[str, Any]]], skill_config: dict[str, Any]
+) -> str:
     """Generate JSON format report.
 
     Args:
@@ -297,7 +300,9 @@ def format_json_report(results: dict[str, list[dict[str, Any]]], skill_config: d
     return json.dumps(report, indent=2, ensure_ascii=False)
 
 
-def format_table_report(results: dict[str, list[dict[str, Any]]], skill_config: dict[str, Any]) -> str:
+def format_table_report(
+    results: dict[str, list[dict[str, Any]]], skill_config: dict[str, Any]
+) -> str:
     """Generate simple table format report.
 
     Args:
@@ -320,7 +325,9 @@ def format_table_report(results: dict[str, list[dict[str, Any]]], skill_config: 
 
         status = "✅" if fail_count == 0 else ("⚠️" if success_count > 0 else "❌")
 
-        lines.append(f"| {device} | {status} | {len(device_results)} | {success_count} | {fail_count} |")
+        lines.append(
+            f"| {device} | {status} | {len(device_results)} | {success_count} | {fail_count} |"
+        )
 
     return "\n".join(lines)
 

@@ -5,7 +5,7 @@ Provides persistent storage for conversation history across CLI sessions.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
 class AgentMemory:
@@ -25,7 +25,7 @@ class AgentMemory:
             memory_file: Custom memory file path (defaults to agent_dir/.agent_memory.json)
         """
         self.max_messages = max_messages
-        
+
         if memory_file:
             self.memory_file = Path(memory_file)
         elif self.MEMORY_FILE:
@@ -33,9 +33,9 @@ class AgentMemory:
         else:
             from config.settings import settings
             self.memory_file = Path(settings.agent_dir) / ".agent_memory.json"
-        
-        self.messages: List[Dict[str, Any]] = []
-        self.metadata: Dict[str, Any] = {}
+
+        self.messages: list[dict[str, Any]] = []
+        self.metadata: dict[str, Any] = {}
         self._load()
 
     def _load(self) -> None:
@@ -88,7 +88,7 @@ class AgentMemory:
         self.metadata = {}
         self.save()
 
-    def get_context(self, max_messages: int | None = None) -> List[Dict[str, Any]]:
+    def get_context(self, max_messages: int | None = None) -> list[dict[str, Any]]:
         """Get conversation context for agent.
 
         Args:
@@ -123,7 +123,7 @@ class AgentMemory:
         """
         return self.metadata.get(key, default)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get memory statistics.
 
         Returns:

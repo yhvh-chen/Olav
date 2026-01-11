@@ -4,13 +4,10 @@ Provides fast, dedicated commands for common operations.
 Commands are prefixed with '/' (e.g., /devices, /help).
 """
 
-import asyncio
-from typing import Callable, Dict, Optional
-import re
-
+from collections.abc import Callable
 
 # Registry for slash commands
-SLASH_COMMANDS: Dict[str, Callable] = {}
+SLASH_COMMANDS: dict[str, Callable] = {}
 
 
 def register_command(name: str) -> Callable:
@@ -38,7 +35,7 @@ async def execute_command(
     full_command: str,
     agent=None,
     memory=None,
-) -> Optional[str]:
+) -> str | None:
     """Execute a slash command.
 
     Args:
@@ -334,6 +331,7 @@ async def cmd_help(args: str) -> str:
     /analyze [src] [dst] [options]     - Analyze network path
     /inspect [scope] [--layer] [--report] - Device inspection
     /query [device] [query]            - Quick device query
+    /search <query>                    - Web search for troubleshooting
 
   Device Commands:
     /devices [filter]   - List devices (e.g., /devices role:core)
@@ -356,6 +354,7 @@ async def cmd_help(args: str) -> str:
     olav> /analyze R1 R3 --error "packet loss"
     olav> /inspect all --layer L3
     olav> /query R1 bgp neighbors
+    olav> /search cisco bgp flapping troubleshooting
     olav> @config.txt analyze this configuration
     olav> !ping 8.8.8.8
 """
@@ -453,6 +452,45 @@ async def cmd_analyze(args: str) -> str:
         return f"Error executing analyze: {str(e)}"
 
 
+@register_command("search")
+async def cmd_search(args: str) -> str:
+    """Search the web for troubleshooting information.
+
+    Usage:
+        /search <query>
+        /search bgp flapping cisco
+        /search "ospf neighbor stuck in exstart"
+
+    Examples:
+        /search cisco ios xr bgp community filtering
+        /search juniper mx series interface crc errors
+        /search arista eos vxlan troubleshooting
+    """
+    if not args.strip():
+        return "Usage: /search <query>\nExample: /search bgp flapping cisco"
+
+    query = args.strip()
+
+    try:
+        from langchain_community.tools import DuckDuckGoSearchResults
+
+        search = DuckDuckGoSearchResults(max_results=5)
+        results = search.invoke(query)
+
+        if not results:
+            return f"No results found for: {query}"
+
+        return f"🔍 Search results for: {query}\n\n{results}"
+
+    except ImportError:
+        return (
+            "Error: DuckDuckGo search not available.\n"
+            "Install with: uv add duckduckgo-search"
+        )
+    except Exception as e:
+        return f"Search error: {str(e)}"
+
+
 @register_command("quit")
 async def cmd_quit(args: str) -> str:
     """Exit OLAV.
@@ -478,7 +516,7 @@ async def cmd_exit(args: str) -> str:
 # =============================================================================
 
 
-def get_all_commands() -> Dict[str, str]:
+def get_all_commands() -> dict[str, str]:
     """Get all registered commands with descriptions.
 
     Returns:

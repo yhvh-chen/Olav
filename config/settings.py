@@ -20,7 +20,6 @@ True Source of Truth:
 
 import json
 import os
-import re
 
 # =============================================================================
 # Project Paths
@@ -28,8 +27,9 @@ import re
 # Use absolute path to find project root
 # Navigate up: config/ -> project_root/
 import os as _os
+import re
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
@@ -55,114 +55,115 @@ load_dotenv(ENV_FILE)
 
 # Ensure environment variables are properly set for pydantic-settings
 # This fixes issues where old values might be cached
-if not os.getenv('LLM_PROVIDER'):
-    os.environ['LLM_PROVIDER'] = 'openai'
-if not os.getenv('EMBEDDING_PROVIDER'):
-    os.environ['EMBEDDING_PROVIDER'] = 'ollama'  # Default to Ollama (free local embeddings)
-if not os.getenv('OLAV_MODE'):
-    os.environ['OLAV_MODE'] = 'QuickTest'
+if not os.getenv("LLM_PROVIDER"):
+    os.environ["LLM_PROVIDER"] = "openai"
+if not os.getenv("EMBEDDING_PROVIDER"):
+    os.environ["EMBEDDING_PROVIDER"] = "ollama"  # Default to Ollama (free local embeddings)
+if not os.getenv("OLAV_MODE"):
+    os.environ["OLAV_MODE"] = "QuickTest"
 
 
 # =============================================================================
 # Nested Configuration Classes (Pydantic v2)
 # =============================================================================
 
+
 class GuardSettings(BaseSettings):
     """Guard 意图过滤器配置"""
-    enabled: bool = Field(
-        default=True,
-        description="是否启用 Guard 过滤"
-    )
-    strict_mode: bool = Field(
-        default=False,
-        description="严格模式：只允许明确的网络运维请求"
-    )
+
+    enabled: bool = Field(default=True, description="是否启用 Guard 过滤")
+    strict_mode: bool = Field(default=False, description="严格模式：只允许明确的网络运维请求")
 
 
 class RoutingSettings(BaseSettings):
     """Skill 路由配置"""
+
     confidence_threshold: float = Field(
-        default=0.6,
-        ge=0.0,
-        le=1.0,
-        description="Skill 匹配置信度阈值"
+        default=0.6, ge=0.0, le=1.0, description="Skill 匹配置信度阈值"
     )
-    fallback_skill: str = Field(
-        default="quick-query",
-        description="降级目标 Skill ID"
-    )
+    fallback_skill: str = Field(default="quick-query", description="降级目标 Skill ID")
 
 
 class HITLSettings(BaseSettings):
     """Human-in-the-Loop 配置"""
-    require_approval_for_write: bool = Field(
-        default=True,
-        description="写操作是否需要审批"
-    )
+
+    require_approval_for_write: bool = Field(default=True, description="写操作是否需要审批")
     require_approval_for_skill_update: bool = Field(
-        default=True,
-        description="Skill/Knowledge 更新是否需要审批"
+        default=True, description="Skill/Knowledge 更新是否需要审批"
     )
     approval_timeout_seconds: int = Field(
-        default=300,
-        ge=10,
-        le=3600,
-        description="审批超时时间 (秒)"
+        default=300, ge=10, le=3600, description="审批超时时间 (秒)"
     )
+
+
+class ExecutionSettings(BaseSettings):
+    """命令执行配置"""
+
+    use_textfsm: bool = Field(default=True, description="是否使用 TextFSM 解析命令输出")
+    textfsm_fallback_to_raw: bool = Field(
+        default=True, description="TextFSM 解析失败时是否回退到原始文本"
+    )
+    enable_token_statistics: bool = Field(default=True, description="是否启用 token 统计")
 
 
 class DiagnosisSettings(BaseSettings):
     """诊断模块配置"""
+
     macro_max_confidence: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="宏观分析置信度上限"
+        default=0.7, ge=0.0, le=1.0, description="宏观分析置信度上限"
     )
     micro_target_confidence: float = Field(
-        default=0.9,
-        ge=0.0,
-        le=1.0,
-        description="微观分析目标置信度"
+        default=0.9, ge=0.0, le=1.0, description="微观分析目标置信度"
     )
     max_diagnosis_iterations: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        description="单轮诊断最大迭代次数"
+        default=5, ge=1, le=20, description="单轮诊断最大迭代次数"
+    )
+    require_approval_for_micro_analysis: bool = Field(
+        default=True, description="微观分析是否需要审批"
+    )
+    auto_approve_if_confidence_below: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="置信度低于此值时自动审批"
+    )
+    enable_web_search: bool = Field(
+        default=True, description="诊断时是否启用联网搜索（fallback 模式）"
+    )
+    web_search_fallback_only: bool = Field(
+        default=True, description="联网搜索仅在本地知识库无结果时启用"
+    )
+    web_search_max_results: int = Field(
+        default=3, ge=1, le=10, description="每次网络搜索的最大结果数"
+    )
+    web_search_timeout: int = Field(
+        default=10, ge=5, le=30, description="网络搜索超时时间（秒）"
     )
 
 
 class LoggingSettings(BaseSettings):
     """日志配置"""
-    level: str = Field(
-        default="INFO",
-        description="日志级别"
-    )
-    audit_enabled: bool = Field(
-        default=True,
-        description="是否记录审计日志"
-    )
+
+    level: str = Field(default="INFO", description="日志级别")
+    audit_enabled: bool = Field(default=True, description="是否记录审计日志")
 
 
 # =============================================================================
 # Settings Classes
 # =============================================================================
 
+
 class Settings(BaseSettings):
     """OLAV Configuration Settings - Three-Layer Architecture
-    
+
     This is NOT the true source of truth, but a loader with defaults:
     - Layer 1 (.env): True source for sensitive config (API Keys, passwords)
     - Layer 2 (.olav/settings.json): True source for agent behavior config
     - Layer 3 (this file): Code defaults and validation only
-    
+
     Configuration Priority (high to low):
     1. Environment variables (export MY_VAR=value)
     2. .env file (MY_VAR=value)
     3. .olav/settings.json ({"myField": value})
     4. Code defaults (field: type = default_value)
-    
+
     Supports three-layer configuration:
     - Environment variables (highest priority)
     - .olav/settings.json (Layer 2)
@@ -191,19 +192,17 @@ class Settings(BaseSettings):
     # Skill Configuration (Phase C-1)
     # =========================================================================
     enabled_skills: list[str] = Field(
-        default_factory=list,
-        description="启用的 Skill ID 列表 (空表示全部启用)"
+        default_factory=list, description="启用的 Skill ID 列表 (空表示全部启用)"
     )
-    disabled_skills: list[str] = Field(
-        default_factory=list,
-        description="禁用的 Skill ID 列表"
-    )
+    disabled_skills: list[str] = Field(default_factory=list, description="禁用的 Skill ID 列表")
 
     # =========================================================================
     # Embedding Configuration (Phase 4: Knowledge Base Integration)
     # =========================================================================
     enable_embedding: bool = True
-    embedding_provider: Literal["ollama", "openai", "none"] = "ollama"  # Default to Ollama (free local)
+    embedding_provider: Literal["ollama", "openai", "none"] = (
+        "ollama"  # Default to Ollama (free local)
+    )
     embedding_model: str = "nomic-embed-text"  # Ollama model (768 dimensions)
     embedding_base_url: str = "http://localhost:11434"  # Ollama default URL
     embedding_api_key: str = ""  # Only needed for OpenAI embeddings
@@ -211,25 +210,15 @@ class Settings(BaseSettings):
     # =========================================================================
     # Nested Configuration Objects (Phase C-1)
     # =========================================================================
-    guard: GuardSettings = Field(
-        default_factory=GuardSettings,
-        description="Guard 过滤器配置"
-    )
-    routing: RoutingSettings = Field(
-        default_factory=RoutingSettings,
-        description="Skill 路由配置"
-    )
-    hitl: HITLSettings = Field(
-        default_factory=HITLSettings,
-        description="HITL 审批配置"
-    )
-    diagnosis: DiagnosisSettings = Field(
-        default_factory=DiagnosisSettings,
-        description="诊断配置"
+    guard: GuardSettings = Field(default_factory=GuardSettings, description="Guard 过滤器配置")
+    routing: RoutingSettings = Field(default_factory=RoutingSettings, description="Skill 路由配置")
+    hitl: HITLSettings = Field(default_factory=HITLSettings, description="HITL 审批配置")
+    diagnosis: DiagnosisSettings = Field(default_factory=DiagnosisSettings, description="诊断配置")
+    execution: ExecutionSettings = Field(
+        default_factory=ExecutionSettings, description="命令执行配置"
     )
     logging_settings: LoggingSettings = Field(
-        default_factory=LoggingSettings,
-        description="日志配置"
+        default_factory=LoggingSettings, description="日志配置"
     )
 
     # =========================================================================
@@ -351,7 +340,7 @@ class Settings(BaseSettings):
 
     def _apply_olav_settings(self) -> None:
         """Layer 2: Load and apply settings from .olav/settings.json.
-        
+
         Priority: Environment variable > .env > .olav/settings.json > code defaults
         """
         settings_path = OLAV_DIR / "settings.json"
@@ -394,6 +383,7 @@ class Settings(BaseSettings):
                 "routing": ("routing", RoutingSettings),
                 "hitl": ("hitl", HITLSettings),
                 "diagnosis": ("diagnosis", DiagnosisSettings),
+                "execution": ("execution", ExecutionSettings),
                 "logging": ("logging_settings", LoggingSettings),
             }
 
@@ -428,9 +418,9 @@ class Settings(BaseSettings):
         """Export configuration as dictionary (for serialization)."""
         return self.model_dump()
 
-    def save_to_json(self, path: Optional[Path] = None) -> None:
+    def save_to_json(self, path: Path | None = None) -> None:
         """Save configuration to JSON file.
-        
+
         Args:
             path: Target file path. Defaults to .olav/settings.json
         """
@@ -443,19 +433,13 @@ class Settings(BaseSettings):
             return components[0] + "".join(x.title() for x in components[1:])
 
         routing_dict = self.routing.model_dump()
-        routing_dict_camel = {
-            snake_to_camel(k): v for k, v in routing_dict.items()
-        }
+        routing_dict_camel = {snake_to_camel(k): v for k, v in routing_dict.items()}
 
         hitl_dict = self.hitl.model_dump()
-        hitl_dict_camel = {
-            snake_to_camel(k): v for k, v in hitl_dict.items()
-        }
+        hitl_dict_camel = {snake_to_camel(k): v for k, v in hitl_dict.items()}
 
         diagnosis_dict = self.diagnosis.model_dump()
-        diagnosis_dict_camel = {
-            snake_to_camel(k): v for k, v in diagnosis_dict.items()
-        }
+        diagnosis_dict_camel = {snake_to_camel(k): v for k, v in diagnosis_dict.items()}
 
         data = {
             "model": self.llm_model_name,
@@ -512,4 +496,3 @@ except Exception as e:
     print(f"Error loading settings: {e}")
     print("Please ensure .env file exists in the project root with proper values")
     raise
-

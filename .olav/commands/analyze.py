@@ -3,9 +3,9 @@
 
 Usage: /analyze [source] [destination] [--error "desc"] [--plan] [--interactive]
 """
-import sys
 import argparse
 import re
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -14,6 +14,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 

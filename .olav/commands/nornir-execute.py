@@ -12,7 +12,6 @@ Examples:
 Note: Commands must be in the whitelist. Dangerous commands are blocked.
 """
 import sys
-import json
 from pathlib import Path
 
 # Add project root to path
@@ -21,6 +20,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -32,10 +32,10 @@ def main():
         print('  /nornir-execute R1 "show version"')
         print('  /nornir-execute SW1 "show vlan brief"')
         return 1
-    
+
     device = sys.argv[1]
     command = sys.argv[2]
-    
+
     try:
         from olav.tools.network import nornir_execute
         result = nornir_execute.invoke({"device": device, "command": command})

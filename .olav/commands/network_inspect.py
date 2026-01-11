@@ -3,10 +3,10 @@
 
 Usage: /inspect [scope] [--layer L1|L2|L3|L4|all] [--report]
 """
-import sys
 import argparse
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
@@ -14,6 +14,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -185,7 +186,6 @@ def main():
 
     try:
         from olav.tools.network import list_devices
-        from olav.tools.inspection_tools import nornir_bulk_execute
 
         # Get device list
         if "devices" in scope_params:

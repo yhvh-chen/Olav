@@ -17,13 +17,10 @@ from olav.core.storage import get_storage_permissions
 from olav.core.subagent_manager import format_subagent_descriptions, get_subagent_middleware
 from olav.tools.capabilities import api_call, search_capabilities
 from olav.tools.inspection_tools import generate_report
-from olav.tools.learning_tools import (
-    embed_knowledge_tool,
-    save_solution_tool,
-    suggest_filename_tool,
-)
+from olav.tools.learning_tools import update_aliases_tool
 from olav.tools.loader import reload_capabilities
 from olav.tools.network import list_devices, nornir_execute
+from olav.tools.research_tool import research_problem_tool
 from olav.tools.smart_query import smart_query
 from olav.tools.storage_tools import (
     list_saved_files,
@@ -153,11 +150,9 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         search_capabilities,  # Secondary: Manual command search
         nornir_execute,  # Secondary: Direct command execution
         api_call,  # Secondary: API calls
-        # Phase 4: Learning tools - self-learning capabilities
-        save_solution_tool,  # Save successful troubleshooting cases
-        suggest_filename_tool,  # Suggest solution filenames
-        # Phase 7: Agentic embedding - embed reports/skills to knowledge base
-        embed_knowledge_tool,  # Embed markdown files to vector knowledge base
+        research_problem_tool,  # Phase 3: Research tool (knowledge + web search)
+        # Phase 4: Learning tools - update device aliases
+        update_aliases_tool,  # Update device naming conventions
         # Phase 6: Storage tools - file operations with HITL
         write_file,  # Generic file write (requires HITL)
         read_file,  # Read files from agent_dir/
@@ -180,10 +175,8 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
             "smart_query": False,  # Safe: uses whitelist internally (handles batch too)
             "nornir_execute": False,  # Safe: whitelist + blacklist enforcement
             "api_call": False,  # Safe: API validation in tool layer
-            "save_solution": True,  # Phase 4: Learning - requires approval (writes to disk)
+            "research_problem": False,  # Read-only: local search + web search
             "update_aliases": True,  # Phase 4: Learning - requires approval (writes to disk)
-            "suggest_solution_filename": False,  # Phase 4: Learning - read-only helper
-            "embed_knowledge": False,  # Phase 7: Embedding - read-only KB update (safe)
             # Phase 6: Storage tools - file operations
             "write_file": True,  # Filesystem write requires approval
             "read_file": False,  # Read-only is safe

@@ -1,15 +1,16 @@
 """OLAV Prompt Session - Enhanced CLI session using prompt-toolkit."""
 
 from pathlib import Path
-from typing import Callable, Optional
+
+from olav.cli.commands import SLASH_COMMANDS
 
 try:
     from prompt_toolkit import PromptSession
-    from prompt_toolkit.history import FileHistory
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.completion import WordCompleter
-    from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
 except ImportError:
     # Fallback if prompt-toolkit not installed
     PromptSession = None
@@ -49,7 +50,7 @@ class OlavPromptSession:
         if history_file is None:
             from config.settings import settings
             history_file = Path(settings.agent_dir) / ".cli_history"
-        
+
         self.history_file = Path(history_file)
         self.enable_completion = enable_completion
         self.enable_history = enable_history
@@ -59,35 +60,40 @@ class OlavPromptSession:
         if self.enable_history:
             self.history_file.parent.mkdir(parents=True, exist_ok=True)
 
-        self._session: Optional[PromptSession] = None
+        self._session: PromptSession | None = None
         self._init_session()
 
     def _init_session(self) -> None:
         """Initialize the prompt-toolkit session."""
         import sys
-        
+
         # Check if stdin is a TTY (interactive terminal)
         # If not (piped input), fall back to basic input
         if not sys.stdin.isatty():
             print("Note: Non-interactive mode detected, using basic input")
             return
-        
+
         if PromptSession is None:
             print("Warning: prompt-toolkit not installed, using basic input")
             return
 
-        # Build command list for completion
-        commands = [
-            "/devices",
-            "/skills",
-            "/inspect",
-            "/reload",
-            "/clear",
-            "/history",
-            "/help",
-            "/quit",
-            "/exit",
-        ]
+        # Build command list for completion dynamically from registered commands
+        # Sort by priority: workflow > device > session > exit
+        command_priority = {
+            # Workflow commands (most used)
+            "backup": 1, "analyze": 2, "inspect": 3, "query": 4, "search": 5,
+            # Device & skill commands
+            "devices": 10, "skills": 11,
+            # Session commands
+            "reload": 20, "clear": 21, "history": 22, "help": 23,
+            # Exit commands (least priority)
+            "quit": 90, "exit": 91,
+        }
+        sorted_names = sorted(
+            SLASH_COMMANDS.keys(),
+            key=lambda x: command_priority.get(x, 50)
+        )
+        commands = [f"/{name}" for name in sorted_names]
 
         # Configure session
         session_kwargs: dict = {}

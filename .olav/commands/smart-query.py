@@ -17,8 +17,8 @@ Examples:
 
 Common intents: interface, bgp, ospf, route, vlan, mac, arp, version, config
 """
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -39,9 +40,9 @@ def main():
     parser.add_argument("device", help="Device name (e.g., 'R1', 'SW1')")
     parser.add_argument("intent", help="Query intent (e.g., 'interface', 'bgp', 'ospf')")
     parser.add_argument("--command", "-c", help="Override with specific command")
-    
+
     args = parser.parse_args()
-    
+
     try:
         from olav.tools.smart_query import smart_query
         result = smart_query.invoke({

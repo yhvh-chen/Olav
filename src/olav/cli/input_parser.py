@@ -9,7 +9,6 @@ Handles:
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple
 
 
 def expand_file_references(text: str, base_dir: Path | None = None) -> str:
@@ -58,7 +57,7 @@ def expand_file_references(text: str, base_dir: Path | None = None) -> str:
     return re.sub(pattern, replace_ref, text)
 
 
-def parse_input(text: str) -> Tuple[str, bool, Optional[str]]:
+def parse_input(text: str) -> tuple[str, bool, str | None]:
     """Parse user input into components.
 
     Args:
@@ -88,7 +87,7 @@ def parse_input(text: str) -> Tuple[str, bool, Optional[str]]:
     return text, False, None
 
 
-def execute_shell_command(command: str) -> Tuple[bool, str, str, int]:
+def execute_shell_command(command: str) -> tuple[bool, str, str, int]:
     """Execute a shell command.
 
     Args:

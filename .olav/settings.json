@@ -28,5 +28,9 @@
     "reportDir": ".olav/reports",
     "checkTypes": ["health-check", "bgp-audit", "interface-errors", "security-baseline"],
     "refreshInterval": 3600
+  },
+  "cli": {
+    "banner": "default",
+    "showBanner": true
   }
 }

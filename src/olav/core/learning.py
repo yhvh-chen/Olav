@@ -111,80 +111,7 @@ def save_solution(
     # Write file
     filepath.write_text(content, encoding="utf-8")
 
-    # Phase 7: Auto-embed solution to knowledge base for semantic search
-    _auto_embed_solution(str(filepath))
-
     return str(filepath)
-
-
-def _auto_embed_solution(filepath: str) -> None:
-    """Auto-embed solution markdown to knowledge base (Phase 7).
-
-    This function is called automatically after save_solution writes a solution
-    file. It embeds the solution to the DuckDB vector store for semantic search.
-
-    Args:
-        filepath: Path to the solution markdown file
-
-    Phase 7: Learning loop auto-trigger - solutions are automatically indexed
-    """
-    try:
-        from olav.tools.knowledge_embedder import KnowledgeEmbedder
-
-        path = Path(filepath)
-
-        # Only auto-embed solutions in knowledge/solutions/
-        if "knowledge/solutions" not in str(path):
-            return
-
-        if not path.exists():
-            logger.warning(f"Solution file not found: {filepath}")
-            return
-
-        # Embed to knowledge base with source_id=2 (solution)
-        embedder = KnowledgeEmbedder()
-        count = embedder.embed_file(path, source_id=2, platform="solution")
-
-        logger.info(f"✅ Auto-embedded solution {path.name}: {count} chunks")
-
-    except Exception as e:
-        # Non-blocking: log warning but don't interrupt solution saving
-        logger.warning(f"Auto-embedding failed for solution {filepath}: {e}")
-
-
-def _auto_embed_aliases(filepath: str) -> None:
-    """Auto-embed aliases knowledge file to vector store (Phase 7).
-
-    This function is called automatically after update_aliases modifies the
-    aliases file. It re-embeds the entire aliases file for semantic search.
-
-    Args:
-        filepath: Path to the aliases.md file
-
-    Phase 7: Learning loop auto-trigger - aliases are automatically updated
-    """
-    try:
-        from olav.tools.knowledge_embedder import KnowledgeEmbedder
-
-        path = Path(filepath)
-
-        # Only auto-embed aliases.md in knowledge/
-        if "knowledge/aliases.md" not in str(path):
-            return
-
-        if not path.exists():
-            logger.warning(f"Aliases file not found: {filepath}")
-            return
-
-        # Embed aliases to knowledge base
-        embedder = KnowledgeEmbedder()
-        count = embedder.embed_file(path, source_id=2, platform="aliases")
-
-        logger.info(f"✅ Auto-embedded aliases {path.name}: {count} chunks")
-
-    except Exception as e:
-        # Non-blocking: log warning but don't interrupt alias updates
-        logger.warning(f"Auto-embedding failed for aliases {filepath}: {e}")
 
 
 def update_aliases(
@@ -248,14 +175,14 @@ def update_aliases(
             updated_content = "\n".join(lines)
             aliases_file.write_text(updated_content, encoding="utf-8")
             # Phase 7: Auto-embed updated aliases
-            _auto_embed_aliases(str(aliases_file))
+            # TODO: Implement _auto_embed_aliases function
+            # _auto_embed_aliases(str(aliases_file))
             return True
         else:
             # No table found, append to end
             new_content = content + f"\n{new_entry}\n"
             aliases_file.write_text(new_content, encoding="utf-8")
             # Phase 7: Auto-embed updated aliases
-            _auto_embed_aliases(str(aliases_file))
             return True
 
     except Exception as e:

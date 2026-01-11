@@ -3,8 +3,8 @@
 
 Usage: /backup [filter] [type] [--commands "cmd1,cmd2"]
 """
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path for olav imports
@@ -13,6 +13,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 

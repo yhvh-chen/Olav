@@ -254,7 +254,7 @@ def interactive_mode(ctx: typer.Context) -> None:
 
     # Import heavy modules only when needed
     from olav.agent import create_olav_agent
-    from olav.cli.display import BannerType, display_banner
+    from olav.cli.display import display_banner, load_banner_from_config
     from olav.cli.memory import AgentMemory
     from olav.cli.session import OlavPromptSession
 
@@ -297,7 +297,9 @@ def interactive_mode(ctx: typer.Context) -> None:
 
         # Display banner
         if is_interactive:
-            display_banner(BannerType.SNOWMAN)
+            banner_text = load_banner_from_config()
+            if banner_text:
+                display_banner(banner_text)
 
         # Create agent
         agent = create_olav_agent(

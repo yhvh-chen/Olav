@@ -230,7 +230,7 @@ class InspectorAgent:
                 "sections": ["summary", "details", "recommendations"],
             }
         }
-        
+
         # Convert flat results to format expected by report formatter
         formatted_results = {}
         for device_name, device_result in result.items():
@@ -238,7 +238,7 @@ class InspectorAgent:
                 formatted_results[device_name] = [device_result]
             else:
                 formatted_results[device_name] = [{"output": str(device_result)}]
-        
+
         report_content = format_inspection_report(
             results=formatted_results,
             skill_config=skill_config,

@@ -179,14 +179,14 @@ def smart_query(
     """
     # Check if this is a batch query (multiple devices)
     is_batch = (
-        "," in device or 
-        device.lower() == "all" or 
+        "," in device or
+        device.lower() == "all" or
         ":" in device  # role:, site:, group: filters
     )
-    
+
     if is_batch:
         return _batch_query_internal(device, intent, command)
-    
+
     # Single device query
     # Step 1: Get device info
     info = get_device_info(device)
@@ -251,7 +251,7 @@ def _batch_query_internal(
 
     # Get singleton Nornir instance
     nr = get_nornir()
-    
+
     filter_desc = ""
 
     # Parse device specification

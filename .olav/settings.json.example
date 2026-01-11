@@ -1,4 +1,19 @@
 {
+  "agent": {
+    "name": "OLAV",
+    "description": "Network Operations AI Assistant",
+    "version": "0.8"
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "x-ai/grok-4.1-fast",
+    "temperature": 0.1,
+    "max_tokens": 4096
+  },
+  "cli": {
+    "banner": "default",
+    "showBanner": true
+  },
   "diagnosis": {
     "requireApprovalForMicroAnalysis": true,
     "autoApproveIfConfidenceBelow": 0.5
@@ -16,3 +31,4 @@
     "enabled": true
   }
 }
+

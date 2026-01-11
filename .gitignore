@@ -1,7 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 *.so
 .Python
 build/
@@ -31,13 +31,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# Configuration files with sensitive data
-config/inventory.csv
-
-# Generated configs (contain credentials from .env)
-data/generated_configs/
-
-# IDEs
+# IDEs & Editors
 .vscode/
 .idea/
 *.swp
@@ -45,7 +39,7 @@ data/generated_configs/
 *~
 .DS_Store
 
-# Testing
+# Testing & QA (Strictly Excluded)
 .pytest_cache/
 .coverage
 htmlcov/
@@ -55,44 +49,30 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+tests/
+*/tests/
+test_*.py
 
-# Logs
+# OLAV Runtime & Data
+.olav/data/
+.olav/logs/
+.olav/reports/
+.olav/scratch/
 *.log
-logs/
+*.sqlite
+*.db
+nornir.log
 
-# Data directories
-data/
+# Sensitive Configuration (User-Specific)
+.env
+.olav/settings.json
+config/inventory.csv
+.olav/config/nornir/hosts.yaml
 
-# Scripts and Docs (User requested exclusion)
-scripts/
-docs/
-
-# Docker
-docker-compose.override.yml
-
-# uv
-.python-version
+# Build/Packaging
 uv.lock
 
-# Archive (code only, keep docs/archive)
+# Archives & Legacy (Excluded from Release)
 archive/
-!docs/archive/
-
-# -----------------------------------------------------------------------------
-# Local Development & Test Files (Added for GitHub cleanup)
-# -----------------------------------------------------------------------------
-
-# Root level debug/test scripts
-/debug_*.py
-/test_*.py
-tests
-
-# Dev/Test Infrastructure
-docker-compose.dev.yml
-Dockerfile.tests
-ssh_config
-
-# GitHub specific
-.github/
-
-
+docs/dev_archive/
+claude-code-migration/

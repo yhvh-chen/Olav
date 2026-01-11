@@ -95,6 +95,7 @@ Working method: Start from the physical layer, work upward layer by layer.
 Available tools:
 - nornir_execute: Execute commands on network devices
 - search_capabilities: Find available commands
+- research_problem: Research problems using local knowledge + web search
 - smart_query: Intelligent device query
 """,
         tools=tools,
@@ -118,7 +119,10 @@ def get_inspector_agent(tools: list[Any] | None = None) -> dict[str, Any]:
     """
     return create_subagent(
         name="inspector-agent",
-        description="Device inspection specialist: health checks, audits, security analysis",
+        description=(
+            "Device inspection specialist: "
+            "health checks, audits, security analysis"
+        ),
         system_prompt="""You are the Network Inspector Agent, specialized in device inspection workflows.
 
 Your expertise includes:

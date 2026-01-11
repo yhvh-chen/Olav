@@ -15,8 +15,8 @@ Options:
     --site       Filter by site name
     --platform   Filter by platform (cisco_ios, huawei_vrp)
 """
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -25,6 +25,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -37,9 +38,9 @@ def main():
     parser.add_argument("--role", "-r", help="Filter by role")
     parser.add_argument("--site", "-s", help="Filter by site")
     parser.add_argument("--platform", "-p", help="Filter by platform")
-    
+
     args = parser.parse_args()
-    
+
     try:
         from olav.tools.network import list_devices
         result = list_devices.invoke({

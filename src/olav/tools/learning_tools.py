@@ -3,7 +3,8 @@
 This module wraps the learning functions in LangChain BaseTool wrappers
 so they can be used by the agent.
 
-Phase 7: Includes agentic embedding tools for reports and skills.
+Simplified version: Only update_aliases for device naming conventions.
+Manual solution documentation kept for user control.
 """
 
 from pathlib import Path
@@ -12,73 +13,8 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from config.settings import settings
-from olav.core.learning import (
-    save_solution,
-    suggest_solution_filename,
-    update_aliases,
-)
+from olav.core.learning import suggest_solution_filename, update_aliases
 from olav.tools.knowledge_embedder import KnowledgeEmbedder
-
-
-class SaveSolutionInput(BaseModel):
-    """Input schema for save_solution tool."""
-
-    title: str = Field(description="Case title (filename-safe, e.g., 'crc-errors-r1')")
-    problem: str = Field(description="Problem description")
-    process: list[str] = Field(description="List of troubleshooting steps taken")
-    root_cause: str = Field(description="Root cause analysis")
-    solution: str = Field(description="Solution implemented")
-    commands: list[str] = Field(description="Key commands used during troubleshooting")
-    tags: list[str] = Field(
-        description="Tags for indexing (with # prefix, e.g., '#物理层', '#CRC')"
-    )
-
-
-class SaveSolutionTool(BaseTool):
-    """Save a successful troubleshooting case to the knowledge base.
-
-    This tool enables the agent to learn from past successes and build a
-    solutions library over time. Cases are saved to agent_dir/knowledge/solutions/.
-    """
-
-    name: str = "save_solution"
-    description: str = """Save a successful troubleshooting case to the knowledge base.
-
-    Use this tool AFTER successfully resolving a problem. The case will be saved
-    to agent_dir/knowledge/solutions/ as a markdown file for future reference.
-
-    Important: Only save REAL, VERIFIED solutions. Do not save hypothetical cases.
-    """
-    args_schema: type[BaseModel] = SaveSolutionInput
-
-    def _run(
-        self,
-        title: str,
-        problem: str,
-        process: list[str],
-        root_cause: str,
-        solution: str,
-        commands: list[str],
-        tags: list[str],
-    ) -> str:
-        """Execute the tool."""
-        try:
-            filepath = save_solution(
-                title=title,
-                problem=problem,
-                process=process,
-                root_cause=root_cause,
-                solution=solution,
-                commands=commands,
-                tags=tags,
-            )
-            # Phase 7: Auto-embedding is done in save_solution()
-            return (
-                f"✅ Solution case saved to: {filepath}\n"
-                f"📚 Auto-embedded to knowledge base for semantic search"
-            )
-        except Exception as e:
-            return f"❌ Failed to save solution: {e}"
 
 
 class UpdateAliasesInput(BaseModel):
@@ -130,11 +66,7 @@ class UpdateAliasesTool(BaseTool):
                 notes=notes,
             )
             if success:
-                # Phase 7: Auto-embedding is done in update_aliases()
-                return (
-                    f"✅ Alias '{alias}' -> '{actual_value}' saved to knowledge base\n"
-                    f"📚 Auto-embedded to knowledge base for semantic search"
-                )
+                return f"✅ Alias '{alias}' -> '{actual_value}' saved to knowledge base"
             else:
                 return f"❌ Failed to update alias '{alias}'"
         except Exception as e:
@@ -276,13 +208,11 @@ class EmbedKnowledgeTool(BaseTool):
 
 
 # Export tool instances
-save_solution_tool = SaveSolutionTool()
 update_aliases_tool = UpdateAliasesTool()
 suggest_filename_tool = SuggestSolutionFilenameTool()
 embed_knowledge_tool = EmbedKnowledgeTool()
 
 __all__ = [
-    "save_solution_tool",
     "update_aliases_tool",
     "suggest_filename_tool",
     "embed_knowledge_tool",

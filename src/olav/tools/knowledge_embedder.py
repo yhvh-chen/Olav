@@ -11,7 +11,6 @@ Phase 4: Knowledge Base Integration
 
 import hashlib
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -32,7 +31,7 @@ class KnowledgeEmbedder:
         >>> embedder.embed_directory(Path("docs/"), source_id=2)
     """
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """Initialize the embedder.
 
         Args:

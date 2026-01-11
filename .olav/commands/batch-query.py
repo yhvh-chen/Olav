@@ -16,8 +16,8 @@ Arguments:
     devices    Comma-separated device names, or "all" for all devices
     intent     Query intent (interface, bgp, ospf, route, vlan, mac, version)
 """
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -26,6 +26,7 @@ sys.path.insert(0, str(project_root))
 
 # Load environment
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -37,9 +38,9 @@ def main():
     )
     parser.add_argument("devices", help="Comma-separated device names or 'all'")
     parser.add_argument("intent", help="Query intent (e.g., 'interface', 'bgp')")
-    
+
     args = parser.parse_args()
-    
+
     try:
         from olav.tools.smart_query import batch_query
         result = batch_query.invoke({
