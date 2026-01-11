@@ -30,29 +30,74 @@ app = typer.Typer(
 )
 
 
-async def stream_agent_response(agent: Any, messages: list[dict]) -> str:
-    """Stream agent response with real-time token output.
+async def stream_agent_response(
+    agent: Any, messages: list[dict], verbose: bool = False
+) -> str:
+    """Stream agent response with hierarchical output display.
 
-    P7 Enhancement: Reduces perceived latency by showing tokens as generated.
+    P8 Enhancement: Added layered streaming with tool call visibility and
+    structured output. Supports verbose mode for debugging.
+
+    Displays:
+    - Tool calls: Highlighted panels showing device/command
+    - Thinking: Dim text (only in verbose mode)
+    - Results: Standard formatted output
 
     Args:
         agent: OLAV agent instance
         messages: Conversation messages
+        verbose: If True, show full thinking process; else show tools + results only
 
     Returns:
-        Complete response text
+        Complete response text (final result only)
     """
+    from olav.cli.display import StreamingDisplay
+
+    display = StreamingDisplay(verbose=verbose, show_spinner=False)
+
     full_response = ""
     current_content = ""
+    previous_tool = None
 
     def extract_ai_content(msg: Any) -> str:
         """Extract content from AIMessage, ignoring tool calls."""
         if hasattr(msg, "content") and msg.content:
-            # Skip AIMessages that only have tool calls (empty content)
             if hasattr(msg, "tool_calls") and msg.tool_calls and not msg.content:
                 return ""
             return msg.content
         return ""
+
+    def parse_tool_call(tool_call: Any) -> tuple[str, str, str] | None:
+        """Parse tool call to extract name, device, and command.
+
+        Args:
+            tool_call: Tool call object from AIMessage
+
+        Returns:
+            Tuple of (tool_name, device, command) or None if not parseable
+        """
+        try:
+            name = getattr(tool_call, "name", "") or tool_call.get("name", "")
+            if not name:
+                return None
+
+            # Extract device and command from args
+            args = getattr(tool_call, "args", {}) or tool_call.get("args", {})
+            if isinstance(args, str):
+                # Try to parse if it's a JSON string
+                import json
+
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+
+            device = args.get("device") or args.get("target")
+            command = args.get("command")
+
+            return (name, device, command)
+        except (AttributeError, TypeError):
+            return None
 
     # Stream tokens as they arrive - use stream_mode="values" for consistent format
     async for event in agent.astream({"messages": messages}, stream_mode="values"):
@@ -62,18 +107,39 @@ async def stream_agent_response(agent: Any, messages: list[dict]) -> str:
             # Check the last message for AI response
             if msgs:
                 last_msg = msgs[-1]
-                # Only process AIMessage responses (not HumanMessage or ToolMessage)
                 msg_type = type(last_msg).__name__
+
+                # Handle tool calls (AIMessage with tool_calls)
+                if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls"):
+                    if last_msg.tool_calls:
+                        for tool_call in last_msg.tool_calls:
+                            # Avoid duplicate display of same tool
+                            tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
+                            if tool_id == previous_tool:
+                                continue
+
+                            parsed = parse_tool_call(tool_call)
+                            if parsed:
+                                tool_name, device, command = parsed
+                                display.show_tool_call(
+                                    tool_name=tool_name,
+                                    device=device,
+                                    command=command,
+                                    status="executing",
+                                )
+                                previous_tool = tool_id
+
+                # Handle final AI response (text content)
                 if msg_type == "AIMessage":
                     new_content = extract_ai_content(last_msg)
                     if new_content and new_content != current_content:
-                        # Print only new characters (delta)
+                        # Stream only new characters (delta)
                         delta = new_content[len(current_content) :]
-                        print(delta, end="", flush=True)
+                        display.show_result(delta, end="")
                         current_content = new_content
 
     # Final newline
-    print()
+    display.show_result("", end="\n")
     full_response = current_content
 
     return full_response
@@ -156,11 +222,12 @@ def run_interactive_loop(
             # Store in memory
             memory.add("user", processed_text)
 
-            # P7: Stream agent response for real-time output
+            # P8: Stream agent response with layered output
             print("🔍 Processing...", flush=True)
             try:
                 messages = [{"role": "user", "content": processed_text}]
-                output = asyncio.run(stream_agent_response(agent, messages))
+                # Default to non-verbose in interactive mode for cleaner output
+                output = asyncio.run(stream_agent_response(agent, messages, verbose=False))
 
                 if output:
                     memory.add("assistant", output)
@@ -186,12 +253,16 @@ def run_interactive_loop(
 def query(
     query_text: str = typer.Argument(..., help="Network operation query"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show full LLM thinking process"
+    ),
 ) -> None:
     """Execute a single network operations query.
 
     Examples:
         olav query "查看 R1 的接口状态"
         olav query "R1 的 BGP 邻居" --debug
+        olav query "Check R2 BGP" --verbose
     """
     from olav.agent import create_olav_agent
 
@@ -202,7 +273,7 @@ def query(
         messages = [{"role": "user", "content": query_text}]
 
         console.print("[dim]🔍 Processing...[/dim]")
-        output = asyncio.run(stream_agent_response(agent, messages))
+        output = asyncio.run(stream_agent_response(agent, messages, verbose=verbose))
 
         if not output:
             console.print("[yellow]No response received[/yellow]")
@@ -214,6 +285,7 @@ def query(
 
             traceback.print_exc()
         raise typer.Exit(1) from None
+
 
 
 @app.command()

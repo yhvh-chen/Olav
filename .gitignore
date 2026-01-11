@@ -76,3 +76,4 @@ uv.lock
 archive/
 docs/dev_archive/
 claude-code-migration/
+.olav/config/nornir/hosts.yaml

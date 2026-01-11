@@ -146,3 +146,132 @@ def print_success(message: str, console: Console | None = None) -> None:
         console.print(f"[bold green]✓[/] {message}")
     else:
         print(f"✓ {message}")
+
+class StreamingDisplay:
+    """Hierarchical streaming output handler for agent execution.
+
+    Manages three levels of output:
+    1. Thinking process (LLM reasoning) - shown in dim/dark color
+    2. Tool calls (network execution) - shown in highlight Panel
+    3. Final results (formatted output) - shown in standard color
+
+    Supports both verbose mode (all output) and compact mode (tools + results only).
+    """
+
+    def __init__(
+        self,
+        console: Console | None = None,
+        verbose: bool = False,
+        show_spinner: bool = True,
+    ) -> None:
+        """Initialize streaming display.
+
+        Args:
+            console: Rich Console instance (creates new if None)
+            verbose: Show full thinking process if True
+            show_spinner: Show spinner during processing if True
+        """
+        if not RICH_AVAILABLE:
+            raise ImportError("Rich library required for StreamingDisplay")
+
+        self.console = console or Console()
+        self.verbose = verbose
+        self.show_spinner = show_spinner
+        self._current_spinner = None
+
+    def show_thinking(self, text: str, end: str = "") -> None:
+        """Display LLM thinking/reasoning in dim text.
+
+        Args:
+            text: Thinking content to display
+            end: End character (empty string for delta, newline for finalized)
+        """
+        if not self.verbose:
+            return
+
+        # Use dim style for thinking process
+        self.console.print(f"[dim]{text}[/]", end=end, highlight=False)
+
+    def show_tool_call(
+        self,
+        tool_name: str,
+        device: str | None = None,
+        command: str | None = None,
+        status: str = "executing",
+    ) -> None:
+        """Display tool call in highlighted Panel format.
+
+        Args:
+            tool_name: Name of the tool being called
+            device: Target device (optional)
+            command: Command being executed (optional)
+            status: Status string ('executing', 'completed', 'failed')
+        """
+        from rich.panel import Panel
+
+        # Build title with status indicator
+        status_icons = {
+            "executing": "⏳",
+            "completed": "✅",
+            "failed": "❌",
+        }
+        icon = status_icons.get(status, "🔧")
+
+        title = f"{icon} {tool_name}"
+        if device:
+            title += f" | {device}"
+
+        # Build content
+        content = ""
+        if command:
+            content = f"Command: `{command}`"
+
+        # Display as panel
+        panel = Panel(
+            content or "Processing...",
+            title=title,
+            border_style="cyan" if status == "executing" else "green",
+            expand=False,
+        )
+        self.console.print(panel)
+
+    def show_result(self, text: str, end: str = "") -> None:
+        """Display final result in standard format.
+
+        Args:
+            text: Result content to display
+            end: End character (empty string for delta, newline for finalized)
+        """
+        self.console.print(text, end=end, highlight=False)
+
+    def show_processing_status(self, message: str = "Processing...") -> None:
+        """Show processing status indicator.
+
+        Args:
+            message: Status message to display
+        """
+        if not self.show_spinner:
+            self.console.print(f"🔍 {message}")
+            return
+
+        # Use rich status for animated feedback
+        from rich.live import Live
+        from rich.spinner import Spinner
+
+        spinner = Spinner("dots", text=f"[bold green]{message}[/bold green]")
+        self._current_spinner = Live(spinner, refresh_per_second=4)
+        self._current_spinner.start()
+
+    def stop_processing_status(self) -> None:
+        """Stop and clear the processing status indicator."""
+        if self._current_spinner:
+            self._current_spinner.stop()
+            self._current_spinner = None
+
+    def show_error(self, message: str) -> None:
+        """Display error message.
+
+        Args:
+            message: Error message to display
+        """
+        self.console.print(f"[bold red]❌ Error:[/] {message}")
