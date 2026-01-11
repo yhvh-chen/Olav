@@ -31,8 +31,8 @@ app = typer.Typer(
 
 
 async def stream_agent_response(
-    agent: Any, 
-    messages: list[dict], 
+    agent: Any,
+    messages: list[dict],
     verbose: bool = False,
     memory: "AgentMemory | None" = None,
 ) -> str:
@@ -138,7 +138,7 @@ async def stream_agent_response(
                     if spinner_started:
                         display.stop_processing_status()
                         spinner_started = False
-                    
+
                     for tool_call in msg.tool_calls:
                         # Avoid duplicate display of same tool call
                         tool_id = getattr(tool_call, "id", "") or tool_call.get("id")
@@ -148,7 +148,7 @@ async def stream_agent_response(
                         parsed = parse_tool_call(tool_call)
                         if parsed:
                             tool_name, device, command = parsed
-                            
+
                             # Important tools get full panel
                             if tool_name in IMPORTANT_TOOLS:
                                 display.show_tool_call(
@@ -168,7 +168,7 @@ async def stream_agent_response(
                                         compact=True,
                                     )
                                     displayed_tool_types.add(tool_name)
-                            
+
                             previous_tool = tool_id
 
             # Handle AI response content - stream it token by token
@@ -187,7 +187,7 @@ async def stream_agent_response(
                     # Accumulate and display content deltas
                     if content_chunk:
                         accumulated_content += content_chunk
-                    
+
                         if stream_tokens:
                             # Stream mode: show each token as it arrives
                             display.show_thinking(content_chunk, end="")
@@ -301,12 +301,12 @@ def run_interactive_loop(
                 history = memory.get_conversation_messages(max_turns=10, max_chars=8000)
                 # Format: history + current message
                 messages = list(history) + [("user", processed_text)]
-                
+
                 # Use verbose mode only if DISPLAY_THINKING=true
                 use_verbose = settings.display_thinking
-                output = asyncio.run(stream_agent_response(
-                    agent, messages, verbose=use_verbose, memory=memory
-                ))
+                output = asyncio.run(
+                    stream_agent_response(agent, messages, verbose=use_verbose, memory=memory)
+                )
 
                 if output:
                     memory.add("assistant", output)

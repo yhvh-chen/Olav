@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from olav.core.skill_loader import SkillLoader, get_skill_loader
-from olav.core.skill_router import SkillRouter
+from olav.core.skill_router import SkillRouter, create_skill_router
 
 
 @pytest.fixture
@@ -110,3 +110,57 @@ class TestSkillRouterEdgeCases:
         result = router.route("一些模糊的查询")
         # Should use fallback
         assert result["fallback"] is True or result["selected_skill"] is not None
+
+    def test_route_with_no_skills_loaded(self) -> None:
+        """Test routing when no skills are available."""
+        mock_llm = MagicMock()
+        empty_loader = MagicMock()
+        empty_loader.load_all.return_value = {}
+
+        router = SkillRouter(llm=mock_llm, skill_loader=empty_loader)
+        result = router.route("test query")
+
+        # Should return early with None skill
+        assert result["selected_skill"] is None
+        assert result["reason"] == "No skills available"
+        assert result["is_network_related"] is True
+        assert result["confidence"] == 0.0
+        assert result["fallback"] is False
+
+    def test_unified_route_exception_handling(self, skill_loader: SkillLoader) -> None:
+        """Test exception handling in _unified_route."""
+        mock_llm = MagicMock()
+        # Make LLM invoke throw an exception
+        mock_llm.invoke.side_effect = Exception("LLM error")
+
+        router = SkillRouter(llm=mock_llm, skill_loader=skill_loader)
+        result = router.route("test query")
+
+        # Should fall back to quick-query on error (confidence=0.5 so it's selected)
+        assert result["is_network_related"] is True
+        # The quick-query skill should be selected, not marked as fallback
+        # because the error handler returns confidence=0.5 which passes the threshold
+        assert result["selected_skill"] is not None
+        assert "error" in result["reason"].lower()
+
+
+class TestCreateSkillRouter:
+    """Tests for create_skill_router function."""
+
+    def test_create_skill_router_returns_instance(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
+        """Test that create_skill_router returns SkillRouter instance."""
+        router = create_skill_router(llm=mock_llm, skill_loader=skill_loader)
+
+        assert isinstance(router, SkillRouter)
+        assert router.llm is mock_llm
+        assert router.skill_loader is skill_loader
+
+    def test_create_skill_router_is_factory(self, mock_llm: MagicMock, skill_loader: SkillLoader) -> None:
+        """Test that create_skill_router is a factory function."""
+        router1 = create_skill_router(llm=mock_llm, skill_loader=skill_loader)
+        router2 = create_skill_router(llm=mock_llm, skill_loader=skill_loader)
+
+        # Should create separate instances (not singleton)
+        assert router1 is not router2
+        assert isinstance(router1, SkillRouter)
+        assert isinstance(router2, SkillRouter)

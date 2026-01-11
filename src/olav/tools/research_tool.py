@@ -1,6 +1,5 @@
 """Research tool for network troubleshooting - combines local knowledge base and web search."""
 
-
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
@@ -67,17 +66,10 @@ class ResearchProblemTool(BaseTool):
         local_results = search_knowledge(query, platform, limit=5)
 
         # Decision logic: when to use web search
-        use_web_search = (
-            include_web_search
-            and self._should_use_web_search(local_results, query)
-        )
+        use_web_search = include_web_search and self._should_use_web_search(local_results, query)
 
         if not use_web_search:
-            return (
-                local_results
-                if local_results
-                else f"No local knowledge found for: {query}"
-            )
+            return local_results if local_results else f"No local knowledge found for: {query}"
 
         # Step 2: If local results insufficient, try web search
         web_results = self._web_search(query, platform)
@@ -142,9 +134,7 @@ class ResearchProblemTool(BaseTool):
                 search_query = query
 
             # Use configured max results
-            max_results = getattr(
-                settings.diagnosis, "web_search_max_results", 3
-            )
+            max_results = getattr(settings.diagnosis, "web_search_max_results", 3)
 
             search = DuckDuckGoSearchResults(max_results=max_results)
             results = search.invoke(search_query)
@@ -164,9 +154,7 @@ class ResearchProblemTool(BaseTool):
             logger.warning(f"Web search failed: {str(e)}")
             return None
 
-    def _merge_results(
-        self, local_results: str, web_results: str
-    ) -> str:
+    def _merge_results(self, local_results: str, web_results: str) -> str:
         """Merge local and web search results intelligently.
 
         Format: Local results first (higher priority), then web results
@@ -185,9 +173,7 @@ class ResearchProblemTool(BaseTool):
 network environment. Web results provide vendor documentation and broader experiences.
 """
 
-    async def _arun(
-        self, *args: tuple, **kwargs: dict
-    ) -> str:
+    async def _arun(self, *args: tuple, **kwargs: dict) -> str:
         """Async version (falls back to sync)."""
         return self._run(*args, **kwargs)
 

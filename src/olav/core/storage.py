@@ -16,6 +16,7 @@ from pathlib import Path
 
 try:
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+
     DEEPAGENTS_HAS_STORAGE = True
     # Note: StoreBackend renamed to FilesystemBackend in official API
     StoreBackend = FilesystemBackend
@@ -23,6 +24,7 @@ except ImportError:
     try:
         # Fallback: try old import path
         from deepagents.storage import CompositeBackend, StateBackend, StoreBackend
+
         DEEPAGENTS_HAS_STORAGE = True
     except ImportError:
         # DeepAgents may not have these exact classes
@@ -58,6 +60,7 @@ def get_storage_backend(project_root: Path | None = None):
         project_root = Path.cwd()
 
     from config.settings import settings
+
     agent_dir = Path(settings.agent_dir)
 
     # Configure persistent storage paths (Agent can write)

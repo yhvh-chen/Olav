@@ -77,6 +77,7 @@ class SkillRouter:
                 "confidence": result.get("confidence", 0.0),
                 "fallback": True,
             }
+
     def _unified_route(self, user_query: str, skill_index: dict[str, Skill]) -> dict[str, Any]:
         """P3优化: 统一路由 - 单次LLM调用完成Guard+Skill选择.
 

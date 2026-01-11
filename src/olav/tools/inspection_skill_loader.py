@@ -60,9 +60,7 @@ class InspectionSkillLoader:
                     break
                 current = current.parent
             else:
-                raise ValueError(
-                    "Could not find project root. Pass skills_dir explicitly."
-                )
+                raise ValueError("Could not find project root. Pass skills_dir explicitly.")
 
         self.skills_dir = Path(skills_dir)
         if not self.skills_dir.exists():
@@ -113,9 +111,7 @@ class InspectionSkillLoader:
                 logger.info(f"✅ Loaded skill: {skill_key} ({skill.name})")
         return skills
 
-    def _parse_skill_content(
-        self, content: str, filename: str
-    ) -> SkillDefinition | None:
+    def _parse_skill_content(self, content: str, filename: str) -> SkillDefinition | None:
         """Parse Markdown skill definition content.
 
         Args:
@@ -157,12 +153,8 @@ class InspectionSkillLoader:
         platform_support = self._extract_platform_support(content)
 
         # Extract estimated runtime
-        runtime_match = re.search(
-            r"Estimated Runtime[:\s]*(.+?)(?:\n|$)", content, re.IGNORECASE
-        )
-        estimated_runtime = (
-            runtime_match.group(1).strip() if runtime_match else "Unknown"
-        )
+        runtime_match = re.search(r"Estimated Runtime[:\s]*(.+?)(?:\n|$)", content, re.IGNORECASE)
+        estimated_runtime = runtime_match.group(1).strip() if runtime_match else "Unknown"
 
         return SkillDefinition(
             filename=filename,
@@ -209,11 +201,7 @@ class InspectionSkillLoader:
                 param = SkillParameter(
                     name=cells[0].strip("`"),
                     type=cells[1],
-                    default=(
-                        None
-                        if cells[2].lower() in ("(required)", "required")
-                        else cells[2]
-                    ),
+                    default=(None if cells[2].lower() in ("(required)", "required") else cells[2]),
                     required=cells[2].lower() in ("(required)", "required"),
                     description=cells[3] if len(cells) > 3 else "",
                 )
@@ -244,9 +232,7 @@ class InspectionSkillLoader:
 
         steps_content = steps_match.group(1)
         # Extract "### Step N:" entries
-        step_headers = re.findall(
-            r"### Step \d+[:\s]+(.+?)(?=\n###|\Z)", steps_content, re.DOTALL
-        )
+        step_headers = re.findall(r"### Step \d+[:\s]+(.+?)(?=\n###|\Z)", steps_content, re.DOTALL)
 
         for step_header in step_headers:
             # Get first line (title)
@@ -357,9 +343,7 @@ class InspectionSkillLoader:
             if lines:
                 title = lines[0].strip()
                 solutions = [
-                    line.strip()
-                    for line in lines[1:]
-                    if line.strip() and not line.startswith("#")
+                    line.strip() for line in lines[1:] if line.strip() and not line.startswith("#")
                 ]
                 troubleshooting[title] = solutions
 
@@ -397,9 +381,7 @@ class InspectionSkillLoader:
         if device_match:
             devices_str = device_match.group(1)
             # Split by comma and clean up
-            platforms = [
-                p.strip() for p in devices_str.split(",") if p.strip()
-            ]
+            platforms = [p.strip() for p in devices_str.split(",") if p.strip()]
 
         return platforms
 

@@ -32,6 +32,7 @@ class AgentMemory:
             self.memory_file = self.MEMORY_FILE
         else:
             from config.settings import settings
+
             self.memory_file = Path(settings.agent_dir) / ".agent_memory.json"
 
         self.messages: list[dict[str, Any]] = []
@@ -130,9 +131,7 @@ class AgentMemory:
             Dictionary with memory stats
         """
         user_messages = sum(1 for m in self.messages if m.get("role") == "user")
-        assistant_messages = sum(
-            1 for m in self.messages if m.get("role") == "assistant"
-        )
+        assistant_messages = sum(1 for m in self.messages if m.get("role") == "assistant")
         tool_messages = sum(1 for m in self.messages if m.get("role") == "tool")
 
         return {
@@ -145,7 +144,7 @@ class AgentMemory:
         }
 
     def get_conversation_messages(
-        self, 
+        self,
         max_turns: int = 10,
         max_chars: int = 8000,
     ) -> list[tuple[str, str]]:
@@ -164,34 +163,33 @@ class AgentMemory:
             List of (role, content) tuples for LangChain
         """
         # Get recent messages (user + assistant pairs = turns)
-        recent = self.messages[-(max_turns * 2):]
-        
+        recent = self.messages[-(max_turns * 2) :]
+
         result = []
         total_chars = 0
-        
+
         for msg in recent:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            
+
             # Skip tool messages (not useful for context)
             if role == "tool":
                 continue
-            
+
             # Truncate long messages
             if len(content) > 2000:
                 content = content[:1800] + "\n... [truncated]"
-            
+
             # Check total character limit
             if total_chars + len(content) > max_chars:
                 # Add summary of older context instead
                 if result:
-                    result.insert(0, (
-                        "system", 
-                        "[Earlier conversation context was truncated to save tokens]"
-                    ))
+                    result.insert(
+                        0, ("system", "[Earlier conversation context was truncated to save tokens]")
+                    )
                 break
-            
+
             result.append((role, content))
             total_chars += len(content)
-        
+
         return result

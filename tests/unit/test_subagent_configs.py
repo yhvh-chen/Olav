@@ -3,7 +3,7 @@
 Tests the subagent configuration generation for macro and micro analyzers.
 """
 
-from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer
+from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer, get_inspector_agent
 
 
 class TestMacroAnalyzer:
@@ -124,3 +124,48 @@ class TestSubAgentConfigsConsistency:
             assert "system_prompt" in config
             # Tools can be empty but must exist
             assert "tools" in config
+
+
+class TestInspectorAgent:
+    """Test inspector-agent subagent configuration."""
+
+    def test_inspector_agent_returns_dict(self) -> None:
+        """Test that get_inspector_agent returns a dictionary."""
+        config = get_inspector_agent()
+        assert isinstance(config, dict)
+
+    def test_inspector_agent_has_required_keys(self) -> None:
+        """Test inspector agent config has required keys."""
+        config = get_inspector_agent()
+        required_keys = ["name", "description", "system_prompt", "tools"]
+        for key in required_keys:
+            assert key in config, f"Missing required key: {key}"
+
+    def test_inspector_agent_name(self) -> None:
+        """Test inspector agent has correct name."""
+        config = get_inspector_agent()
+        assert config["name"] == "inspector-agent"
+
+    def test_inspector_agent_description(self) -> None:
+        """Test inspector agent has meaningful description."""
+        config = get_inspector_agent()
+        assert len(config["description"]) > 10
+        # Should mention inspection
+        desc_lower = config["description"].lower()
+        assert any(
+            keyword in desc_lower
+            for keyword in ["inspection", "health", "audit", "check", "检查", "巡检"]
+        )
+
+    def test_inspector_agent_system_prompt(self) -> None:
+        """Test inspector agent has system prompt."""
+        config = get_inspector_agent()
+        assert isinstance(config["system_prompt"], str)
+        assert len(config["system_prompt"]) > 50
+
+    def test_inspector_agent_tools(self) -> None:
+        """Test inspector agent has tools list."""
+        config = get_inspector_agent()
+        assert isinstance(config["tools"], list)
+        # Tools list is empty (tools are injected at runtime)
+        # but the list must exist

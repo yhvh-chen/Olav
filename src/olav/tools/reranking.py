@@ -5,7 +5,6 @@ Uses cross-encoder models (e.g., jina-reranker or mxbai-rerank) to score
 relevance of search results more accurately than naive ranking.
 """
 
-
 from langchain_core.tools import tool
 
 

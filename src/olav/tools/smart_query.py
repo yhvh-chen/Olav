@@ -179,9 +179,7 @@ def smart_query(
     """
     # Check if this is a batch query (multiple devices)
     is_batch = (
-        "," in device or
-        device.lower() == "all" or
-        ":" in device  # role:, site:, group: filters
+        "," in device or device.lower() == "all" or ":" in device  # role:, site:, group: filters
     )
 
     if is_batch:
@@ -262,16 +260,14 @@ def _batch_query_internal(
         # Filter by role
         role = devices.split(":", 1)[1].strip()
         device_list = [
-            name for name, host in nr.inventory.hosts.items()
-            if host.get("role") == role
+            name for name, host in nr.inventory.hosts.items() if host.get("role") == role
         ]
         filter_desc = f"role:{role}"
     elif devices.startswith("site:"):
         # Filter by site
         site = devices.split(":", 1)[1].strip()
         device_list = [
-            name for name, host in nr.inventory.hosts.items()
-            if host.get("site") == site
+            name for name, host in nr.inventory.hosts.items() if host.get("site") == site
         ]
         filter_desc = f"site:{site}"
     elif devices.startswith("group:"):
@@ -279,7 +275,7 @@ def _batch_query_internal(
         group = devices.split(":", 1)[1].strip()
         device_list = []
         for name, host in nr.inventory.hosts.items():
-            if hasattr(host.groups, 'keys'):
+            if hasattr(host.groups, "keys"):
                 if group in host.groups.keys():
                     device_list.append(name)
             elif isinstance(host.groups, (list, tuple)):
@@ -343,9 +339,7 @@ def _batch_query_internal(
     for command, cmd_devices_list in command_devices.items():
         # Filter Nornir to these devices
         # Use default argument to capture loop variable
-        nr_filtered = nr.filter(
-            filter_func=lambda h, devices=cmd_devices_list: h.name in devices
-        )
+        nr_filtered = nr.filter(filter_func=lambda h, devices=cmd_devices_list: h.name in devices)
 
         # Execute command in parallel (Nornir handles threading)
         agg_result = nr_filtered.run(

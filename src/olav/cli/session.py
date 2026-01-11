@@ -49,6 +49,7 @@ class OlavPromptSession:
         """
         if history_file is None:
             from config.settings import settings
+
             history_file = Path(settings.agent_dir) / ".cli_history"
 
         self.history_file = Path(history_file)
@@ -81,18 +82,24 @@ class OlavPromptSession:
         # Sort by priority: workflow > device > session > exit
         command_priority = {
             # Workflow commands (most used)
-            "backup": 1, "analyze": 2, "inspect": 3, "query": 4, "search": 5,
+            "backup": 1,
+            "analyze": 2,
+            "inspect": 3,
+            "query": 4,
+            "search": 5,
             # Device & skill commands
-            "devices": 10, "skills": 11,
+            "devices": 10,
+            "skills": 11,
             # Session commands
-            "reload": 20, "clear": 21, "history": 22, "help": 23,
+            "reload": 20,
+            "clear": 21,
+            "history": 22,
+            "help": 23,
             # Exit commands (least priority)
-            "quit": 90, "exit": 91,
+            "quit": 90,
+            "exit": 91,
         }
-        sorted_names = sorted(
-            SLASH_COMMANDS.keys(),
-            key=lambda x: command_priority.get(x, 50)
-        )
+        sorted_names = sorted(SLASH_COMMANDS.keys(), key=lambda x: command_priority.get(x, 50))
         commands = [f"/{name}" for name in sorted_names]
 
         # Configure session

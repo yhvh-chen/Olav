@@ -2,6 +2,7 @@
 
 Provides tools to delegate tasks to specialized subagents.
 """
+
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
@@ -53,7 +54,7 @@ def delegate_task(
     try:
         middleware = get_task_middleware()
 
-        if hasattr(middleware, 'subagent_graphs'):
+        if hasattr(middleware, "subagent_graphs"):
             subagent_graphs = middleware.subagent_graphs
 
             if subagent_type not in subagent_graphs:

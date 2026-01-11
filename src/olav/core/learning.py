@@ -57,6 +57,7 @@ def save_solution(
     """
     if knowledge_dir is None:
         from config.settings import settings
+
         knowledge_dir = Path(settings.agent_dir) / "knowledge" / "solutions"
 
     knowledge_dir = Path(knowledge_dir)
@@ -147,6 +148,7 @@ def update_aliases(
     """
     if aliases_file is None:
         from config.settings import settings
+
         aliases_file = Path(settings.agent_dir) / "knowledge" / "aliases.md"
 
     aliases_file = Path(aliases_file)
@@ -215,6 +217,7 @@ def learn_from_interaction(
     """
     if knowledge_dir is None:
         from config.settings import settings
+
         knowledge_dir = Path(settings.agent_dir) / "knowledge"
 
     actions = {}

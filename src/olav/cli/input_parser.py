@@ -174,7 +174,7 @@ def strip_code_blocks(text: str) -> str:
             last_triple_backtick = text.rfind("```")
             if last_triple_backtick > first_newline:
                 # Extract content between
-                content = text[first_newline + 1:last_triple_backtick].strip()
+                content = text[first_newline + 1 : last_triple_backtick].strip()
                 return content
 
     return text

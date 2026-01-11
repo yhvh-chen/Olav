@@ -51,7 +51,9 @@ class InspectionReport(BaseModel):
     devices: list[str] = Field(description="Devices inspected")
     results: list[InspectionResult] = Field(description="All inspection results")
     summary: dict[str, Any] = Field(default_factory=dict, description="Summary statistics")
-    recommendations: list[str] = Field(default_factory=list, description="Actionable recommendations")
+    recommendations: list[str] = Field(
+        default_factory=list, description="Actionable recommendations"
+    )
 
 
 # =============================================================================
@@ -104,7 +106,9 @@ def nornir_bulk_execute(
     """
     try:
         # Initialize Nornir
-        nr = InitNornir(config_file=str(Path(settings.agent_dir) / "config" / "nornir" / "config.yaml"))
+        nr = InitNornir(
+            config_file=str(Path(settings.agent_dir) / "config" / "nornir" / "config.yaml")
+        )
 
         # Filter devices if specific list provided
         if devices != "all":
@@ -199,7 +203,9 @@ def parse_inspection_scope(
         return result
 
     # Case 2: Specific device names "R1, R2, R5"
-    if "," in scope and not any(word in scope.lower() for word in ["all", "devices", "routers", "switches"]):
+    if "," in scope and not any(
+        word in scope.lower() for word in ["all", "devices", "routers", "switches"]
+    ):
         device_names = [d.strip() for d in scope.split(",")]
         result["devices"] = device_names
         result["description"] = f"{len(device_names)} devices: {', '.join(device_names)}"
@@ -297,11 +303,11 @@ def generate_report(
             "output": {
                 "format": "markdown",
                 "language": "en-US",
-                "sections": ["summary", "details", "recommendations"]
+                "sections": ["summary", "details", "recommendations"],
             }
         }
     else:
-        skill_config = skill.frontmatter if hasattr(skill, 'frontmatter') else {}
+        skill_config = skill.frontmatter if hasattr(skill, "frontmatter") else {}
 
     # Generate report based on skill config
     report_content = format_report(results, skill_config, inspection_type)

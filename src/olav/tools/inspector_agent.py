@@ -84,8 +84,7 @@ class InspectorAgent:
                 elif param.type == "boolean":
                     if not isinstance(value, bool):
                         errors.append(
-                            f"Parameter '{param.name}' must be boolean, "
-                            f"got {type(value).__name__}"
+                            f"Parameter '{param.name}' must be boolean, got {type(value).__name__}"
                         )
 
         return len(errors) == 0, errors

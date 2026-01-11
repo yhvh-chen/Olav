@@ -58,12 +58,14 @@ class KnowledgeEmbedder:
 
         if provider == "ollama":
             from langchain_ollama import OllamaEmbeddings
+
             return OllamaEmbeddings(
                 model=settings.embedding_model,  # nomic-embed-text
                 base_url=settings.embedding_base_url or "http://localhost:11434",
             )
         elif provider == "openai":
             from langchain_openai import OpenAIEmbeddings
+
             return OpenAIEmbeddings(
                 model=settings.embedding_model,  # text-embedding-3-small
                 openai_api_key=settings.embedding_api_key,
@@ -145,7 +147,9 @@ class KnowledgeEmbedder:
                 try:
                     embedding = self.embeddings.embed_query(chunk)
                 except Exception as e:
-                    print(f"Warning: Could not generate embedding for chunk {i} in {file_path}: {e}")
+                    print(
+                        f"Warning: Could not generate embedding for chunk {i} in {file_path}: {e}"
+                    )
                     continue
 
                 # Store in database

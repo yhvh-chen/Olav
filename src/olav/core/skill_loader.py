@@ -88,7 +88,9 @@ class SkillLoader:
             skill_id = fm.get("id") or fm.get("name")
             if not skill_id:
                 # 如果都没有，从文件名生成
-                skill_id = file_path.stem.replace("-", " ").replace("_", " ").lower().replace(" ", "-")
+                skill_id = (
+                    file_path.stem.replace("-", " ").replace("_", " ").lower().replace(" ", "-")
+                )
 
             # 验证必需字段
             if "description" not in fm:

@@ -6,6 +6,7 @@ specialized subagents for macro and micro network analysis.
 
 try:
     from deepagents.middleware.subagents import SubAgentMiddleware
+
     DEEPAGENTS_AVAILABLE = True
 except ImportError:
     DEEPAGENTS_AVAILABLE = False

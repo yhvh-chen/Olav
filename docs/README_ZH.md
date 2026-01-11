@@ -1,564 +1,200 @@
-# 🤖 OLAV - 企业网络运维 AI 助手
+# 🤖 OLAV - 企业级网络运维 AI 助手
 
-**版本**: 0.8.0  
-**状态**: ✅ 生产可用  
-**架构**: DeepAgents 原生 + 三层知识架构（Skills/Knowledge/Tools）  
-**CLI**: 交互式 DeepAgent CLI  
-**平台**: 支持 Claude Code，兼容 Windows/Mac/Linux  
+**版本**: v0.8.0
+**状态**: ✅ 生产就绪 (Production Ready)
+**框架**: DeepAgents Native
 
-**[英文指南](README.MD)** | **中文指南**
+OLAV (Operations Language-based Autonomous Vehicle) 是一款专为生产环境设计的智能 **Agentic (代理式)** 网络助手。它弥合了 **生成式 AI** 与 **确定性网络自动化** (Nornir/Netmiko) 之间的鸿沟。
 
----
-
-## 📋 目录
-
-- [快速开始](#快速开始)
-- [功能特性](#功能特性)
-- [安装](#安装)
-- [使用示例](#使用示例)
-- [备份指南](#备份指南)
-- [架构](#架构)
-- [技术栈](#技术栈)
+**[中文指南](README_ZH.md)** | **English Guide**
 
 ---
 
-## 快速开始
+## 🌟 为什么选择 OLAV?
 
-### 1️⃣ 环境配置 (5分钟)
+### 🧠 Agentic & Autonomous (智能代理)
+基于 **DeepAgents** 框架构建，OLAV 不仅仅是一个聊天机器人。它是一个以目标为导向的 Agent，能够：
+- **规划 (Plan)**: 将复杂请求（例如“审计所有 BGP 邻居”）拆解为子任务。
+- **行动 (Act)**: 自主执行多步骤工作流，使用工具并检查结果。
+- **反思 (Reflect)**: 在向用户汇报之前验证自己的输出。
+- **记忆 (Memory)**: 在整个故障排查会话中保持上下文。
+
+### 🔄 Claude Code 兼容
+OLAV v0.8 采用了与 **Claude Code** 100% 兼容的文件结构 (`.claude/` ↔ `.olav/`)。
+- **无缝迁移**: 直接将现有的 Claude Code 提示词 (prompts) 和技能 (skills) 放入 `.olav/skills`。
+- **标准化 SOP**: 使用标准 Markdown 定义 Agent 遵循的健壮运维流程 (SOP)。
+
+### 📊 Schema-Aware & Structured (结构化感知)
+停止向 LLM 投喂原始文本。
+- **TextFSM 原生支持**: OLAV 自动通过 TextFSM 模板运行 CLI 输出，将非结构化文本流转换为 **结构化 JSON**。
+- **Token 高效**: 这种结构化感知方法减少了 50% 以上的上下文使用，并通过允许 AI 查询特定字段（如 `interface[0].status`）而不是解析文本，显着提高了分析准确性。
+
+### 🛡️ 企业级安全
+- **三层知识大脑**: 解耦 **技能 Skills** (How)、**知识 Knowledge** (What) 和 **能力 Capabilities** (Tools)。
+- **人机介入 (HITL)**: 敏感命令（如 `reload`, `config`）触发强制审批门控。
+- **多厂商支持**: 原生支持 Cisco, Huawei, Juniper, Arista 以及任何兼容 SSH 的设备。
+
+---
+
+## 🚀 快速开始
+
+### 1. 安装
+前置条件: Python 3.10+
 
 ```bash
-# 安装依赖（使用 uv - 快速包管理器）
-uv sync --dev
+# 使用 uv 安装 (推荐，速度更快)
+pip install uv
+uv sync
+```
 
-# 复制环境配置
+### 2. 配置 (环境)
+从模板创建配置文件：
+
+```bash
 cp .env.example .env
-# 编辑 .env 并添加设备信息和 API 密钥
+# 编辑 .env 添加你的 LLM API Key (OpenAI, DeepSeek 等)
 ```
 
-### 2️⃣ 启动交互式 CLI
+### 3. 网络清单设置 (关键步骤)
+OLAV 使用 Nornir 与网络交互。你必须在 `.olav/config/nornir/hosts.yaml` 中定义设备。
+*注意：这是 OLAV 知道设备存在的唯一途径。*
+
+1. 复制示例文件：
+   ```bash
+   cp .olav/config/nornir/hosts.yaml.example .olav/config/nornir/hosts.yaml
+   ```
+2. 编辑 `hosts.yaml` 填入你的实际设备信息。**此文件已被 git-ignored** 以保护凭据。
+
+```yaml
+# 示例 .olav/config/nornir/hosts.yaml
+R1:  # <-- 聊天中使用的别名 (例如 "检查 R1")
+  hostname: 192.168.10.1
+  platform: cisco_ios
+  username: admin
+  password: password123 
+  groups: ["core", "routers"]
+```
+
+### 4. 初始化 (一次性)
+你 **必须** 运行此脚本来索引设备、加载命令白名单并构建向量数据库。
 
 ```bash
-# 启动 DeepAgent CLI
-uv run python -m olav.main
-
-# 欢迎来到 OLAV 交互式 CLI
-# 输入 /help 查看可用命令
+uv run python scripts/init_capabilities.py
 ```
+*输出示例: "Successfully loaded X commands, Y devices..."*
 
-### 3️⃣ 使用斜杠命令
-
-```
-OLAV> /devices
-✅ R1, R2, R3, R4, SW1, SW2 (已连接)
-
-OLAV> 检查 R1 接口状态
-🔍 查询匹配到 'quick-query' 技能
-...
-
-OLAV> /inspect layer3
-📊 L3 检查报告
-...
-
-OLAV> /skills
-📚 可用技能: device-inspection, quick-query, deep-analysis, config-backup
-
-OLAV> /quit
-```
-
-### 4️⃣ 在 Claude Code 中使用
-
-```
-1. 打开项目目录
-2. 在 Claude Code 中打开
-3. OLAV CLI 自动与 Agent 集成
-4. 查看可用 Skill: `/skills`
-5. 发送命令: "备份所有 core 角色设备的运行配置"
-```
-
----
-
-## 功能特性
-
-### 🎯 四大核心能力
-
-#### 1. **设备检查** - 综合设备健康检查
-- **L1 物理层**: CPU/内存/温度/电源/风扇
-- **L2 数据链路**: VLAN/STP/LLDP/MAC 表
-- **L3 网络层**: 路由/OSPF/BGP/VPNv4
-- **L4 传输层**: TCP/进程/内存/错误计数
-
-#### 2. **快速查询** - 1-2 条命令快速响应
-- 简单查询的即时响应
-- 自动命令选择
-- 多厂商支持（Cisco/华为/Arista）
-
-示例：
-```
-"检查 R1 CPU 使用率"
-"显示 SW1 接口状态"
-"获取 R3 的 BGP 邻居"
-```
-
-#### 3. **深度分析** - 多步复杂诊断
-- 多步骤故障排除工作流
-- 自动问题定位
-- 补救建议
-
-示例：
-```
-"诊断为什么 R1 BGP 邻居断开"
-"分析核心交换机接口错误率"
-"检查网络安全基线合规性"
-```
-
-#### 4. **设备备份** - 智能配置备份
-- 支持按组/角色/站点灵活过滤
-- 单个或批量设备备份
-- 自动文件命名和时间戳
-- Git 版本控制集成
-
-示例：
-```
-"备份所有核心设备运行配置"
-"保存 test 组的启动配置"
-"备份 border 角色的运行配置"
-```
-
----
-
-### 🔧 Claude Code 与多平台支持
-
-OLAV 完全支持 **Claude Code**、**Cursor IDE** 等 Agent 平台，提供：
-
-- ✅ **自动化迁移工具** - 一键转换: `python scripts/migrate_olav_to_agent.py --platform claude`
-- ✅ **双格式支持** - 同时支持 `.olav/skills/*.md`（旧）和 `skills/*/SKILL.md`（新）
-- ✅ **知识库管理** - 搜索、重加载和同步，支持混合 FTS + 向量搜索
-- ✅ **兼容性验证** - 使用 `verify_claude_compatibility.py` 自动检查
-- ✅ **安全迁移** - 变更前自动备份，提供干运行模式
-- ✅ **80+ 个测试** - 全面的测试确保可靠性
-
-**快速迁移**:
-```bash
-# 先测试（不做任何更改）
-python scripts/migrate_olav_to_agent.py --platform claude --dry-run
-
-# 执行迁移（自动备份）
-python scripts/migrate_olav_to_agent.py --platform claude
-
-# 验证结果
-python scripts/verify_claude_compatibility.py .
-```
-
-**可用工具**:
-- `search-knowledge.py` - 混合知识库搜索
-- `reload-knowledge.py` - 更新知识库
-- `sync-knowledge.py` - 数据库同步
-- 详见 [AGENT_MIGRATION_GUIDE.md](AGENT_MIGRATION_GUIDE.md)
-
----
-
-## 安装
-
-### 前提条件
-
-- **Python 3.11+** (推荐 3.13)
-- **uv** 包管理器（快速安装: `pip install uv`）
-- **网络设备** (Cisco IOS/XE、华为、Arista 等)
-- **网络设备的 SSH 访问**
-
-### 完整安装步骤
+### 5. 启动
+启动交互式 Agent CLI：
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/your-org/OLAV.git
-cd OLAV
-
-# 2. 安装依赖
-uv sync --dev
-
-# 3. 配置环境
-cp .env.example .env
-# 编辑 .env:
-# - DEVICE_USERNAME=admin
-# - DEVICE_PASSWORD=password
-# - OPENAI_API_KEY=sk-...
-
-# 4. 配置 Nornir（网络设备清单）
-# 编辑 .olav/config/nornir/hosts.yaml
-# 编辑 .olav/config/nornir/groups.yaml
-
-# 5. 启动交互式 CLI 并测试
-uv run python -m olav.main
-
-# 在 CLI 中，测试基本命令:
-# OLAV> /devices
-# OLAV> 检查设备连通性
-# OLAV> /quit
+uv run olav.py
 ```
 
 ---
 
-## 使用示例
+## 💻 工作流与 CLI
 
-### 示例 1: 启动 CLI 并查询设备
+OLAV 在两种模式下运行：**自然语言** (Agentic) 和 **工作流** (确定性)。
 
+### Agentic Chat (自然语言对话)
+描述你想要做什么，Agent 会使用其技能规划执行步骤。
+> "检查核心路由器上 OSPF 翻滚的原因"
+> "审计 Access-01 和 Dist-01 之间的 VLAN 一致性"
+
+### Workflow Commands (`/`) (工作流命令)
+对于频繁的任务，使用 Slash 命令触发 **Schema-Aware 工作流**。这些比自由格式聊天更快、更便宜（Token 更少）且更可靠。
+
+**详细用法:**
+
+*   **`/analyze [query]`**: 启动 MicroAnalyzer 子 Agent。
+    *   *示例*: `/analyze "Why is BGP peering down on Core-01?"` (为什么Core-01的BGP对等体断开了？)
+*   **`/inspect [target]`**: 运行健康巡检 (L1-L4)。
+    *   *示例*: `/inspect group:core` 或 `/inspect R1`
+*   **`/backup`**: 备份所有或特定设备的 running-config。
+    *   *示例*: `/backup` (所有) 或 `/backup group:access`
+
+| 命令 | 描述 | Agentic 级别 |
+|---------|-------------|---------------|
+| `/analyze` | **深度诊断**: 启动 MicroAnalyzer 子代理进行根因分析。 | ⭐⭐⭐ |
+| `/inspect` | **健康巡检**: 基于已知 Schema 运行 L1-L4 检查。 | ⭐⭐ |
+| `/backup` | **配置备份**: 保存 running-config 的标准化工作流。 | ⭐ |
+| `/search` | **RAG 搜索**: 本地知识库 (.md) 和 Web 的混合搜索。 | ⭐ |
+| `/devices` | **清单**: 列出连接的设备及其连接状态。 | - |
+| `/skills` | **技能清单**: 列出已加载的 Markdown SOP。 | - |
+| `/stats` | **Token 统计**: 显示成本和 Token 消耗统计。 | - |
+| `/plan` | **调试**: 显示 Agent 当前的思维链和计划。 | - |
+| `/clear` | 清屏。 | - |
+| `/quit` | 退出。 | - |
+
+---
+
+## 🛠️ 高级特性
+
+### 1. Schema-Aware 解析 (TextFSM)
+教 OLAV 如何解析新命令：
+1.  将 NTC-template 文件放入 `.olav/config/textfsm/`。
+2.  在 `.olav/config/textfsm/index` 中更新索引文件。
+
+OLAV 将优先向 LLM 发送 `JSON` 对象而不是原始文本块，从而实现“结构化感知”推理。
+
+### 2. 添加技能 (Claude Code 兼容)
+在 `.olav/skills/` 中创建一个 Markdown 文件，以传授新的标准操作程序 (SOP)。OLAV 原生读取 **Claude Code** 技能格式。
+
+**迁移助手**:
+想转换现有的 Skills 到新格式？使用内置工具：
 ```bash
-# 启动交互式 CLI
-$ uv run python -m olav.main
-
-# OLAV> R1 接口状态
-# 🔍 查询匹配到 'quick-query' 技能
-# 执行: show ip interface brief on R1
-# ...
-# ✅ 任务完成
-#
-# OLAV>
+uv run python scripts/migrate_to_claude_code.py --path ./old_skills/
 ```
 
-### 示例 2: 查看可用设备
-
-```bash
-# OLAV> /devices
-# 📋 已连接的设备:
-#   R1 (Cisco IOS) - 组: test, 角色: border, 站点: lab
-#   R2 (Cisco IOS) - 组: test, 角色: border, 站点: lab
-#   R3 (Cisco IOS) - 组: test, 角色: core, 站点: lab
-#   R4 (Cisco IOS) - 组: test, 角色: core, 站点: lab
-#   SW1 (Cisco IOS) - 组: test, 角色: access, 站点: lab
-#   SW2 (Cisco IOS) - 组: test, 角色: access, 站点: lab
+**示例: `.olav/skills/daily-check.md`**
+```markdown
+---
+name: daily-check
+description: 对边缘路由器执行每日健康检查
+version: 1.0
+---
+# Procedure
+1. Execute `/inspect` workflow on group "edge".
+2. Check for "High CPU" log patterns.
+3. Report anomalies.
 ```
 
-### 示例 3: 备份设备配置
+### 3. 添加工作流 (Workflows)
+要将 Skill 暴露为 Slash 命令 (工作流):
+1. 如上所述创建 skill markdown 文件。
+2. 在 `.olav/config/commands.yaml` 中注册 (或者依赖自动加载器的搜索功能)。
+*注意: `/analyze` 等高优先级工作流是为了性能而硬编码的。*
 
-```bash
-# 单个设备备份
-OLAV> 备份 R1 运行配置
-🔍 查询匹配到 'config-backup' 技能
-📁 正在保存 R1 运行配置
-✅ 已保存到: .olav/data/configs/R1-running-config-20260109-120000.txt
+### 4. 知识库 (RAG) 与 标准路径
+OLAV 遵循 **"文档即真理" (Documents as Truth)** 哲学。
 
-# 按角色备份
-OLAV> 备份所有 core 角色设备运行配置
-🔍 查询匹配到 'config-backup' 技能
-📁 发现 2 个 core 设备: R3, R4
-✅ 已保存 R3 运行配置
-✅ 已保存 R4 运行配置
+**默认文件位置:**
+| 功能 | 输入/输出 | 路径 | 格式 |
+|---|---|---|---|
+| **知识库 (KB)** | 输入 | `.olav/knowledge/` | `.md`, `.txt`, `.pdf` |
+| **报告 (Reports)** | 输出 | `.olav/reports/` | `.html` (仪表板), `.json` |
+| **技能 (Skills)** | 输入 | `.olav/skills/` | `.md` (Claude Code 格式) |
+| **资产清单 (Inventory)** | 输入 | `.olav/config/nornir/hosts.yaml` | YAML |
 
-# 按组备份
-OLAV> 备份 test 组启动配置
-🔍 查询匹配到 'config-backup' 技能
-📁 发现 6 个 test 组设备
-✅ 已保存配置（6 个文件）
-```
+**使用方法:**
+- 将本地站点文档放入 `knowledge/` 并运行 `uv run python scripts/index_knowledge.py`。
+- 在 `reports/` 目录下查找生成的健康检查报告（来自 `/inspect` 或 `/analyze`）。
+OLAV 遵循 **"文档即真理" (Documents as Truth)** 哲学。
+- 将你的站点文档 (PDF/MD) 放入 `.olav/knowledge/`。
+- 运行 `uv run python scripts/index_knowledge.py` 进行向量化。
+- 使用 `/search` 在故障排查期间检索此特定上下文。
 
 ---
 
-## 备份指南
+## 🏗️ 架构
 
-### 设备过滤选项
+- **运行时**: Python 3.12 + `uv`
+- **Agent 框架**: DeepAgents
+- **数据库**: DuckDB (Vector + Relational)
+- **执行层**: Nornir (并发) + Netmiko (SSH)
+- **协议**: SSH, Telnet, NETCONF
 
-备份技能支持多种过滤方式：
+## 📄 许可证与支持
 
-| 过滤类型 | 语法 | 示例 |
-|---------|------|------|
-| **单个设备** | 设备名 | `备份 R1 运行配置` |
-| **多个设备** | 逗号分隔 | `备份 R1,R2,R3 运行配置` |
-| **按角色** | `role:` 前缀 | `备份 role:core 运行配置` |
-| **按组** | `group:` 前缀 | `备份 group:test 运行配置` |
-| **按站点** | `site:` 前缀 | `备份 site:lab 运行配置` |
-| **所有设备** | `all` 关键字 | `备份 all 运行配置` |
-
-### 备份文件位置
-
-所有备份自动保存到 `.olav/data/configs/`，文件名包含时间戳：
-
-```
-.olav/data/configs/
-├── R1-running-config-20260109-120000.txt
-├── R2-running-config-20260109-120000.txt
-├── R3-startup-config-20260109-120000.txt
-└── ...
-```
-
-### Git 版本控制
-
-使用 Git 跟踪配置变更：
-
-```bash
-# 初始化（一次性）
-cd .olav/data
-git init
-git config user.name "OLAV Backup"
-
-# 备份保存后
-git add configs/
-git commit -m "Backup $(date +%Y%m%d-%H%M%S)"
-
-# 查看备份历史
-git log --oneline | head -10
-```
-
----
-
-## 高级使用
-
-### 三层知识架构
-
-```
-┌────────────────────────────────────────────────────────┐
-│          OLAV 三层知识架构                              │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  第1层: SKILLS (.olav/skills/*.md or */SKILL.md)     │
-│  ├─ device-inspection    → 综合 L1-L4 检查           │
-│  ├─ quick-query          → 快速查询                   │
-│  ├─ deep-analysis        → 多步诊断                   │
-│  └─ config-backup        → 配置备份                   │
-│     [策略层 - HOW: 如何执行任务]                      │
-│                                                        │
-│  第2层: KNOWLEDGE (.olav/knowledge/*.md)             │
-│  ├─ aliases.md           → 设备别名映射               │
-│  ├─ topology.md          → 网络拓扑                   │
-│  └─ solutions/           → 解决方案和模式             │
-│     [知识层 - WHAT: 事实是什么]                       │
-│                                                        │
-│  第3层: TOOLS/CAPABILITIES                            │
-│  ├─ Nornir               → SSH 批量执行               │
-│  ├─ search-knowledge     → 统一搜索工具               │
-│  ├─ DuckDB              → CLI/API/NETCONF 库         │
-│  └─ LangChain           → LLM 集成                    │
-│     [能力层 - CAN: 我们能做什么]                      │
-│                                                        │
-└────────────────────────────────────────────────────────┘
-```
-
-### 执行流程
-
-```
-用户输入
-  ↓
-┌─────────────────────────┐
-│ LLM 技能路由器          │
-│ (意图识别 +             │
-│  路由)                 │
-└──────────┬──────────────┘
-           ↓
-      选择技能
-           ↓
-┌──────────────────────────┐
-│ 技能执行引擎             │
-│ (解析范围 +             │
-│  执行命令)              │
-└──────────┬───────────────┘
-           ↓
-    Nornir 批量执行
-           ↓
-┌──────────────────────────┐
-│ 报告生成                 │
-│ (Markdown 格式)         │
-└──────────┬───────────────┘
-```
-
----
-
-## 架构
-
-### 核心技术
-
-| 组件 | 技术 | 用途 |
-|-----|------|------|
-| **框架** | DeepAgents | Agent 编排和 HITL |
-| **LLM** | OpenAI/Claude | 意图识别和路由 |
-| **CLI** | prompt-toolkit 3.0+ | 交互式命令界面 |
-| **网络** | Nornir 3.3 | 多设备批量执行 |
-| **数据库** | DuckDB 0.8 | 轻量级能力库 |
-| **包管理器** | uv | 快速依赖管理 |
-
-### 关键特性
-
-✅ **小核心，大生态** - 通过 Markdown 扩展  
-✅ **Claude Code 兼容** - `.olav/` 结构与 `.claude/` 对齐  
-✅ **多厂商支持** - Cisco/华为/Arista/Juniper 等  
-✅ **智能路由** - LLM 自动选择合适的 Skill  
-✅ **生产就绪** - 完整的错误处理、类型提示、验证  
-✅ **易于扩展** - 通过添加 Markdown 文件增加新功能  
-
----
-
-## 文件结构
-
-```
-OLAV/
-├── .olav/                     # OLAV 配置和知识库
-│   ├── OLAV.md               # 核心系统提示词
-│   ├── skills/               # 核心 Skill（Markdown）
-│   │   ├── device-inspection.md      # L1-L4 检查
-│   │   ├── quick-query.md            # 快速查询
-│   │   ├── deep-analysis.md          # 复杂诊断
-│   │   └── config-backup.md          # 配置备份
-│   ├── knowledge/            # 知识库
-│   │   ├── aliases.md        # 设备别名映射
-│   │   └── topology.md       # 网络拓扑
-│   ├── config/nornir/        # Nornir 清单配置
-│   ├── data/
-│   │   └── configs/          # 备份存储目录
-│   ├── reports/              # 生成的报告
-│   └── capabilities.db       # DuckDB 命令库
-│
-├── src/olav/                 # 主源代码
-│   ├── agent.py             # DeepAgents agent 创建
-│   ├── main.py              # CLI 入口点
-│   ├── core/                # 核心模块
-│   └── tools/               # LangChain 工具
-│
-├── tests/                    # 测试套件
-├── pyproject.toml           # 项目配置（uv）
-└── README.md                # 英文说明文档
-```
-
----
-
-## 快速参考
-
-### 常用命令
-
-```bash
-# 🚀 启动交互式 CLI
-uv run python -m olav.main
-
-# 📋 在 CLI 中 - 查看可用设备
-/devices
-/devices [group]
-
-# 📚 在 CLI 中 - 显示可用 Skill
-/skills
-/skills [skill_name]
-
-# 🔍 在 CLI 中 - 快速检查
-/inspect [layer|scope]
-
-# 📁 在 CLI 中 - 列出备份
-/backups
-
-# 📜 在 CLI 中 - 显示命令历史
-/history
-
-# 🧹 在 CLI 中 - 清空内存
-/clear
-
-# ❓ 在 CLI 中 - 帮助
-/help
-
-# 🚪 在 CLI 中 - 退出
-/quit
-```
-
-### 迁移和设置
-
-```bash
-# 迁移到 Claude Code
-python scripts/migrate_olav_to_agent.py --platform claude
-
-# 先预览（推荐）
-python scripts/migrate_olav_to_agent.py --platform claude --dry-run
-
-# 迁移到所有平台
-python scripts/migrate_olav_to_agent.py --platform all
-
-# 验证迁移结果
-python scripts/verify_claude_compatibility.py .
-pytest tests/ -v
-```
-
-### 知识库管理
-
-```bash
-# 搜索知识库（混合：全文 + 语义）
-python .olav/commands/search-knowledge.py "BGP 配置" --type hybrid
-
-# 重新加载/更新知识库
-python .olav/commands/reload-knowledge.py --incremental
-
-# 同步知识库数据库
-python .olav/commands/sync-knowledge.py --cleanup
-
-# 获取详细报告
-python .olav/commands/reload-knowledge.py --incremental --report
-```
-
-### 测试
-
-```bash
-# 运行所有测试
-pytest tests/ -v
-
-# 运行特定测试文件
-pytest tests/unit/test_skill_loader.py -v
-
-# 运行带覆盖率报告
-pytest tests/ --cov=src/olav --cov-report=html
-
-# 仅运行单元测试（快速）
-pytest tests/unit/ -v
-```
-
-### 开发工具
-
-```bash
-# 代码格式化（Ruff）
-uv run ruff format .
-
-# 代码检查和修复
-uv run ruff check . --fix
-
-# 类型检查（Pyright）
-uv run pyright
-
-# 前置提交检查
-uv run pre-commit run --all-files
-
-# 验证整个项目
-python scripts/verify_migration_complete.py .
-```
-
----
-
-## 常见问题
-
-### Q: 如何添加新设备？
-A: 编辑 `.olav/config/nornir/hosts.yaml` 并添加设备条目，包含组和角色信息。
-
-### Q: 能否备份特定配置部分？
-A: 在 Skill 中使用自然语言："从核心设备备份接口配置" - Skill 会确定最佳方法。
-
-### Q: 备份如何组织的？
-A: 所有备份保存到 `.olav/data/configs/`，格式为 `[device]-[config-type]-[timestamp].txt`
-
-### Q: 如何迁移到 Claude Code？
-A: 运行 `python scripts/migrate_olav_to_agent.py --platform claude` - 自动化迁移！
-
-### Q: 迁移失败怎么办？
-A: 先用 `--dry-run` 预览，或从 `.backup_*` 目录恢复。详见 [AGENT_MIGRATION_GUIDE.md](AGENT_MIGRATION_GUIDE.md)。
-
----
-
-## 支持
-
-### 故障排除
-
-1. **找不到设备**: 检查 `.olav/config/nornir/hosts.yaml` 并验证 `.env` 中的凭证
-2. **命令超时**: 在 Nornir 配置中增加 SSH 超时
-3. **备份文件未保存**: 验证 `.olav/data/configs/` 目录存在且可写
-
----
-
-## 许可证
-
-MIT License - 详见 LICENSE 文件
-
----
-
-**OLAV v0.8** - *用 AI 构建网络智能*  
-**最后更新**: 2026-01-09 | **维护者**: GitHub Copilot + Claude Haiku 4.5
-
----
+**MIT License** - Open Source & Enterprise Ready.
+详细架构文档见 `docs/` 文件夹。

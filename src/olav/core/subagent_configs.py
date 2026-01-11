@@ -119,10 +119,7 @@ def get_inspector_agent(tools: list[Any] | None = None) -> dict[str, Any]:
     """
     return create_subagent(
         name="inspector-agent",
-        description=(
-            "Device inspection specialist: "
-            "health checks, audits, security analysis"
-        ),
+        description=("Device inspection specialist: health checks, audits, security analysis"),
         system_prompt="""You are the Network Inspector Agent, specialized in device inspection workflows.
 
 Your expertise includes:

@@ -5,7 +5,6 @@ Provides:
 - Rich-based UI rendering
 """
 
-
 try:
     from rich.console import Console
     from rich.text import Text
@@ -71,9 +70,7 @@ def load_banner_from_config(settings_path: str | None = None) -> str:
         return get_banner("default")
 
 
-def display_banner(
-    banner_text: str, console: Console | None = None
-) -> None:
+def display_banner(banner_text: str, console: Console | None = None) -> None:
     """Display a banner to the console.
 
     Args:
@@ -113,8 +110,7 @@ def print_welcome(console: Console | None = None) -> None:
     # Print welcome message
     if console:
         console.print(
-            "\n[bold green]Welcome to OLAV v0.8[/] - "
-            "[dim]Network Operations AI Assistant[/]"
+            "\n[bold green]Welcome to OLAV v0.8[/] - [dim]Network Operations AI Assistant[/]"
         )
         console.print("[dim]Type /help for available commands[/]\n")
     else:
@@ -146,6 +142,7 @@ def print_success(message: str, console: Console | None = None) -> None:
         console.print(f"[bold green]✓[/] {message}")
     else:
         print(f"✓ {message}")
+
 
 class StreamingDisplay:
     """Hierarchical streaming output handler for agent execution.
@@ -269,6 +266,7 @@ class StreamingDisplay:
         """
         if markdown and text.strip():
             from rich.markdown import Markdown
+
             md = Markdown(text)
             self.console.print(md)
         else:

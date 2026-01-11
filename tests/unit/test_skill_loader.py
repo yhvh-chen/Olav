@@ -315,3 +315,268 @@ No description.
         skills = loader.load_all()
 
         assert "no-desc" not in skills
+
+    def test_skip_skill_md_file_in_legacy(self, tmp_path) -> None:
+        """Test that SKILL.md in legacy format is skipped (line 60)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create a SKILL.md file in legacy format (should be skipped)
+        (skills_dir / "SKILL.md").write_text(
+            """---
+id: should-be-skipped
+description: This should not be loaded
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # SKILL.md should be skipped in legacy format
+        assert "should-be-skipped" not in skills
+
+    def test_skip_draft_files(self, tmp_path) -> None:
+        """Test that draft files are skipped (line 62)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create files with .draft prefix or starting with _
+        (skills_dir / "draft-test.draft.md").write_text(
+            """---
+id: draft-test
+description: Draft skill
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        (skills_dir / "_private.md").write_text(
+            """---
+id: private
+description: Private skill
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # Both files should be skipped
+        assert "draft-test" not in skills
+        assert "private" not in skills
+
+    def test_no_frontmatter_returns_none(self, tmp_path) -> None:
+        """Test that files without frontmatter return None (line 85)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create file without frontmatter delimiters
+        (skills_dir / "no-fm.md").write_text(
+            """# Just a markdown file
+
+No frontmatter here.
+""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # Should be skipped
+        assert "no-fm" not in skills or "just" not in skills
+
+    def test_skill_id_from_filename(self, tmp_path) -> None:
+        """Test generating skill_id from filename when no id/name (line 91)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create file without id or name field
+        (skills_dir / "my_test_skill.md").write_text(
+            """---
+description: Test skill
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # Should generate id from filename: my_test_skill -> my-test-skill
+        assert "my-test-skill" in skills
+
+    def test_parse_skill_exception_handling(self, tmp_path) -> None:
+        """Test exception handling in _parse_skill_header (lines 113-115)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create a file that will cause read errors
+        test_file = skills_dir / "test-error.md"
+        test_file.write_text("---\nid: test\ndescription: test\n---", encoding="utf-8")
+
+        # Mock read_text to raise exception
+        with patch("pathlib.Path.read_text", side_effect=PermissionError("Access denied")):
+            loader = SkillLoader(skills_dir)
+            skills = loader.load_all()
+
+            # Should handle gracefully and skip the file
+            assert "test" not in skills or "test-error" not in skills
+
+    def test_frontmatter_no_end_delimiter(self, tmp_path) -> None:
+        """Test frontmatter without end delimiter returns None (line 125)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create file with opening --- but no closing ---
+        (skills_dir / "no-end.md").write_text(
+            """---
+id: no-end
+description: No end delimiter
+Still frontmatter...
+""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # Should be skipped
+        assert "no-end" not in skills
+
+    def test_yaml_parse_error_handling(self, tmp_path) -> None:
+        """Test YAML parse error handling (lines 130-131)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create file with invalid YAML
+        (skills_dir / "bad-yaml.md").write_text(
+            """---
+id: test
+description: [invalid {yaml}
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.load_all()
+
+        # Should handle YAML error gracefully
+        assert "bad-yaml" not in skills
+
+    def test_get_skill_auto_loads(self, tmp_path) -> None:
+        """Test that get_skill auto-loads if index is empty (line 136)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        (skills_dir / "auto-load.md").write_text(
+            """---
+id: auto-load
+description: Test auto-load
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        # Don't call load_all() first
+        skill = loader.get_skill("auto-load")
+
+        # Should auto-load and find the skill
+        assert skill is not None
+        assert skill.id == "auto-load"
+
+    def test_get_skill_content_load_error(self, tmp_path) -> None:
+        """Test error handling when loading skill content (lines 147-148)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Create a valid skill file
+        (skills_dir / "lazy-load.md").write_text(
+            """---
+id: lazy-load
+description: Test lazy loading
+---
+Content here""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+
+        # Manually create a skill with content=None to simulate lazy loading
+        from olav.core.skill_loader import Skill
+        skill = Skill(
+            id="lazy-load",
+            intent="unknown",
+            complexity="medium",
+            description="Test lazy loading",
+            examples=[],
+            file_path=str(skills_dir / "lazy-load.md"),
+            content=None,  # Content not loaded yet
+        )
+
+        # Add to index directly (bypassing load_all)
+        loader._index["lazy-load"] = skill
+
+        # Mock Path.read_text to raise exception
+        with patch("pathlib.Path.read_text", side_effect=PermissionError("Access denied")):
+            # Call get_skill which should trigger lazy load and fail
+            result = loader.get_skill("lazy-load")
+            # Content should remain None due to error
+            assert result.content is None
+
+    def test_get_skills_by_intent_auto_loads(self, tmp_path) -> None:
+        """Test that get_skills_by_intent auto-loads if index is empty (lines 154-157)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        (skills_dir / "intent-test.md").write_text(
+            """---
+id: intent-test
+intent: diagnose
+description: Test intent filtering
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        # Don't call load_all() first
+        skills = loader.get_skills_by_intent("diagnose")
+
+        # Should auto-load and filter
+        assert len(skills) >= 1
+        assert any(s.id == "intent-test" for s in skills)
+
+    def test_get_index_summary_auto_loads(self, tmp_path) -> None:
+        """Test that get_index_summary auto-loads if index is empty (lines 161-164)."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        (skills_dir / "summary-test.md").write_text(
+            """---
+id: summary-test
+description: Test index summary
+examples:
+  - example1
+  - example2
+  - example3
+  - example4
+---
+Content""",
+            encoding="utf-8",
+        )
+
+        loader = SkillLoader(skills_dir)
+        # Don't call load_all() first
+        summary = loader.get_index_summary()
+
+        # Should auto-load and create summary
+        assert summary["total"] >= 1
+        assert "summary-test" in summary["skills"]
+        # Should only keep first 3 examples
+        assert len(summary["skills"]["summary-test"]["examples"]) <= 3
+

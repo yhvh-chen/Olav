@@ -24,6 +24,7 @@ def register_command(name: str) -> Callable:
         def cmd_devices(args: str) -> str:
             return "Device list..."
     """
+
     def decorator(func: Callable) -> Callable:
         SLASH_COMMANDS[name] = func
         return func
@@ -70,6 +71,7 @@ async def execute_command(
 
         # Check if function is async
         import inspect
+
         if inspect.iscoroutinefunction(func):
             # Call async function directly (we're already in async context)
             result = await func(args)
@@ -178,6 +180,7 @@ async def cmd_inspect(args: str) -> str:
 
     try:
         from config.settings import settings
+
         # Use network_inspect.py to avoid shadowing Python's built-in inspect module
         inspect_script = Path(settings.agent_dir) / "commands" / "network_inspect.py"
 
@@ -186,7 +189,7 @@ async def cmd_inspect(args: str) -> str:
             [sys.executable, str(inspect_script)] + cmd_args,
             capture_output=True,
             text=True,
-            cwd=str(Path.cwd())
+            cwd=str(Path.cwd()),
         )
 
         output = result.stdout
@@ -231,13 +234,14 @@ async def cmd_query(args: str) -> str:
 
     try:
         from config.settings import settings
+
         query_script = Path(settings.agent_dir) / "commands" / "query.py"
 
         result = subprocess.run(
             [sys.executable, str(query_script)] + args.split(),
             capture_output=True,
             text=True,
-            cwd=str(Path.cwd())
+            cwd=str(Path.cwd()),
         )
 
         output = result.stdout
@@ -297,11 +301,11 @@ async def cmd_history(args: str) -> str:
         memory = AgentMemory()
         stats = memory.get_stats()
         return f"""Session History Stats:
-  Total Messages: {stats['total_messages']}
-  User Messages: {stats['user_messages']}
-  Assistant Messages: {stats['assistant_messages']}
-  Tool Messages: {stats['tool_messages']}
-  Memory File: {stats['memory_file']}"""
+  Total Messages: {stats["total_messages"]}
+  User Messages: {stats["user_messages"]}
+  Assistant Messages: {stats["assistant_messages"]}
+  Tool Messages: {stats["tool_messages"]}
+  Memory File: {stats["memory_file"]}"""
     except Exception as e:
         return f"Error showing history: {str(e)}"
 
@@ -392,12 +396,13 @@ async def cmd_backup(args: str) -> str:
 
     try:
         from config.settings import settings
+
         backup_script = Path(settings.agent_dir) / "commands" / "backup.py"
         result = subprocess.run(
             [sys.executable, str(backup_script)] + args.split(),
             capture_output=True,
             text=True,
-            cwd=str(Path.cwd())
+            cwd=str(Path.cwd()),
         )
 
         output = result.stdout
@@ -434,12 +439,13 @@ async def cmd_analyze(args: str) -> str:
 
     try:
         from config.settings import settings
+
         analyze_script = Path(settings.agent_dir) / "commands" / "analyze.py"
         result = subprocess.run(
             [sys.executable, str(analyze_script)] + args.split(),
             capture_output=True,
             text=True,
-            cwd=str(Path.cwd())
+            cwd=str(Path.cwd()),
         )
 
         output = result.stdout
@@ -483,10 +489,7 @@ async def cmd_search(args: str) -> str:
         return f"🔍 Search results for: {query}\n\n{results}"
 
     except ImportError:
-        return (
-            "Error: DuckDuckGo search not available.\n"
-            "Install with: uv add duckduckgo-search"
-        )
+        return "Error: DuckDuckGo search not available.\nInstall with: uv add duckduckgo-search"
     except Exception as e:
         return f"Search error: {str(e)}"
 

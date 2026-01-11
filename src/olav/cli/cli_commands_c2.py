@@ -19,6 +19,7 @@ from config.settings import Settings
 # Configuration Commands
 # =============================================================================
 
+
 class ConfigCommand:
     """Handle 'olav config' commands for configuration management."""
 
@@ -64,15 +65,25 @@ class ConfigCommand:
 
         if not key or key == "hitl":
             lines.append("\n[Human-in-the-Loop (HITL)]")
-            lines.append(f"  Approve Write Ops:     {self.settings.hitl.require_approval_for_write}")
-            lines.append(f"  Approve Skill Updates: {self.settings.hitl.require_approval_for_skill_update}")
+            lines.append(
+                f"  Approve Write Ops:     {self.settings.hitl.require_approval_for_write}"
+            )
+            lines.append(
+                f"  Approve Skill Updates: {self.settings.hitl.require_approval_for_skill_update}"
+            )
             lines.append(f"  Approval Timeout:      {self.settings.hitl.approval_timeout_seconds}s")
 
         if not key or key == "diagnosis":
             lines.append("\n[Diagnosis Parameters]")
-            lines.append(f"  Macro Max Confidence:   {self.settings.diagnosis.macro_max_confidence}")
-            lines.append(f"  Micro Target Confidence: {self.settings.diagnosis.micro_target_confidence}")
-            lines.append(f"  Max Iterations:          {self.settings.diagnosis.max_diagnosis_iterations}")
+            lines.append(
+                f"  Macro Max Confidence:   {self.settings.diagnosis.macro_max_confidence}"
+            )
+            lines.append(
+                f"  Micro Target Confidence: {self.settings.diagnosis.micro_target_confidence}"
+            )
+            lines.append(
+                f"  Max Iterations:          {self.settings.diagnosis.max_diagnosis_iterations}"
+            )
 
         if not key or key == "logging":
             lines.append("\n[Logging]")
@@ -141,6 +152,7 @@ class ConfigCommand:
 
             # Save to settings.json
             from config.settings import OLAV_DIR
+
             self.settings.save_to_json(OLAV_DIR / "settings.json")
             return f"✓ Configuration updated: {key} = {value}"
 
@@ -188,6 +200,7 @@ class ConfigCommand:
 
         # Check settings.json exists
         from config.settings import OLAV_DIR
+
         settings_file = OLAV_DIR / "settings.json"
         if settings_file.exists():
             lines.append(f"✓ Settings file exists: {settings_file}")
@@ -208,6 +221,7 @@ class ConfigCommand:
 # Skill Commands
 # =============================================================================
 
+
 class SkillCommand:
     """Handle 'olav skill' commands for skill management."""
 
@@ -218,6 +232,7 @@ class SkillCommand:
             olav_dir: Path to .olav directory
         """
         from config.settings import OLAV_DIR
+
         self.olav_dir = olav_dir or OLAV_DIR
         self.skills_dir = self.olav_dir / "skills"
 
@@ -238,7 +253,9 @@ class SkillCommand:
         lines.append("Available Skills")
         lines.append("=" * 70)
 
-        skills = sorted([f.stem for f in self.skills_dir.glob("*.md") if not f.stem.startswith("_")])
+        skills = sorted(
+            [f.stem for f in self.skills_dir.glob("*.md") if not f.stem.startswith("_")]
+        )
 
         if not skills:
             return "No skills found"
@@ -270,7 +287,10 @@ class SkillCommand:
             content = skill_file.read_text(encoding="utf-8")
             # Show first 50 lines
             lines = content.split("\n")[:50]
-            return "\n".join(lines) + f"\n\n... (use 'cat .olav/skills/{skill_name}.md' for full content)"
+            return (
+                "\n".join(lines)
+                + f"\n\n... (use 'cat .olav/skills/{skill_name}.md' for full content)"
+            )
         except Exception as e:
             return f"Error reading skill: {e}"
 
@@ -313,6 +333,7 @@ class SkillCommand:
 # Knowledge Commands
 # =============================================================================
 
+
 class KnowledgeCommand:
     """Handle 'olav knowledge' commands for knowledge base operations."""
 
@@ -323,6 +344,7 @@ class KnowledgeCommand:
             olav_dir: Path to .olav directory
         """
         from config.settings import OLAV_DIR
+
         self.olav_dir = olav_dir or OLAV_DIR
         self.knowledge_dir = self.olav_dir / "knowledge"
 
@@ -456,6 +478,7 @@ How to prevent this issue in the future.
 # Validate Commands
 # =============================================================================
 
+
 class ValidateCommand:
     """Handle 'olav validate' commands for file integrity checks."""
 
@@ -466,6 +489,7 @@ class ValidateCommand:
             olav_dir: Path to .olav directory
         """
         from config.settings import OLAV_DIR
+
         self.olav_dir = olav_dir or OLAV_DIR
 
     def validate_all(self) -> str:
@@ -535,6 +559,7 @@ class ValidateCommand:
 # Command Factory
 # =============================================================================
 
+
 class CLICommandFactory:
     """Factory for creating CLI command handlers."""
 
@@ -547,6 +572,7 @@ class CLICommandFactory:
         """
         self.settings = settings
         from config.settings import OLAV_DIR
+
         self.olav_dir = olav_dir or OLAV_DIR
 
     def create_config_command(self) -> ConfigCommand:
