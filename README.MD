@@ -1,4 +1,4 @@
-# 🤖 OLAV - Enterprise Network Operations AI Assistant
+# ☃️ OLAV - Enterprise Network Operations AI Assistant
 
 ```
  ▄████▄   ██        ▄████▄    ██    ██
@@ -407,4 +407,3 @@ Adjusted MTU to 1500...
 ## 📄 License & Support
 
 **MIT License** - Open Source & Enterprise Ready.
-See `docs/` folder for detailed architectural documentation.
