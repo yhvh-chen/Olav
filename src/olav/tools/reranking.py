@@ -5,6 +5,8 @@ Uses cross-encoder models (e.g., jina-reranker or mxbai-rerank) to score
 relevance of search results more accurately than naive ranking.
 """
 
+from typing import Literal
+
 from langchain_core.tools import tool
 
 
@@ -100,7 +102,7 @@ def rerank_search_results(
         ]
 
         # Rerank using cross-encoder
-        reranked = reranker.compress_documents(
+        reranked = reranker.compress_documents(  # type: ignore[attr-defined]
             documents=documents,
             query=query,
         )
@@ -134,7 +136,7 @@ def rerank_search_results(
 @tool
 def search_with_reranking(
     query: str,
-    scope: str = "all",
+    scope: Literal["capabilities", "knowledge", "all"] = "all",
     platform: str | None = None,
     limit: int = 10,
     rerank: bool = True,
@@ -162,7 +164,7 @@ def search_with_reranking(
     from olav.tools.capabilities import search as base_search
 
     # Get base search results (hybrid search)
-    raw_results = base_search(
+    raw_results = base_search(  # type: ignore[misc]
         query=query,
         scope=scope,
         platform=platform,
@@ -179,7 +181,7 @@ def search_with_reranking(
 
 if __name__ == "__main__":
     # Test example
-    results = [
+    results: list[tuple[str, str, str | None]] = [
         ("BGP Configuration", "Step-by-step guide to configure BGP routing", "cisco_ios"),
         ("BGP Protocol Theory", "Understanding BGP protocol design", "general"),
         ("BGP Troubleshooting", "Common BGP issues and solutions", "cisco_ios"),

@@ -44,7 +44,7 @@ class ResearchProblemTool(BaseTool):
         "Perfect for troubleshooting unfamiliar issues, finding vendor documentation, "
         "or discovering new solutions. E.g., research_problem('BGP flapping on Cisco IOS-XR')"
     )
-    args_schema: type[BaseModel] = ResearchProblemInput
+    args_schema: type[BaseModel] = ResearchProblemInput  # type: ignore[assignment]
 
     def _run(
         self,
@@ -136,7 +136,7 @@ class ResearchProblemTool(BaseTool):
             # Use configured max results
             max_results = getattr(settings.diagnosis, "web_search_max_results", 3)
 
-            search = DuckDuckGoSearchResults(max_results=max_results)
+            search = DuckDuckGoSearchResults(num_results=max_results)  # type: ignore[call-arg]
             results = search.invoke(search_query)
 
             if results and "No good" not in results:
@@ -175,7 +175,23 @@ network environment. Web results provide vendor documentation and broader experi
 
     async def _arun(self, *args: tuple, **kwargs: dict) -> str:
         """Async version (falls back to sync)."""
-        return self._run(*args, **kwargs)
+        # Unpack args for _run
+        if len(args) >= 1:
+            query_arg = args[0]
+            platform_arg = args[1] if len(args) > 1 else kwargs.get("platform", "all")
+            include_web_search_arg = (
+                args[2] if len(args) > 2 else kwargs.get("include_web_search", True)
+            )
+            # Ensure types are correct
+            query = str(query_arg) if not isinstance(query_arg, str) else query_arg
+            platform = str(platform_arg) if not isinstance(platform_arg, str) else platform_arg
+            include_web_search = (
+                bool(include_web_search_arg)
+                if not isinstance(include_web_search_arg, bool)
+                else include_web_search_arg
+            )
+            return self._run(query, platform, include_web_search)
+        return self._run(*args, **kwargs)  # type: ignore[arg-type]
 
 
 # Create singleton instance

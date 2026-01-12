@@ -21,7 +21,7 @@ def save_solution(
     solution: str,
     commands: list[str],
     tags: list[str],
-    knowledge_dir: Path = None,
+    knowledge_dir: Path | None = None,
 ) -> str:
     """Save a successful troubleshooting case to the knowledge base.
 
@@ -121,7 +121,7 @@ def update_aliases(
     alias_type: str,
     platform: str = "unknown",
     notes: str = "",
-    aliases_file: Path = None,
+    aliases_file: Path | None = None,
 ) -> bool:
     """Update the aliases knowledge base with a new alias.
 
@@ -196,7 +196,7 @@ def learn_from_interaction(
     query: str,
     response: str,
     success: bool,
-    knowledge_dir: Path = None,
+    knowledge_dir: Path | None = None,
 ) -> dict[str, str]:
     """Analyze an interaction and extract learnings.
 

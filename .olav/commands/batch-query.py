@@ -16,6 +16,7 @@ Arguments:
     devices    Comma-separated device names, or "all" for all devices
     intent     Query intent (interface, bgp, ospf, route, vlan, mac, version)
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -33,8 +34,7 @@ load_dotenv()
 def main():
     """Execute a batch query across multiple devices."""
     parser = argparse.ArgumentParser(
-        description="Query multiple devices with the same intent",
-        prog="/batch-query"
+        description="Query multiple devices with the same intent", prog="/batch-query"
     )
     parser.add_argument("devices", help="Comma-separated device names or 'all'")
     parser.add_argument("intent", help="Query intent (e.g., 'interface', 'bgp')")
@@ -43,10 +43,13 @@ def main():
 
     try:
         from olav.tools.smart_query import batch_query
-        result = batch_query.invoke({
-            "devices": args.devices,
-            "intent": args.intent,
-        })
+
+        result = batch_query.invoke(
+            {
+                "devices": args.devices,
+                "intent": args.intent,
+            }
+        )
         print(result)
         return 0
     except Exception as e:

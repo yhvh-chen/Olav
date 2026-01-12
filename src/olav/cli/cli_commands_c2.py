@@ -138,7 +138,7 @@ class ConfigCommand:
         # Apply setting changes
         try:
             if key == "llm.model":
-                self.settings.llm_model_name = value
+                self.settings.llm_model_name = str(value)  # type: ignore[assignment]
             elif key == "llm.temperature":
                 self.settings.llm_temperature = float(value)
             elif key == "routing.confidence_threshold":
@@ -374,6 +374,7 @@ class KnowledgeCommand:
 
         # List solutions
         solutions_dir = self.knowledge_dir / "solutions"
+        solutions: list[str] = []
         if solutions_dir.exists():
             solutions = sorted([f.stem for f in solutions_dir.glob("*.md")])
             if solutions:
@@ -382,7 +383,7 @@ class KnowledgeCommand:
                     lines.append(f"  • {file}")
 
         lines.append("\n" + "=" * 70)
-        total = len(root_files) + len(solutions) if solutions_dir.exists() else len(root_files)
+        total = len(root_files) + len(solutions)
         lines.append(f"Total: {total} item(s)")
         return "\n".join(lines)
 
@@ -507,7 +508,7 @@ class ValidateCommand:
 
         # Check core files
         core_files = {
-            "OLAV.md": self.olav_dir / "OLAV.md",
+            "OLAV.md": self.olav_dir.parent / "OLAV.md",
         }
 
         lines.append("\n[Core Files]")

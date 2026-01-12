@@ -1,24 +1,33 @@
 """OLAV Prompt Session - Enhanced CLI session using prompt-toolkit."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from olav.cli.commands import SLASH_COMMANDS
 
-try:
+if TYPE_CHECKING:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.completion import WordCompleter
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
-except ImportError:
-    # Fallback if prompt-toolkit not installed
-    PromptSession = None
-    FileHistory = None
-    AutoSuggestFromHistory = None
-    WordCompleter = None
-    KeyBindings = None
-    HTML = None
+else:
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.formatted_text import HTML
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+    except ImportError:
+        # Fallback if prompt-toolkit not installed
+        PromptSession = None  # type: ignore[misc,assignment]
+        FileHistory = None  # type: ignore[misc,assignment]
+        AutoSuggestFromHistory = None  # type: ignore[misc,assignment]
+        WordCompleter = None  # type: ignore[misc,assignment]
+        KeyBindings = None  # type: ignore[misc,assignment]
+        HTML = None  # type: ignore[misc,assignment]
 
 
 class OlavPromptSession:
@@ -34,7 +43,7 @@ class OlavPromptSession:
 
     def __init__(
         self,
-        history_file: str | Path = None,
+        history_file: str | Path | None = None,
         enable_completion: bool = True,
         enable_history: bool = True,
         multiline: bool = True,
@@ -124,14 +133,14 @@ class OlavPromptSession:
             kb = KeyBindings()
 
             @kb.add("c-c")
-            def _(event) -> None:
+            def _(event: object) -> None:  # noqa: ANN001
                 """Ctrl+C exits."""
-                event.app.exit(exception=EOFError, style="class:abort")
+                event.app.exit(exception=EOFError, style="class:abort")  # type: ignore[attr-defined]
 
             @kb.add("c-d")
-            def _(event) -> None:
+            def _(event: object) -> None:  # noqa: ANN001
                 """Ctrl+D exits."""
-                event.app.exit(exception=EOFError)
+                event.app.exit(exception=EOFError)  # type: ignore[attr-defined]
 
             session_kwargs["key_bindings"] = kb
 
@@ -162,7 +171,7 @@ class OlavPromptSession:
             result = await self._session.prompt_async(message)
             return result
         except (EOFError, KeyboardInterrupt):
-            raise EOFError
+            raise EOFError from None
 
     def prompt_sync(self, message: str = "olav> ") -> str:
         """Get user input synchronously.
@@ -182,7 +191,7 @@ class OlavPromptSession:
             result = self._session.prompt(message)
             return result
         except (EOFError, KeyboardInterrupt):
-            raise EOFError
+            raise EOFError from None
 
     def clear_history(self) -> None:
         """Clear command history."""

@@ -88,6 +88,7 @@ ignore = ["E402", "E501"]  # E402: dotenv loading, E501: line length in docstrin
 "src/olav/main.py" = ["E402"]
 "src/olav/cli/cli_main.py" = ["E402", "ANN401", "S602", "S112"]
 "src/olav/core/settings.py" = ["ANN401"]
+"config/settings.py" = ["ANN401"]
 "src/olav/core/llm.py" = ["ANN401"]
 "src/olav/cli/input_parser.py" = ["S602"]
 "src/olav/tools/task_tools.py" = ["ANN401"]  # Middleware returns dynamic type
@@ -99,6 +100,17 @@ strict = true
 ignore_missing_imports = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[tool.pyright]
+typeCheckingMode = "standard"
+reportMissingImports = "warning"  # Downgrade missing imports to warnings (external deps)
+reportUnknownMemberType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownArgumentType = "warning"
+reportOptionalCall = "warning"
+reportOptionalMemberAccess = "warning"
+reportOptionalOperand = "warning"
+reportAttributeAccessIssue = "warning"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

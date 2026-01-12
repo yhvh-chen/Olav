@@ -11,6 +11,7 @@ Examples:
 
 Note: Commands must be in the whitelist. Dangerous commands are blocked.
 """
+
 import sys
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def main():
 
     try:
         from olav.tools.network import nornir_execute
+
         result = nornir_execute.invoke({"device": device, "command": command})
         print(result)
         return 0

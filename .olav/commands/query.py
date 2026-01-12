@@ -3,6 +3,7 @@
 
 Usage: /query [device] [query]
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -24,7 +25,6 @@ QUERY_PATTERNS = {
     "interface brief": "show ip interface brief",
     "interface errors": "show interfaces counters errors",
     "interface": "show interfaces {arg}",
-
     # Routing queries
     "route": "show ip route",
     "route summary": "show ip route summary",
@@ -33,14 +33,12 @@ QUERY_PATTERNS = {
     "bgp neighbor": "show ip bgp neighbors",
     "ospf": "show ip ospf neighbor",
     "ospf neighbor": "show ip ospf neighbor",
-
     # System queries
     "version": "show version",
     "uptime": "show version | include uptime",
     "cpu": "show processes cpu sorted | head 10",
     "memory": "show memory statistics",
     "inventory": "show inventory",
-
     # Layer 2 queries
     "vlan": "show vlan brief",
     "mac": "show mac address-table",
@@ -50,13 +48,11 @@ QUERY_PATTERNS = {
     "lldp": "show lldp neighbors",
     "spanning": "show spanning-tree summary",
     "stp": "show spanning-tree summary",
-
     # Config queries
     "config": "show running-config",
     "running": "show running-config",
     "startup": "show startup-config",
     "acl": "show access-lists",
-
     # Status queries
     "status": "show interfaces status",
     "neighbors": "show cdp neighbors",
@@ -104,6 +100,7 @@ def resolve_device_alias(alias: str) -> str:
     """
     try:
         from config.settings import settings
+
         alias_file = Path(settings.agent_dir) / "knowledge" / "aliases.md"
 
         if alias_file.exists():
@@ -147,6 +144,7 @@ def execute_query(device: str, query: str) -> str:
 
     try:
         from olav.tools.network import nornir_execute
+
         result = nornir_execute.invoke({"device": actual_device, "command": command})
 
         if "Error:" in result:
@@ -160,10 +158,7 @@ def execute_query(device: str, query: str) -> str:
 
 def main():
     """Execute query workflow."""
-    parser = argparse.ArgumentParser(
-        description="Execute quick network query",
-        prog="/query"
-    )
+    parser = argparse.ArgumentParser(description="Execute quick network query", prog="/query")
     parser.add_argument("device", help="Device name or alias")
     parser.add_argument("query", nargs="*", help="Query (e.g., 'interface status', 'bgp')")
 
@@ -185,15 +180,16 @@ def main():
     if args.device.lower() == "all":
         try:
             from olav.tools.network import list_devices
+
             result = list_devices.invoke({})
             devices = _extract_device_names(result)
 
             print(f"🔍 Querying {len(devices)} devices: {query_str}\n")
 
             for device in devices:
-                print(f"\n{'='*40}")
+                print(f"\n{'=' * 40}")
                 print(f"Device: {device}")
-                print("="*40)
+                print("=" * 40)
                 output = execute_query(device, query_str)
                 print(output)
 

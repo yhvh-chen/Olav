@@ -3,6 +3,7 @@
 
 Usage: /backup [filter] [type] [--commands "cmd1,cmd2"]
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -40,12 +41,10 @@ def parse_filter(filter_expr: str) -> dict:
 def main():
     """Execute backup workflow."""
     parser = argparse.ArgumentParser(
-        description="Backup network device configurations",
-        prog="/backup"
+        description="Backup network device configurations", prog="/backup"
     )
     parser.add_argument("filter", help="Device filter (role:core, site:lab, R1,R2, all)")
-    parser.add_argument("type", choices=["running", "startup", "all", "custom"],
-                       help="Backup type")
+    parser.add_argument("type", choices=["running", "startup", "all", "custom"], help="Backup type")
     parser.add_argument("--commands", help="Custom commands (comma-separated)")
 
     args = parser.parse_args()
@@ -107,11 +106,9 @@ def main():
                     config_type = "custom"
 
                 # Save config
-                save_result = save_device_config.invoke({
-                    "device": device,
-                    "config_type": config_type,
-                    "content": result
-                })
+                save_result = save_device_config.invoke(
+                    {"device": device, "config_type": config_type, "content": result}
+                )
 
                 if "Error:" in save_result:
                     errors.append((device, cmd, save_result))
@@ -131,6 +128,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 

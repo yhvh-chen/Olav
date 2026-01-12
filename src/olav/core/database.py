@@ -19,7 +19,7 @@ class OlavDatabase:
     - command_cache: Cached command outputs (optional, not used in MVP)
     """
 
-    def __init__(self, db_path: str | Path = None) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
         """Initialize database connection.
 
         Args:
@@ -381,7 +381,7 @@ class OlavDatabase:
 _db_instance: OlavDatabase | None = None
 
 
-def get_database(db_path: str | None = None) -> OlavDatabase:
+def get_database(db_path: str | Path | None = None) -> OlavDatabase:
     """Get the global database instance.
 
     Args:
@@ -407,7 +407,7 @@ def reset_database() -> None:
     if _db_instance is not None:
         try:
             _db_instance.close()
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         _db_instance = None
 

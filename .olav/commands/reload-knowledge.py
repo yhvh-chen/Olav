@@ -19,6 +19,7 @@ Options:
     --verbose        Print detailed indexing information
     --reset          Clear database and reindex from scratch
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -36,26 +37,19 @@ load_dotenv()
 def main():
     """Reload and reindex knowledge base."""
     parser = argparse.ArgumentParser(
-        description="Reindex knowledge base into vector database",
-        prog="/reload-knowledge"
+        description="Reindex knowledge base into vector database", prog="/reload-knowledge"
     )
     parser.add_argument(
         "--incremental",
         "-i",
         action="store_true",
-        help="Only index new/modified files (incremental mode)"
+        help="Only index new/modified files (incremental mode)",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Print detailed indexing information"
+        "--verbose", "-v", action="store_true", help="Print detailed indexing information"
     )
     parser.add_argument(
-        "--reset",
-        "-r",
-        action="store_true",
-        help="Clear database and reindex from scratch"
+        "--reset", "-r", action="store_true", help="Clear database and reindex from scratch"
     )
 
     args = parser.parse_args()
@@ -71,7 +65,7 @@ def main():
             agent_dir=settings.agent_dir,
             incremental=args.incremental,
             reset=args.reset,
-            verbose=args.verbose
+            verbose=args.verbose,
         )
 
         # Print results

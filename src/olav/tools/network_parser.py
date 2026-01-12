@@ -8,6 +8,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from nornir.core import Nornir
 from nornir.core.exceptions import NornirSubTaskError
@@ -15,6 +16,10 @@ from nornir.core.task import AggregatedResult, Result
 from nornir_netmiko.tasks import netmiko_send_command
 
 from config.settings import settings
+
+if TYPE_CHECKING:
+    from olav.core.database import OlavDatabase
+    from olav.tools.network_executor import CommandExecutionResult
 
 
 def estimate_tokens(text: str) -> int:
@@ -36,10 +41,10 @@ def execute_with_textfsm(
     device: str,
     command: str,
     timeout: int,
-    db: "OlavDatabase",  # noqa: F821
-    blacklist_checker: callable,
-    platform_detector: callable,
-) -> "CommandExecutionResult":  # noqa: F821
+    db: "OlavDatabase",
+    blacklist_checker: object,  # Function that takes str and returns str|None
+    platform_detector: object,  # Function that takes str and returns str|None
+) -> "CommandExecutionResult":
     """Execute command with TextFSM parsing.
 
     Args:
@@ -62,7 +67,7 @@ def execute_with_textfsm(
     start_time = datetime.now()
 
     # Check blacklist
-    blacklisted_pattern = blacklist_checker(command)
+    blacklisted_pattern = blacklist_checker(command) if callable(blacklist_checker) else None  # type: ignore[arg-type]
     if blacklisted_pattern:
         return CommandExecutionResult(
             device=device,
@@ -73,10 +78,10 @@ def execute_with_textfsm(
         )
 
     # Detect platform
-    platform = platform_detector(device)
+    platform = platform_detector(device) if callable(platform_detector) else None  # type: ignore[arg-type]
 
     # Check whitelist
-    if platform:
+    if platform and isinstance(platform, str):
         if not db.is_command_allowed(command, platform):
             return CommandExecutionResult(
                 device=device,
@@ -112,7 +117,7 @@ def execute_with_textfsm(
             use_textfsm=True,  # Enable TextFSM parsing
         )
 
-        host_result: Result = result[device]
+        host_result: Result = result[device]  # type: ignore[assignment]
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 
         if host_result.failed:

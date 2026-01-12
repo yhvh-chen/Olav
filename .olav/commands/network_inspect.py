@@ -3,6 +3,7 @@
 
 Usage: /inspect [scope] [--layer L1|L2|L3|L4|all] [--report]
 """
+
 import argparse
 import sys
 from datetime import datetime
@@ -134,7 +135,9 @@ def generate_report(all_results: dict, layers: list[str], output_path: Path) -> 
         else:
             error_count += 1
 
-    lines.append(f"**Overall Status**: ✅ {ok_count} OK | ⚠️ {warn_count} Warning | ❌ {error_count} Critical\n")
+    lines.append(
+        f"**Overall Status**: ✅ {ok_count} OK | ⚠️ {warn_count} Warning | ❌ {error_count} Critical\n"
+    )
     lines.append("---\n")
 
     # Device details
@@ -154,15 +157,18 @@ def generate_report(all_results: dict, layers: list[str], output_path: Path) -> 
 def main():
     """Execute inspection workflow."""
     parser = argparse.ArgumentParser(
-        description="Run comprehensive device inspection",
-        prog="/inspect"
+        description="Run comprehensive device inspection", prog="/inspect"
     )
-    parser.add_argument("scope", nargs="*", default=["all"],
-                       help="Device scope (all, role:core, R1,R2, keywords)")
-    parser.add_argument("--layer", choices=["L1", "L2", "L3", "L4", "all"],
-                       default="all", help="Inspection layer(s)")
-    parser.add_argument("--report", action="store_true",
-                       help="Generate detailed report file")
+    parser.add_argument(
+        "scope", nargs="*", default=["all"], help="Device scope (all, role:core, R1,R2, keywords)"
+    )
+    parser.add_argument(
+        "--layer",
+        choices=["L1", "L2", "L3", "L4", "all"],
+        default="all",
+        help="Inspection layer(s)",
+    )
+    parser.add_argument("--report", action="store_true", help="Generate detailed report file")
 
     args = parser.parse_args()
 
@@ -198,7 +204,9 @@ def main():
             print(f"❌ No devices found matching scope '{scope_str}'")
             return 1
 
-        print(f"🔍 Inspecting {len(device_list)} devices: {', '.join(device_list[:5])}{'...' if len(device_list) > 5 else ''}")
+        print(
+            f"🔍 Inspecting {len(device_list)} devices: {', '.join(device_list[:5])}{'...' if len(device_list) > 5 else ''}"
+        )
         print("")
 
         # Execute inspection
@@ -211,19 +219,12 @@ def main():
             for cmd in commands:
                 try:
                     from olav.tools.network import nornir_execute
+
                     output = nornir_execute.invoke({"device": device, "command": cmd})
                     success = "Error:" not in output
-                    device_results.append({
-                        "command": cmd,
-                        "success": success,
-                        "output": output
-                    })
+                    device_results.append({"command": cmd, "success": success, "output": output})
                 except Exception as e:
-                    device_results.append({
-                        "command": cmd,
-                        "success": False,
-                        "output": str(e)
-                    })
+                    device_results.append({"command": cmd, "success": False, "output": str(e)})
 
             all_results[device] = device_results
 
@@ -235,7 +236,13 @@ def main():
         # Generate report if requested
         if args.report:
             from config.settings import settings
-            report_path = Path(settings.agent_dir) / "data" / "reports" / f"inspection-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+
+            report_path = (
+                Path(settings.agent_dir)
+                / "data"
+                / "reports"
+                / f"inspection-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+            )
             generate_report(all_results, layers, report_path)
             print(f"\n📄 Report saved: {report_path}")
         else:
@@ -254,6 +261,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 

@@ -71,8 +71,7 @@ def register_source(conn, source_name: str, source_path: Path, platform: str = N
 
     # Get the inserted ID (DuckDB doesn't have cursor.lastrowid)
     result = conn.execute(
-        "SELECT max(id) FROM knowledge_sources WHERE name = ?",
-        [source_name]
+        "SELECT max(id) FROM knowledge_sources WHERE name = ?", [source_name]
     ).fetchone()
     source_id = result[0] if result else None
     print(f"  Created new source: {source_name} (ID: {source_id})")
@@ -179,6 +178,7 @@ Examples:
 
     # Register source
     import duckdb
+
     conn = duckdb.connect(args.db or str(Path(settings.agent_dir) / "data" / "knowledge.db"))
     try:
         source_id = register_source(conn, args.source, source_path, args.platform)
@@ -201,7 +201,7 @@ Examples:
         print(f"   Files processed: {stats['indexed'] + stats['skipped']}")
         print(f"   Chunks indexed: {stats['indexed']}")
         print(f"   Files skipped (unchanged): {stats['skipped']}")
-        if stats['errors'] > 0:
+        if stats["errors"] > 0:
             print(f"   Errors: {stats['errors']}")
 
     print()

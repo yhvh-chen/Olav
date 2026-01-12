@@ -30,10 +30,10 @@ def _get_allowed_dirs() -> list[str]:
     """
     agent_dir = settings.agent_dir
     return [
-        f"{agent_dir}/data/configs",  # Device configurations
-        f"{agent_dir}/data/logs",  # Logs and outputs
+        "data/exports",  # Exported device data (configs, MAC tables, etc.)
+        "data/reports",  # Analysis reports
+        "data/logs",  # Application and Nornir logs
         f"{agent_dir}/knowledge/solutions",  # Troubleshooting solutions
-        f"{agent_dir}/data/reports",  # Reports and analysis
         f"{agent_dir}/scratch",  # Temporary files
     ]
 
@@ -131,10 +131,10 @@ def write_file(
     """Write content to a file in the OLAV knowledge base.
 
     This tool saves data to the local filesystem. Allowed directories:
-    - agent_dir/data/configs/ - Device configurations
-    - agent_dir/data/logs/ - Logs and command outputs
+    - data/exports/ - Exported device data (configs, MAC tables, ARP, etc.)
+    - data/reports/ - Analysis reports (auto-embedded to KB)
+    - data/logs/ - Application and Nornir logs
     - agent_dir/knowledge/solutions/ - Troubleshooting solutions
-    - agent_dir/data/reports/ - Reports and analysis (auto-embedded to KB)
     - agent_dir/scratch/ - Temporary files
 
     IMPORTANT: This operation requires HITL approval.
@@ -143,7 +143,7 @@ def write_file(
     embedded to the knowledge vector store for agentic retrieval.
 
     Args:
-        filepath: Path to write (relative to project root, e.g., "data/configs/R1-config.txt")
+        filepath: Path to write (relative to project root, e.g., "data/exports/R1-config.txt")
         content: Content to write
         create_dirs: Whether to create parent directories if they don't exist
 
@@ -151,7 +151,7 @@ def write_file(
         Success message with filepath, or error message
 
     Examples:
-        path = f"{settings.agent_dir}/data/configs/R1-running-config.txt"
+        path = "data/exports/R1-running-config.txt"
         write_file(path, config_output)
     """
     # Validate path
@@ -202,7 +202,7 @@ def read_file(
         File content, or error message
 
     Examples:
-        read_file(f"{settings.agent_dir}/data/configs/R1-running-config.txt")
+        read_file("data/exports/R1-running-config.txt")
         read_file(f"{settings.agent_dir}/skills/quick-query.md")
     """
     # Validate path
@@ -317,7 +317,7 @@ def save_tech_support(
 
 @tool
 def list_saved_files(
-    directory: str = None,
+    directory: str | None = None,
     pattern: str = "*",
 ) -> str:
     """List files saved in the OLAV knowledge base.

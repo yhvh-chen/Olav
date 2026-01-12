@@ -13,6 +13,15 @@ Based on DESIGN_V0.8.md Section 7.4:
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    try:
+        from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+
+        _StoreBackend = FilesystemBackend
+    except ImportError:
+        from deepagents.storage import CompositeBackend, StateBackend
 
 try:
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
@@ -35,7 +44,7 @@ except ImportError:
         CompositeBackend = None  # type: ignore[misc, assignment]
 
 
-def get_storage_backend(project_root: Path | None = None):
+def get_storage_backend(project_root: Path | None = None) -> object:  # noqa: ANN401
     """Get the configured storage backend for OLAV.
 
     Args:
@@ -73,7 +82,7 @@ def get_storage_backend(project_root: Path | None = None):
     # Configure read-only paths
     read_only_paths = [
         agent_dir / "imports" / "apis",
-        agent_dir / "OLAV.md",
+        project_root / "OLAV.md",
     ]
 
     # Configure temporary paths (session-only)
@@ -81,19 +90,23 @@ def get_storage_backend(project_root: Path | None = None):
         agent_dir / "scratch",
     ]
 
+    if not DEEPAGENTS_HAS_STORAGE:
+        # Return None if DeepAgents storage not available
+        return None
+
     # Create persistent backend
-    persistent_backend = StoreBackend(
+    persistent_backend = StoreBackend(  # type: ignore[misc, call-arg]
         root_dir=project_root,
         allowed_paths=persistent_paths,
         read_only_paths=read_only_paths,
     )
 
     # Create temporary backend for scratch space
-    temp_backend = StateBackend()
+    temp_backend = StateBackend()  # type: ignore[misc, call-arg]
 
     # Create composite backend
     # Priority: specific paths first, then temporary
-    composite = CompositeBackend(
+    composite = CompositeBackend(  # type: ignore[misc, call-arg]
         backends={
             **{str(path): persistent_backend for path in persistent_paths},
             **{str(path): persistent_backend for path in read_only_paths},

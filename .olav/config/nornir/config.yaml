@@ -12,6 +12,15 @@ inventory:
     group_file: ".olav/config/nornir/groups.yaml"
     defaults_file: ".olav/config/nornir/defaults.yaml"
 
+# Logging configuration
+logging:
+  enabled: true
+  level: INFO
+  loggers:
+    - nornir
+  log_file: "data/logs/nornir.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
 # Connection parameters (global defaults)
 connection_options:
   netmiko:

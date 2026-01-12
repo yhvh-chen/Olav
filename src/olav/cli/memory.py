@@ -5,7 +5,6 @@ Provides persistent storage for conversation history across CLI sessions.
 
 import json
 from pathlib import Path
-from typing import Any
 
 
 class AgentMemory:
@@ -35,8 +34,8 @@ class AgentMemory:
 
             self.memory_file = Path(settings.agent_dir) / ".agent_memory.json"
 
-        self.messages: list[dict[str, Any]] = []
-        self.metadata: dict[str, Any] = {}
+        self.messages: list[dict[str, object]] = []
+        self.metadata: dict[str, object] = {}
         self._load()
 
     def _load(self) -> None:
@@ -67,7 +66,7 @@ class AgentMemory:
 
         self.memory_file.write_text(json.dumps(data, indent=2))
 
-    def add(self, role: str, content: str, **kwargs) -> None:
+    def add(self, role: str, content: str, **kwargs: object) -> None:  # noqa: ANN003
         """Add a message to memory.
 
         Args:
@@ -89,7 +88,7 @@ class AgentMemory:
         self.metadata = {}
         self.save()
 
-    def get_context(self, max_messages: int | None = None) -> list[dict[str, Any]]:
+    def get_context(self, max_messages: int | None = None) -> list[dict[str, object]]:
         """Get conversation context for agent.
 
         Args:
@@ -102,7 +101,7 @@ class AgentMemory:
             return self.messages.copy()
         return self.messages[-max_messages:]
 
-    def set_metadata(self, key: str, value: Any) -> None:
+    def set_metadata(self, key: str, value: object) -> None:  # noqa: ANN401
         """Set metadata value.
 
         Args:
@@ -112,7 +111,7 @@ class AgentMemory:
         self.metadata[key] = value
         self.save()
 
-    def get_metadata(self, key: str, default: Any = None) -> Any:
+    def get_metadata(self, key: str, default: object = None) -> object:  # noqa: ANN401
         """Get metadata value.
 
         Args:
@@ -124,7 +123,7 @@ class AgentMemory:
         """
         return self.metadata.get(key, default)
 
-    def get_stats(self) -> dict[str, Any]:
+    def get_stats(self) -> dict[str, object]:
         """Get memory statistics.
 
         Returns:
@@ -169,8 +168,8 @@ class AgentMemory:
         total_chars = 0
 
         for msg in recent:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
+            role = str(msg.get("role", "user"))
+            content = str(msg.get("content", ""))
 
             # Skip tool messages (not useful for context)
             if role == "tool":

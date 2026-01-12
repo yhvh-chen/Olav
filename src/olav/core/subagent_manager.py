@@ -4,6 +4,11 @@ This module provides integration with DeepAgents' SubAgentMiddleware to enable
 specialized subagents for macro and micro network analysis.
 """
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from deepagents.middleware.subagents import SubAgentMiddleware
+
 try:
     from deepagents.middleware.subagents import SubAgentMiddleware
 
@@ -11,8 +16,6 @@ try:
 except ImportError:
     DEEPAGENTS_AVAILABLE = False
     SubAgentMiddleware = None  # type: ignore[misc, assignment]
-
-from typing import Any
 
 from langchain_core.tools import BaseTool
 
@@ -25,7 +28,7 @@ from olav.core.subagent_configs import get_macro_analyzer, get_micro_analyzer
 def get_subagent_middleware(
     tools: list[BaseTool],
     default_model: object | None = None,
-) -> Any:
+) -> object:  # noqa: ANN401
     """Create and configure SubAgentMiddleware with OLAV's specialized analyzers.
 
     This middleware enables the main agent to delegate complex analysis tasks
@@ -51,7 +54,7 @@ def get_subagent_middleware(
 
     # Define subagents using official DeepAgents API format
     # See: https://github.com/langchain-ai/deepagents
-    subagents: list[dict[str, Any]] = [
+    subagents: list[dict[str, Any]] = [  # noqa: ANN401
         {
             **get_macro_analyzer(tools=tools),
             "model": default_model,
@@ -64,8 +67,8 @@ def get_subagent_middleware(
 
     # Create middleware with our analyzers
     middleware = SubAgentMiddleware(
-        subagents=subagents,
-        default_model=default_model,
+        subagents=subagents,  # type: ignore[arg-type]
+        default_model=default_model,  # type: ignore[arg-type]
     )
 
     return middleware

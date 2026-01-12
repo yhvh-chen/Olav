@@ -76,7 +76,7 @@ async def stream_agent_response(
     spinner_started = False
 
     # Tools that deserve full panel display
-    IMPORTANT_TOOLS = {"nornir_execute", "smart_query", "api_call"}
+    IMPORTANT_TOOLS = {"nornir_execute", "smart_query", "api_call"}  # noqa: N806
 
     def extract_ai_content(msg: Any) -> str:
         """Extract content from AIMessage, ignoring tool calls."""
@@ -86,7 +86,7 @@ async def stream_agent_response(
             return msg.content
         return ""
 
-    def parse_tool_call(tool_call: Any) -> tuple[str, str, str] | None:
+    def parse_tool_call(tool_call: Any) -> tuple[str, str | None, str | None] | None:
         """Parse tool call to extract name, device, and command.
 
         Args:
@@ -299,8 +299,10 @@ def run_interactive_loop(
             try:
                 # Build messages with conversation history
                 history = memory.get_conversation_messages(max_turns=10, max_chars=8000)
-                # Format: history + current message
-                messages = list(history) + [("user", processed_text)]
+                # Format: history + current message (convert tuples to dicts)
+                messages = [{"role": role, "content": content} for role, content in history] + [
+                    {"role": "user", "content": processed_text}
+                ]
 
                 # Use verbose mode only if DISPLAY_THINKING=true
                 use_verbose = settings.display_thinking
@@ -371,7 +373,7 @@ def devices() -> None:
 
     console.print("[bold cyan]Loading network devices...[/bold cyan]")
     try:
-        result = nornir_list_devices.invoke({})
+        result = nornir_list_devices()  # type: ignore[call-arg]
         console.print(
             Panel(result, title="[bold cyan]Network Devices[/bold cyan]", border_style="cyan")
         )
@@ -470,6 +472,13 @@ def interactive_mode(ctx: typer.Context) -> None:
 
 def main() -> None:
     """Main entry point for OLAV CLI."""
+    # Initialize logging
+    from config.logging import setup_logging
+    from config.settings import settings
+
+    log_level = settings.log_level if hasattr(settings, "log_level") else "INFO"
+    setup_logging(log_level=log_level)
+
     try:
         app()
     except KeyboardInterrupt:

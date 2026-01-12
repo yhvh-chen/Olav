@@ -26,7 +26,7 @@ def expand_file_references(text: str, base_dir: Path | None = None) -> str:
     """
     pattern = r"@([\w./\\-]+)"
 
-    def replace_ref(match):
+    def replace_ref(match: re.Match[str]) -> str:  # noqa: ANN001
         filepath = match.group(1)
         path = Path(filepath)
 

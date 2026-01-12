@@ -52,6 +52,7 @@ def get_nornir(
         password = getattr(settings, "device_password", None)
 
         if username or password:
+            assert _nornir_instance is not None  # For type checker  # noqa: S101
             for host in _nornir_instance.inventory.hosts.values():
                 if username:
                     host.username = username
@@ -246,7 +247,7 @@ class NetworkExecutor:
             )
 
             # Extract result
-            host_result: Result = result[device]
+            host_result: Result = result[device]  # type: ignore[assignment]
 
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 

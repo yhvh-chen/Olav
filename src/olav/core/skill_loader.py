@@ -182,5 +182,6 @@ def get_skill_loader(skills_dir: Path | None = None) -> SkillLoader:
     if not hasattr(get_skill_loader, "_instance"):
         if skills_dir is None:
             skills_dir = Path(__file__).parent.parent.parent.parent / ".olav" / "skills"
-        get_skill_loader._instance = SkillLoader(skills_dir)
-    return get_skill_loader._instance
+        # Use a module-level variable for singleton (type: ignore for function attribute)
+        get_skill_loader._instance = SkillLoader(skills_dir)  # type: ignore[attr-defined]
+    return get_skill_loader._instance  # type: ignore[attr-defined]

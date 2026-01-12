@@ -20,6 +20,7 @@ Options:
     --verbose       Print detailed sync information
     --report        Generate sync report to file
 """
+
 import argparse
 import sys
 from datetime import datetime
@@ -38,27 +39,15 @@ load_dotenv()
 def main():
     """Sync knowledge base with filesystem."""
     parser = argparse.ArgumentParser(
-        description="Synchronize knowledge database with filesystem",
-        prog="/sync-knowledge"
+        description="Synchronize knowledge database with filesystem", prog="/sync-knowledge"
     )
     parser.add_argument(
-        "--cleanup",
-        "-c",
-        action="store_true",
-        help="Remove orphaned vectors from deleted files"
+        "--cleanup", "-c", action="store_true", help="Remove orphaned vectors from deleted files"
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Print detailed sync information"
+        "--verbose", "-v", action="store_true", help="Print detailed sync information"
     )
-    parser.add_argument(
-        "--report",
-        "-r",
-        action="store_true",
-        help="Generate sync report to file"
-    )
+    parser.add_argument("--report", "-r", action="store_true", help="Generate sync report to file")
 
     args = parser.parse_args()
 
@@ -74,7 +63,7 @@ def main():
             agent_dir=settings.agent_dir,
             cleanup=args.cleanup,
             verbose=args.verbose,
-            generate_report=args.report
+            generate_report=args.report,
         )
 
         # Print results
@@ -86,7 +75,11 @@ def main():
         print(f"   Consistency issues: {stats.get('consistency_issues', 0)}")
 
         if args.report:
-            report_path = Path(settings.agent_dir) / "data" / f"sync_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            report_path = (
+                Path(settings.agent_dir)
+                / "data"
+                / f"sync_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            )
             print(f"   Detailed report: {report_path}")
 
         return 0

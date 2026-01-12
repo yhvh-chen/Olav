@@ -78,7 +78,7 @@ def create_olav_agent(
         llm = model
 
     # Load base system prompt from OLAV.md or use default
-    olav_md_path = Path(settings.agent_dir) / "OLAV.md"
+    olav_md_path = Path("OLAV.md")
     if olav_md_path.exists():
         base_prompt = olav_md_path.read_text(encoding="utf-8")
     else:
@@ -193,8 +193,8 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        checkpointer=checkpointer,
-        interrupt_on=interrupt_on,
+        checkpointer=checkpointer,  # type: ignore[arg-type]
+        interrupt_on=interrupt_on,  # type: ignore[arg-type]
         debug=debug,
         name="olav",
     )

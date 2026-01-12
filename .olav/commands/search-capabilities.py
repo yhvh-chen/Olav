@@ -14,6 +14,7 @@ Options:
     --platform    Filter by platform (cisco_ios, huawei_vrp, etc.)
     --type        Filter by type (command, api)
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -31,8 +32,7 @@ load_dotenv()
 def main():
     """Search capabilities database."""
     parser = argparse.ArgumentParser(
-        description="Search available network commands",
-        prog="/search-capabilities"
+        description="Search available network commands", prog="/search-capabilities"
     )
     parser.add_argument("query", help="Search query (e.g., 'interface', 'bgp')")
     parser.add_argument("--platform", "-p", help="Filter by platform (e.g., 'cisco_ios')")
@@ -43,12 +43,15 @@ def main():
 
     try:
         from olav.tools.capabilities import search_capabilities
-        result = search_capabilities.invoke({
-            "query": args.query,
-            "platform": args.platform,
-            "cap_type": args.cap_type,
-            "limit": args.limit,
-        })
+
+        result = search_capabilities.invoke(
+            {
+                "query": args.query,
+                "platform": args.platform,
+                "cap_type": args.cap_type,
+                "limit": args.limit,
+            }
+        )
         print(result)
         return 0
     except Exception as e:

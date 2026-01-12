@@ -18,6 +18,7 @@ Options:
     --type        Search type: knowledge, solution, or both (default: both)
     --limit       Maximum results to return (default: 5)
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -35,8 +36,7 @@ load_dotenv()
 def main():
     """Search unified knowledge base."""
     parser = argparse.ArgumentParser(
-        description="Search unified knowledge database (FTS + Vector)",
-        prog="/search-knowledge"
+        description="Search unified knowledge database (FTS + Vector)", prog="/search-knowledge"
     )
     parser.add_argument("query", help="Search query (e.g., 'optical module aging')")
     parser.add_argument(
@@ -45,14 +45,10 @@ def main():
         dest="search_type",
         default="both",
         choices=["knowledge", "solution", "both"],
-        help="Search type (default: both)"
+        help="Search type (default: both)",
     )
     parser.add_argument(
-        "--limit",
-        "-l",
-        type=int,
-        default=5,
-        help="Maximum results to return (default: 5)"
+        "--limit", "-l", type=int, default=5, help="Maximum results to return (default: 5)"
     )
 
     args = parser.parse_args()
@@ -60,11 +56,13 @@ def main():
     try:
         from olav.tools.capabilities import search_knowledge
 
-        result = search_knowledge.invoke({
-            "query": args.query,
-            "search_type": args.search_type,
-            "limit": args.limit,
-        })
+        result = search_knowledge.invoke(
+            {
+                "query": args.query,
+                "search_type": args.search_type,
+                "limit": args.limit,
+            }
+        )
 
         print(result)
         return 0

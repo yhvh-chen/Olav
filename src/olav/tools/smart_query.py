@@ -314,9 +314,12 @@ def _batch_query_internal(
 
         if platform not in platform_commands:
             cmd = get_best_command(platform, intent)
-            platform_commands[platform] = cmd
+            if cmd:  # Only store if command was found
+                platform_commands[platform] = cmd
 
-        device_commands[device] = platform_commands[platform]
+        device_cmd = platform_commands.get(platform)
+        if device_cmd:
+            device_commands[device] = device_cmd
 
     # Check if we have a command for all devices
     devices_without_cmd = [d for d in valid_devices if not device_commands.get(d)]

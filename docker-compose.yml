@@ -1,90 +1,45 @@
-version: '3.8'
-
 services:
-  olav-agent:
+  olav:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: olav-agent
+    container_name: olav
     image: olav:0.8
     
-    # Environment configuration
     environment:
       - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
+      # Pass through environment variables from .env
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
       - OLLAMA_BASE_URL=http://ollama:11434
-      - LOG_LEVEL=INFO
-      # Configuration from Phase C-1
-      - OLAV_CONFIG=/app/.olav/settings.json
-      - LLM_MODEL_NAME=gpt-4
-      - LLM_TEMPERATURE=0.7
-      - ROUTING_CONFIDENCE_THRESHOLD=0.7
-      - HITL_REQUIRE_APPROVAL_FOR_WRITE=false
     
-    # Volume mounts for persistence
     volumes:
-      # Configuration and skills
-      - ./.olav:/app/.olav:rw
-      # Data persistence
-      - ./data:/app/data:rw
-      # Knowledge base
-      - ./knowledge:/app/knowledge:rw
-      # Logs
-      - ./logs:/app/logs:rw
+      # Mount configuration and data directories
+      - ./.olav:/app/.olav
+      - ./data:/app/data
+      - ./knowledge:/app/knowledge
     
-    # Network configuration
     networks:
       - olav-network
     
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-    
-    # Health check from Phase C-3 validation
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
-    
-    # Restart policy
-    restart: unless-stopped
-    
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    
-    # Dependencies
     depends_on:
       - ollama
     
     # Interactive terminal for CLI
     stdin_open: true
     tty: true
+    
+    restart: unless-stopped
 
-  # Optional: Ollama service for local LLM
+  # Ollama service for local LLM (optional - comment out if using OpenAI/Azure)
   ollama:
     image: ollama/ollama:latest
-    container_name: ollama-service
-    
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
+    container_name: ollama
     
     volumes:
-      # Model persistence
       - ollama-models:/root/.ollama
-      # Configuration
-      - ./config/ollama:/etc/ollama:ro
     
     networks:
       - olav-network
@@ -92,128 +47,12 @@ services:
     ports:
       - "11434:11434"
     
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 8G
-        reservations:
-          cpus: '2'
-          memory: 4G
-    
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    
     restart: unless-stopped
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
-  # Optional: PostgreSQL for LangGraph checkpointer
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres-store
-    
-    environment:
-      POSTGRES_USER: olav
-      POSTGRES_PASSWORD: olav_dev_password  # Change in production!
-      POSTGRES_DB: olav_store
-      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
-    
-    volumes:
-      # Data persistence
-      - postgres-data:/var/lib/postgresql/data
-      # Initial setup
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    
-    networks:
-      - olav-network
-    
-    ports:
-      - "5432:5432"
-    
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U olav"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    
-    restart: unless-stopped
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Optional: Redis for caching
-  redis:
-    image: redis:7-alpine
-    container_name: redis-cache
-    
-    command: redis-server --appendonly yes --requirepass redis_dev_password
-    
-    volumes:
-      # Data persistence
-      - redis-data:/data
-    
-    networks:
-      - olav-network
-    
-    ports:
-      - "6379:6379"
-    
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    
-    restart: unless-stopped
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-# Networks
 networks:
   olav-network:
     driver: bridge
 
-# Volumes
 volumes:
   ollama-models:
-    driver: local
-  postgres-data:
-    driver: local
-  redis-data:
     driver: local

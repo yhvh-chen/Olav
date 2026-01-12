@@ -112,6 +112,7 @@ class CapabilitiesLoader:
                     continue
 
                 if not dry_run:
+                    assert self.db is not None  # For type checker  # noqa: S101
                     self.db.insert_capability(
                         cap_type="command",
                         platform=platform,
@@ -179,6 +180,7 @@ class CapabilitiesLoader:
                     summary = method_spec.get("summary", method_spec.get("description"))
 
                     if not dry_run:
+                        assert self.db is not None  # For type checker  # noqa: S101
                         self.db.insert_capability(
                             cap_type="api",
                             platform=platform,
@@ -242,7 +244,7 @@ class CapabilitiesLoader:
 
 
 def reload_capabilities(
-    imports_dir: str | Path = None,
+    imports_dir: str | Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """Convenience function to reload capabilities.
@@ -257,13 +259,15 @@ def reload_capabilities(
     if imports_dir is None:
         from config.settings import settings
 
-        imports_dir = str(Path(settings.agent_dir) / "imports")
+        imports_dir_obj = Path(settings.agent_dir) / "imports"
+    else:
+        imports_dir_obj = Path(imports_dir) if isinstance(imports_dir, str) else imports_dir
 
-    loader = CapabilitiesLoader(Path(imports_dir))
+    loader = CapabilitiesLoader(imports_dir_obj)
     return loader.reload(dry_run=dry_run)
 
 
-def validate_capabilities(imports_dir: str | Path = None) -> list[str]:
+def validate_capabilities(imports_dir: str | Path | None = None) -> list[str]:
     """Convenience function to validate capabilities.
 
     Args:
@@ -275,7 +279,9 @@ def validate_capabilities(imports_dir: str | Path = None) -> list[str]:
     if imports_dir is None:
         from config.settings import settings
 
-        imports_dir = str(Path(settings.agent_dir) / "imports")
+        imports_dir_obj = Path(settings.agent_dir) / "imports"
+    else:
+        imports_dir_obj = Path(imports_dir) if isinstance(imports_dir, str) else imports_dir
 
-    loader = CapabilitiesLoader(Path(imports_dir))
+    loader = CapabilitiesLoader(imports_dir_obj)
     return loader.validate()

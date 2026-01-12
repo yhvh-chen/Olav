@@ -69,78 +69,87 @@ if not os.getenv("OLAV_MODE"):
 
 
 class GuardSettings(BaseSettings):
-    """Guard 意图过滤器配置"""
+    """Guard Intent Filter Configuration"""
 
-    enabled: bool = Field(default=True, description="是否启用 Guard 过滤")
-    strict_mode: bool = Field(default=False, description="严格模式：只允许明确的网络运维请求")
+    enabled: bool = Field(default=True, description="Enable Guard filtering")
+    strict_mode: bool = Field(
+        default=False, description="Strict mode: only allow explicit network operations requests"
+    )
 
 
 class RoutingSettings(BaseSettings):
-    """Skill 路由配置"""
+    """Skill Routing Configuration"""
 
     confidence_threshold: float = Field(
-        default=0.6, ge=0.0, le=1.0, description="Skill 匹配置信度阈值"
+        default=0.6, ge=0.0, le=1.0, description="Skill matching confidence threshold"
     )
-    fallback_skill: str = Field(default="quick-query", description="降级目标 Skill ID")
+    fallback_skill: str = Field(default="quick-query", description="Fallback target Skill ID")
 
 
 class HITLSettings(BaseSettings):
-    """Human-in-the-Loop 配置"""
+    """Human-in-the-Loop Configuration"""
 
-    require_approval_for_write: bool = Field(default=True, description="写操作是否需要审批")
+    require_approval_for_write: bool = Field(
+        default=True, description="Require approval for write operations"
+    )
     require_approval_for_skill_update: bool = Field(
-        default=True, description="Skill/Knowledge 更新是否需要审批"
+        default=True, description="Require approval for Skill/Knowledge updates"
     )
     approval_timeout_seconds: int = Field(
-        default=300, ge=10, le=3600, description="审批超时时间 (秒)"
+        default=300, ge=10, le=3600, description="Approval timeout in seconds"
     )
 
 
 class ExecutionSettings(BaseSettings):
-    """命令执行配置"""
+    """Command Execution Configuration"""
 
-    use_textfsm: bool = Field(default=True, description="是否使用 TextFSM 解析命令输出")
+    use_textfsm: bool = Field(default=True, description="Use TextFSM to parse command output")
     textfsm_fallback_to_raw: bool = Field(
-        default=True, description="TextFSM 解析失败时是否回退到原始文本"
+        default=True, description="Fallback to raw text if TextFSM parsing fails"
     )
-    enable_token_statistics: bool = Field(default=True, description="是否启用 token 统计")
+    enable_token_statistics: bool = Field(default=True, description="Enable token statistics")
 
 
 class DiagnosisSettings(BaseSettings):
-    """诊断模块配置"""
+    """Diagnosis Module Configuration"""
 
     macro_max_confidence: float = Field(
-        default=0.7, ge=0.0, le=1.0, description="宏观分析置信度上限"
+        default=0.7, ge=0.0, le=1.0, description="Maximum confidence threshold for macro analysis"
     )
     micro_target_confidence: float = Field(
-        default=0.9, ge=0.0, le=1.0, description="微观分析目标置信度"
+        default=0.9, ge=0.0, le=1.0, description="Target confidence for micro analysis"
     )
     max_diagnosis_iterations: int = Field(
-        default=5, ge=1, le=20, description="单轮诊断最大迭代次数"
+        default=5, ge=1, le=20, description="Maximum diagnosis iterations per round"
     )
     require_approval_for_micro_analysis: bool = Field(
-        default=True, description="微观分析是否需要审批"
+        default=True, description="Require approval for micro analysis"
     )
     auto_approve_if_confidence_below: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="置信度低于此值时自动审批"
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Auto-approve if confidence is below this threshold",
     )
     enable_web_search: bool = Field(
-        default=True, description="诊断时是否启用联网搜索（fallback 模式）"
+        default=True, description="Enable web search during diagnosis (fallback mode)"
     )
     web_search_fallback_only: bool = Field(
-        default=True, description="联网搜索仅在本地知识库无结果时启用"
+        default=True, description="Web search only enabled when local knowledge base has no results"
     )
     web_search_max_results: int = Field(
-        default=3, ge=1, le=10, description="每次网络搜索的最大结果数"
+        default=3, ge=1, le=10, description="Maximum results per web search"
     )
-    web_search_timeout: int = Field(default=10, ge=5, le=30, description="网络搜索超时时间（秒）")
+    web_search_timeout: int = Field(
+        default=10, ge=5, le=30, description="Web search timeout in seconds"
+    )
 
 
 class LoggingSettings(BaseSettings):
-    """日志配置"""
+    """Logging Configuration"""
 
-    level: str = Field(default="INFO", description="日志级别")
-    audit_enabled: bool = Field(default=True, description="是否记录审计日志")
+    level: str = Field(default="INFO", description="Logging level")
+    audit_enabled: bool = Field(default=True, description="Enable audit logging")
 
 
 # =============================================================================
@@ -184,15 +193,17 @@ class Settings(BaseSettings):
     llm_model_name: str = "gpt-4-turbo"
     llm_base_url: str = ""
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 4096
+    llm_max_tokens: int = 16000
 
     # =========================================================================
     # Skill Configuration (Phase C-1)
     # =========================================================================
     enabled_skills: list[str] = Field(
-        default_factory=list, description="启用的 Skill ID 列表 (空表示全部启用)"
+        default_factory=list, description="List of enabled Skill IDs (empty means all enabled)"
     )
-    disabled_skills: list[str] = Field(default_factory=list, description="禁用的 Skill ID 列表")
+    disabled_skills: list[str] = Field(
+        default_factory=list, description="List of disabled Skill IDs"
+    )
 
     # =========================================================================
     # Embedding Configuration (Phase 4: Knowledge Base Integration)
@@ -208,15 +219,23 @@ class Settings(BaseSettings):
     # =========================================================================
     # Nested Configuration Objects (Phase C-1)
     # =========================================================================
-    guard: GuardSettings = Field(default_factory=GuardSettings, description="Guard 过滤器配置")
-    routing: RoutingSettings = Field(default_factory=RoutingSettings, description="Skill 路由配置")
-    hitl: HITLSettings = Field(default_factory=HITLSettings, description="HITL 审批配置")
-    diagnosis: DiagnosisSettings = Field(default_factory=DiagnosisSettings, description="诊断配置")
+    guard: GuardSettings = Field(
+        default_factory=GuardSettings, description="Guard filter configuration"
+    )
+    routing: RoutingSettings = Field(
+        default_factory=RoutingSettings, description="Skill routing configuration"
+    )
+    hitl: HITLSettings = Field(
+        default_factory=HITLSettings, description="HITL approval configuration"
+    )
+    diagnosis: DiagnosisSettings = Field(
+        default_factory=DiagnosisSettings, description="Diagnosis configuration"
+    )
     execution: ExecutionSettings = Field(
-        default_factory=ExecutionSettings, description="命令执行配置"
+        default_factory=ExecutionSettings, description="Command execution configuration"
     )
     logging_settings: LoggingSettings = Field(
-        default_factory=LoggingSettings, description="日志配置"
+        default_factory=LoggingSettings, description="Logging configuration"
     )
 
     # =========================================================================
@@ -272,7 +291,7 @@ class Settings(BaseSettings):
     # Removed 'olav_mode' - this was v0.5 legacy; environment provides clearer semantics
     environment: Literal["local", "development", "production"] = "local"
 
-    server_host: str = "0.0.0.0"
+    server_host: str = "0.0.0.0"  # noqa: S104
     server_port: int = 8000
 
     # =========================================================================
@@ -339,7 +358,7 @@ class Settings(BaseSettings):
     # postgres_uri validator removed - not needed in v0.8
     # All database operations use DuckDB via duckdb_path
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize settings and apply .olav/settings.json overrides (Layer 2)."""
         super().__init__(**kwargs)
         self._apply_olav_settings()
@@ -406,7 +425,7 @@ class Settings(BaseSettings):
                             # Create new nested object from converted JSON data
                             nested_obj = cls(**converted_data)
                             setattr(self, attr_name, nested_obj)
-                        except Exception:
+                        except Exception:  # noqa: S110
                             # If validation fails, keep default
                             pass
 

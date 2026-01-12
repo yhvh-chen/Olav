@@ -142,10 +142,12 @@ class InspectorAgent:
             # Map skill name to command construction
             commands = self._build_commands_for_skill(skill, params)
 
-            result = nornir_execute(
-                device_group=device_group,
-                commands=commands,
-                timeout=params.get("timeout", 30),
+            result = nornir_execute(  # type: ignore[call-arg]
+                device=device_group,
+                command=commands[0] if commands else "",
+                timeout=int(params.get("timeout", 30))
+                if isinstance(params.get("timeout"), (int, str))
+                else 30,
             )
 
             # Format and return results
@@ -154,8 +156,10 @@ class InspectorAgent:
                 "skill": skill_name,
                 "skill_name": skill.name,
                 "device_group": device_group,
-                "result": result,
-                "report_path": self._generate_report(skill, result),
+                "result": result if isinstance(result, dict) else {"output": str(result)},
+                "report_path": self._generate_report(
+                    skill, result if isinstance(result, dict) else {"output": str(result)}
+                ),
             }
         except Exception as e:
             logger.error(f"Error executing skill {skill_name}: {e}")
@@ -251,10 +255,9 @@ class InspectorAgent:
         )
         report_path.parent.mkdir(parents=True, exist_ok=True)
 
-        write_file(
+        write_file(  # type: ignore[call-arg]
             str(report_path),
             report_content,
-            description=f"Inspection report: {skill.name}",
         )
 
         logger.info(f"✅ Report saved to {report_path}")

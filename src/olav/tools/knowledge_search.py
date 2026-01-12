@@ -172,7 +172,12 @@ def _execute_fts_search(
     """
     # Use first term for initial matching
     first_term = query_terms[0] if query_terms else query
-    params = [f"%{first_term}%", f"%{first_term}%", f"%{first_term}%", f"%{first_term}%"]
+    params: list[str | int] = [
+        f"%{first_term}%",
+        f"%{first_term}%",
+        f"%{first_term}%",
+        f"%{first_term}%",
+    ]
 
     if platform:
         fts_sql += " AND platform = ?"
@@ -214,9 +219,12 @@ def _execute_vector_search(
             )
         else:
             from langchain_openai import OpenAIEmbeddings
+            from pydantic import SecretStr
 
+            api_key = settings.embedding_api_key
             embeddings = OpenAIEmbeddings(
-                model=settings.embedding_model, openai_api_key=settings.embedding_api_key
+                model=settings.embedding_model,
+                api_key=SecretStr(api_key) if api_key else None,  # type: ignore[arg-type]
             )
 
         query_vec = embeddings.embed_query(query)
@@ -230,7 +238,7 @@ def _execute_vector_search(
             FROM knowledge_chunks
             WHERE embedding IS NOT NULL
         """
-        vec_params = [vec_str]
+        vec_params: list[str | int] = [vec_str]
 
         if platform:
             vec_sql += " AND platform = ?"

@@ -3,6 +3,7 @@
 
 Usage: /analyze [source] [destination] [--error "desc"] [--plan] [--interactive]
 """
+
 import argparse
 import re
 import sys
@@ -51,9 +52,9 @@ Goal: Combine findings and provide recommendations
 def extract_problem_device(macro_result: str) -> str:
     """Extract problem device from macro analysis result."""
     patterns = [
-        r'Problem device:\s*(\w+)',
-        r'Issue found on:\s*(\w+)',
-        r'Fault domain:\s*(\w+)',
+        r"Problem device:\s*(\w+)",
+        r"Issue found on:\s*(\w+)",
+        r"Fault domain:\s*(\w+)",
     ]
 
     for pattern in patterns:
@@ -87,16 +88,15 @@ def synthesize_results(macro_result: str, micro_result: str) -> str:
 def main():
     """Execute analysis workflow."""
     parser = argparse.ArgumentParser(
-        description="Analyze network path from source to destination",
-        prog="/analyze"
+        description="Analyze network path from source to destination", prog="/analyze"
     )
     parser.add_argument("source", help="Source device name")
     parser.add_argument("destination", help="Destination device name")
     parser.add_argument("--error", help="Error description to guide analysis")
-    parser.add_argument("--plan", action="store_true",
-                       help="Show analysis plan before execution")
-    parser.add_argument("--interactive", action="store_true",
-                       help="Pause after each analysis phase")
+    parser.add_argument("--plan", action="store_true", help="Show analysis plan before execution")
+    parser.add_argument(
+        "--interactive", action="store_true", help="Pause after each analysis phase"
+    )
 
     args = parser.parse_args()
 
@@ -110,7 +110,7 @@ def main():
             print("Analysis cancelled by user")
             return 0
 
-        print("\n" + "="*60 + "\n")
+        print("\n" + "=" * 60 + "\n")
 
     try:
         from olav.tools.task_tools import delegate_task
@@ -138,16 +138,15 @@ Provide a structured report with:
 - Identified fault domain
 """
 
-        macro_result = delegate_task.invoke({
-            "subagent_type": "macro-analyzer",
-            "task_description": macro_task
-        })
+        macro_result = delegate_task.invoke(
+            {"subagent_type": "macro-analyzer", "task_description": macro_task}
+        )
 
         print(macro_result)
 
         if args.interactive:
             input("\n[Paused] Press Enter to continue to Phase 2...")
-            print("\n" + "="*60 + "\n")
+            print("\n" + "=" * 60 + "\n")
 
         # Phase 2: Micro Analysis
         print("=== Phase 2: Micro Analysis ===\n")
@@ -167,16 +166,15 @@ Please analyze:
 Provide a structured report with findings for each layer.
 """
 
-        micro_result = delegate_task.invoke({
-            "subagent_type": "micro-analyzer",
-            "task_description": micro_task
-        })
+        micro_result = delegate_task.invoke(
+            {"subagent_type": "micro-analyzer", "task_description": micro_task}
+        )
 
         print(micro_result)
 
         if args.interactive:
             input("\n[Paused] Press Enter to continue to Phase 3...")
-            print("\n" + "="*60 + "\n")
+            print("\n" + "=" * 60 + "\n")
 
         # Phase 3: Synthesis
         print("=== Phase 3: Synthesis ===\n")
@@ -188,6 +186,7 @@ Provide a structured report with findings for each layer.
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 

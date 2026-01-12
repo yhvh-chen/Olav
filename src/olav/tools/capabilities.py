@@ -149,7 +149,7 @@ def search(
 
     # Search capabilities
     if scope in ("capabilities", "all"):
-        cap_results = search_capabilities(
+        cap_results = search_capabilities(  # type: ignore[misc]
             query=query,
             type="all",
             platform=platform,

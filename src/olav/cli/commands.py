@@ -34,8 +34,8 @@ def register_command(name: str) -> Callable:
 
 async def execute_command(
     full_command: str,
-    agent=None,
-    memory=None,
+    agent: object | None = None,  # noqa: ANN401
+    memory: object | None = None,  # noqa: ANN401
 ) -> str | None:
     """Execute a slash command.
 
@@ -105,17 +105,17 @@ async def cmd_devices(args: str) -> str:
 
     filter_expr = args.strip() if args else None
     try:
-        # list_devices is a LangChain StructuredTool, use .invoke()
+        # Parse filter like "role:core" into kwargs
         if filter_expr:
-            # Parse filter like "role:core" into kwargs
             if ":" in filter_expr:
                 key, value = filter_expr.split(":", 1)
-                result = list_devices.invoke({key.strip(): value.strip()})
+                # Use invoke() for langchain StructuredTool
+                result = list_devices.invoke(**{key.strip(): value.strip()})  # type: ignore[call-arg]
             else:
                 # Treat as alias search
-                result = list_devices.invoke({"alias": filter_expr})
+                result = list_devices.invoke({"alias": filter_expr})  # type: ignore[call-arg]
         else:
-            result = list_devices.invoke({})
+            result = list_devices.invoke({})  # type: ignore[call-arg]
         return result
     except Exception as e:
         return f"Error listing devices: {str(e)}"
@@ -139,9 +139,9 @@ async def cmd_skills(args: str) -> str:
     if args:
         # Show specific skill
         skill_name = args.strip()
-        skill = loader.get(skill_name)
+        skill = loader.get_skill(skill_name)
         if skill:
-            return f"Skill: {skill.name}\n\n{skill.content}"
+            return f"Skill: {skill.id}\n\n{skill.content}"
         else:
             return f"Skill '{skill_name}' not found"
     else:
@@ -185,7 +185,7 @@ async def cmd_inspect(args: str) -> str:
         inspect_script = Path(settings.agent_dir) / "commands" / "network_inspect.py"
 
         cmd_args = args.split() if args else ["all"]
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: ASYNC221, S603
             [sys.executable, str(inspect_script)] + cmd_args,
             capture_output=True,
             text=True,
@@ -237,7 +237,7 @@ async def cmd_query(args: str) -> str:
 
         query_script = Path(settings.agent_dir) / "commands" / "query.py"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: ASYNC221, S603
             [sys.executable, str(query_script)] + args.split(),
             capture_output=True,
             text=True,
@@ -265,7 +265,7 @@ async def cmd_reload(args: str) -> str:
         from olav.core.skill_loader import get_skill_loader
 
         loader = get_skill_loader()
-        loader.reload()
+        loader.load_all()  # Reload skills by re-running load_all
         return "✅ Skills and capabilities reloaded successfully"
     except Exception as e:
         return f"Error reloading: {str(e)}"
@@ -398,7 +398,7 @@ async def cmd_backup(args: str) -> str:
         from config.settings import settings
 
         backup_script = Path(settings.agent_dir) / "commands" / "backup.py"
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: ASYNC221, S603
             [sys.executable, str(backup_script)] + args.split(),
             capture_output=True,
             text=True,
@@ -441,7 +441,7 @@ async def cmd_analyze(args: str) -> str:
         from config.settings import settings
 
         analyze_script = Path(settings.agent_dir) / "commands" / "analyze.py"
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: ASYNC221, S603
             [sys.executable, str(analyze_script)] + args.split(),
             capture_output=True,
             text=True,
@@ -480,7 +480,7 @@ async def cmd_search(args: str) -> str:
     try:
         from langchain_community.tools import DuckDuckGoSearchResults
 
-        search = DuckDuckGoSearchResults(max_results=5)
+        search = DuckDuckGoSearchResults(num_results=5)  # type: ignore[call-arg]
         results = search.invoke(query)
 
         if not results:

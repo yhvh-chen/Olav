@@ -21,7 +21,7 @@ Built on the **DeepAgents** framework, OLAV isn't just a chatbot. It is a goal-o
 
 ### 🔄 Claude Code Compatible
 OLAV v0.8 adopts a 100% compatible file structure with **Claude Code** (`.claude/` ↔ `.olav/`).
-- **Seamless Migration**: Drop your existing Claude Code prompts and skills directly into `.olav/skills`.
+- **Seamless Migration**: To use with Claude Code, simply copy `.olav/` to `.claude/` and rename `OLAV.md` to `CLAUDE.md`.
 - **Standardized SOPs**: Use standard Markdown to define robust operational procedures that the Agent follows.
 
 ### 📊 Schema-Aware & Structured
@@ -31,7 +31,9 @@ Stop feeding raw text to LLMs.
 
 ### 🛡️ Enterprise Grade
 - **3-Layer Knowledge Brain**: Decouples **Skills** (How), **Knowledge** (What), and **Capabilities** (Tools).
-- **Human-in-the-Loop (HITL)**: Sensitive commands (`reload`, `config`) triggers mandatory approval gates.
+- **Human-in-the-Loop (HITL)**: Sensitive commands (`reload`, `config`) trigger mandatory approval gates—critical decisions require human validation.
+- **Prompt Guard**: Automatic intent filtering blocks non-network queries, preventing prompt injection and off-topic requests.
+- **Command Whitelisting & Blacklisting**: All executable commands are strictly whitelisted per platform (Cisco, Juniper, etc.), with explicit blacklist of forbidden operations (reload, reboot, erase, etc.), preventing dangerous or unintended operations.
 - **Multi-Vendor**: Native support for Cisco, Huawei, Juniper, Arista, and any SSH-compatible device.
 
 ---
@@ -39,12 +41,34 @@ Stop feeding raw text to LLMs.
 ## 🚀 Quick Start
 
 ### 1. Installation
-Prerequisites: Python 3.10+
+Prerequisites: Python 3.11+ (Required)
 
+**Option A: Using uv (Recommended - Faster)**
 ```bash
-# Install using uv (recommended for speed)
+# Install uv
 pip install uv
+
+# Install dependencies
 uv sync
+
+# Activate virtual environment (optional, uv run works without it)
+source .venv/bin/activate  # On Linux/Mac
+# or
+.venv\Scripts\activate  # On Windows
+```
+
+**Option B: Using pip/virtualenv (Standard)**
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate  # On Linux/Mac
+# or
+.venv\Scripts\activate  # On Windows
+
+# Install dependencies
+pip install -e ".[dev]"
 ```
 
 ### 2. Configuration (Environment)
@@ -52,7 +76,20 @@ Create your configuration file from the template:
 
 ```bash
 cp .env.example .env
-# Edit .env to add your LLM API Key (OpenAI, DeepSeek, etc.)
+```
+
+Edit `.env` with your settings:
+```bash
+# Required: LLM Configuration
+LLM_PROVIDER=openai  # or 'ollama' for local models
+LLM_API_KEY=your-api-key-here  # Get from https://platform.openai.com or https://openrouter.ai
+
+# Optional: For local Ollama
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Optional: Embedding provider for RAG
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text:latest
 ```
 
 ### 3. Network Inventory Setup (Crucial)
@@ -63,6 +100,7 @@ OLAV uses Nornir to talk to your network. You must define your devices in `.olav
    ```bash
    cp .olav/config/nornir/hosts.yaml.example .olav/config/nornir/hosts.yaml
    ```
+
 2. Edit `hosts.yaml` with your actual device details. **This file is git-ignored** to protect credentials.
 
 ```yaml
@@ -71,23 +109,169 @@ R1:  # <-- Alias used in Chat (e.g. "Check R1")
   hostname: 192.168.10.1
   platform: cisco_ios
   username: admin
-  password: password123 
+  password: password123
   groups: ["core", "routers"]
 ```
 
 ### 4. Initialization (One-time)
-You **MUST** run this script to index devices, load command whitelists, and build the vector database.
+Run the initialization script to set up all components automatically:
 
+**If using uv:**
 ```bash
-uv run python scripts/init_capabilities.py
+uv run python scripts/init.py
 ```
-*Output: "Successfully loaded X commands, Y devices..."*
+
+**If using pip/venv:**
+```bash
+python scripts/init.py
+```
+
+**What it does:**
+- ✅ Generates `.olav/settings.json` from your `.env` values (model, temperature, etc.)
+- ✅ Generates `.olav/knowledge/aliases.md` from your `hosts.yaml` device names
+- ✅ Loads command whitelists into `capabilities.db`
+- ✅ Creates `knowledge.db` schema for RAG search
+
+**Additional options:**
+```bash
+# With uv
+uv run python scripts/init.py --check           # Check initialization status
+uv run python scripts/init.py --force           # Regenerate settings.json and aliases.md
+uv run python scripts/init.py --reload-commands # Re-import commands after editing whitelists
+
+# With pip/venv
+python scripts/init.py --check
+python scripts/init.py --force
+python scripts/init.py --reload-commands
+```
 
 ### 5. Launch
-Start the interactive Agent CLI:
 
+**Option A: Using uv**
 ```bash
-uv run olav.py
+uv run olav
+```
+
+**Option B: Using pip/venv (after activation)**
+```bash
+olav
+# or
+python -m olav
+```
+
+**Option C: Docker (For isolation or deployment)**
+```bash
+# Using OpenAI/Azure (recommended)
+docker-compose up olav
+
+# Using local Ollama LLM
+docker-compose up
+
+# Run interactively
+docker-compose run --rm olav
+
+# Pull latest Ollama model
+docker-compose exec ollama ollama pull llama3
+```
+
+---
+
+## 🔒 Security Features
+
+OLAV implements a **defense-in-depth** security model to ensure safe autonomous operations in production networks.
+
+### 1. **Prompt Guard** - Intent Filtering
+Guards against prompt injection attacks and off-topic requests by validating that user queries are network-operations related.
+
+- **Strict Mode**: Only explicit network operations are allowed (e.g., "Check BGP status")
+- **Fuzzy Matching**: Intelligent classification to catch rephrasings of malicious prompts
+- **Configurable**: Enable/disable via `guard.enabled` in `.olav/settings.json`
+
+```json
+{
+  "guard": {
+    "enabled": true,
+    "strict_mode": false
+  }
+}
+```
+
+### 2. **Command Whitelisting** - Capability Control
+All executable commands are strictly whitelisted per vendor platform. OLAV will **never** execute commands not in the whitelist.
+
+**Whitelist Location**: `.olav/imports/commands/{platform}.txt`
+
+Example `.olav/imports/commands/cisco_ios.txt`:
+```
+# Read-only commands
+show version
+show interfaces
+show running-config
+# Blocked by default:
+# reload        ← NOT in whitelist, BLOCKED
+# write erase   ← NOT in whitelist, BLOCKED
+```
+
+**Benefits**:
+- Prevents accidental dangerous commands (reload, factory reset)
+- Vendor-specific: Different allowed commands per platform
+- Easily auditable: All permitted commands in one place
+
+To add new commands: Edit the platform file and run:
+```bash
+uv run python scripts/init.py --reload-commands
+```
+
+### 2b. **Command Blacklist** - Forbidden Operations
+In addition to whitelisting, OLAV maintains an explicit **blacklist** of dangerous commands that are **always** forbidden, regardless of whitelist status.
+
+**Blacklist Location**: `.olav/imports/commands/blacklist.txt`
+
+Example forbidden commands:
+```
+# Absolutely forbidden - no exceptions
+reload
+reboot
+erase
+format
+delete filesystem
+write erase
+factory reset
+shutdown
+halt
+```
+
+**Why Both?**
+- **Whitelist** = Explicit permission (positive control) - only listed commands are allowed
+- **Blacklist** = Explicit prohibition (negative control) - even if somehow whitelisted, these are forbidden
+- **Defense-in-depth**: Dual protection against accidental misconfigurations
+
+### 3. **Human-in-the-Loop (HITL)** - Approval Gates
+Critical operations automatically pause for human approval before execution.
+
+**Approval Required For**:
+- **Write Operations**: Any command that modifies device state (config, reload)
+- **Skill Updates**: When agent learns new troubleshooting solutions or device aliases
+- **Risky Diagnosis**: High-impact diagnosis operations requiring manual sign-off
+
+**Configuration** (`.olav/settings.json`):
+```json
+{
+  "hitl": {
+    "require_approval_for_write": true,
+    "require_approval_for_skill_update": true,
+    "approval_timeout_seconds": 300
+  }
+}
+```
+
+**Example Flow**:
+```
+User: "Update the VLAN config on SW1"
+Agent: 🔐 HOLD - This is a write operation
+       Please confirm: set vlan 100 name prod-vlan [Y/n]
+User: Y
+Agent: ✅ Proceeding with update...
 ```
 
 ---
@@ -140,12 +324,6 @@ OLAV will prioritize sending the `JSON` object to the LLM instead of the raw tex
 ### 2. Adding Skills (Claude Code Compatible)
 Create a Markdown file in `.olav/skills/` to teach a new Standard Operating Procedure (SOP). OLAV natively reads **Claude Code** skill formats.
 
-**Migration Helper**:
-Converting existing Skills to the new format? Use the included tool:
-```bash
-uv run python scripts/migrate_to_claude_code.py --path ./old_skills/
-```
-
 **Example: `.olav/skills/daily-check.md`**
 ```markdown
 ---
@@ -179,10 +357,40 @@ OLAV follows a **"Documents as Truth"** philosophy.
 **Usage:**
 - Place local site docs into `knowledge/` and run `uv run python scripts/index_knowledge.py`.
 - Find generated health reports (from `/inspect` or `/analyze`) in `reports/`.
-OLAV follows a **"Documents as Truth"** philosophy.
-- Place your site docs (PDF/MD) in `.olav/knowledge/`.
-- Run `uv run python scripts/index_knowledge.py` to vectorize.
-- Use `/search` to retrieve this specific context during troubleshooting.
+
+### 5. Agentic Self-Learning
+OLAV can learn from successful troubleshooting sessions and user interactions:
+
+**Auto-Generated Content:**
+| What | Path | Trigger |
+|------|------|---------|
+| **Solutions** | `.olav/knowledge/solutions/*.md` | After successful diagnosis, agent saves the case |
+| **Device Aliases** | `.olav/knowledge/aliases.md` | When user clarifies device names (e.g., "Core router is R1") |
+
+**Example - Learning Aliases:**
+```
+User: "Core switches are SW1 and SW2"
+Agent: ✓ Learned alias "Core switches" → "SW1, SW2"
+```
+The agent appends to `aliases.md` and will use this knowledge in future queries.
+
+**Example - Saving Solutions:**
+After resolving a BGP flapping issue, the agent auto-saves:
+```markdown
+# Case: bgp-flapping-r1
+> Created: 2026-01-12 (Auto-saved by OLAV)
+
+## Problem
+BGP neighbor flapping on R1...
+
+## Root Cause
+MTU mismatch on transit link...
+
+## Solution
+Adjusted MTU to 1500...
+```
+
+*Note: Solution auto-save requires `learning.autoSaveSolutions: true` in settings.json*
 
 ---
 

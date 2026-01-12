@@ -46,7 +46,7 @@ class UpdateAliasesTool(BaseTool):
 
     The alias is saved to agent_dir/knowledge/aliases.md.
     """
-    args_schema: type[BaseModel] = UpdateAliasesInput
+    args_schema: type[BaseModel] = UpdateAliasesInput  # type: ignore[assignment]
 
     def _run(
         self,
@@ -96,7 +96,7 @@ class SuggestSolutionFilenameTool(BaseTool):
     Example: suggest_solution_filename(problem_type="CRC", device="R1", symptom="optical power")
     Returns: 'crc-r1-optical-power'
     """
-    args_schema: type[BaseModel] = SuggestSolutionFilenameInput
+    args_schema: type[BaseModel] = SuggestSolutionFilenameInput  # type: ignore[assignment]
 
     def _run(
         self,
@@ -121,7 +121,7 @@ class EmbedKnowledgeInput(BaseModel):
         default="report",
         description="Type of source: 'report', 'skill', 'solution', or 'knowledge'",
     )
-    platform: str = Field(
+    platform: str | None = Field(
         default=None,
         description="Optional platform tag (e.g., 'cisco_ios', 'huawei_vrp', 'report')",
     )
@@ -146,13 +146,13 @@ class EmbedKnowledgeTool(BaseTool):
 
     Returns: Summary of indexed chunks and any errors.
     """
-    args_schema: type[BaseModel] = EmbedKnowledgeInput
+    args_schema: type[BaseModel] = EmbedKnowledgeInput  # type: ignore[assignment]
 
     def _run(
         self,
         file_path: str,
         source_type: str = "report",
-        platform: str = None,
+        platform: str | None = None,
     ) -> str:
         """Execute the tool."""
         try:

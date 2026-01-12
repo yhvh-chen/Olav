@@ -144,7 +144,7 @@ def nornir_bulk_execute(
         return output
 
     except Exception as e:
-        return {"error": f"Bulk execution failed: {str(e)}"}
+        return {"error": [f"Bulk execution failed: {str(e)}"]}  # type: ignore[return-value]
 
 
 # =============================================================================
@@ -295,7 +295,7 @@ def generate_report(
     """
     # Load skill configuration
     skill_loader = get_skill_loader()
-    skill = skill_loader.load(skill_id)
+    skill = skill_loader.get_skill(skill_id)
 
     if not skill:
         # Use default configuration if skill not found
@@ -310,13 +310,15 @@ def generate_report(
         skill_config = skill.frontmatter if hasattr(skill, "frontmatter") else {}
 
     # Generate report based on skill config
-    report_content = format_report(results, skill_config, inspection_type)
+    report_content = format_report(
+        results, skill_config if isinstance(skill_config, dict) else {}, inspection_type
+    )
 
     # Save to file if path specified
     if output_path:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(report_content, encoding="utf-8")
+        output_path_obj = Path(output_path) if isinstance(output_path, str) else output_path
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        output_path_obj.write_text(report_content, encoding="utf-8")
         return f"Report saved to: {output_path}\n\n{report_content[:500]}..."
 
     return report_content

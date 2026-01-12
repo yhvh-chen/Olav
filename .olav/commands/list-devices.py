@@ -15,6 +15,7 @@ Options:
     --site       Filter by site name
     --platform   Filter by platform (cisco_ios, huawei_vrp)
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -32,8 +33,7 @@ load_dotenv()
 def main():
     """List available devices from inventory."""
     parser = argparse.ArgumentParser(
-        description="List network devices from inventory",
-        prog="/list-devices"
+        description="List network devices from inventory", prog="/list-devices"
     )
     parser.add_argument("--role", "-r", help="Filter by role")
     parser.add_argument("--site", "-s", help="Filter by site")
@@ -43,11 +43,14 @@ def main():
 
     try:
         from olav.tools.network import list_devices
-        result = list_devices.invoke({
-            "role": args.role,
-            "site": args.site,
-            "platform": args.platform,
-        })
+
+        result = list_devices.invoke(
+            {
+                "role": args.role,
+                "site": args.site,
+                "platform": args.platform,
+            }
+        )
         print(result)
         return 0
     except Exception as e:

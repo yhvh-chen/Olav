@@ -48,7 +48,7 @@ User: backup group:test running config
 Process:
   1. list_devices() → Find devices in "test" group
   2. Execute show running-config on R1, R2, R3, R4, SW1, SW2
-  3. save_device_config saves each config to .olav/data/configs/
+  3. save_device_config saves each config to data/exports/
 ```
 
 ### Backup by Role
@@ -84,9 +84,9 @@ Process:
 
 ## Backup Storage
 
-All backups are saved to `.olav/data/configs/`:
+All backups are saved to `data/exports/`:
 ```
-.olav/data/configs/
+data/exports/
 ├── R1-running-config-20260108-120000.txt
 ├── R2-running-config-20260108-120000.txt
 ├── R1-startup-config-20260108-120000.txt

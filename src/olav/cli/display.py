@@ -5,15 +5,22 @@ Provides:
 - Rich-based UI rendering
 """
 
-try:
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from rich.console import Console
     from rich.text import Text
+else:
+    try:
+        from rich.console import Console
+        from rich.text import Text
 
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
-    Console = None
-    Text = None
+        RICH_AVAILABLE = True
+    except ImportError:
+        RICH_AVAILABLE = False
+        Console = None  # type: ignore[misc,assignment]
+        Text = None  # type: ignore[misc,assignment]
 
 
 def get_banner(banner_name: str = "default") -> str:
@@ -34,7 +41,7 @@ def get_banner(banner_name: str = "default") -> str:
         return ""
 
 
-def load_banner_from_config(settings_path: str | None = None) -> str:
+def load_banner_from_config(settings_path: str | Path | None = None) -> str:
     """Load banner text from settings configuration.
 
     Args:
@@ -44,20 +51,21 @@ def load_banner_from_config(settings_path: str | None = None) -> str:
         Banner text string
     """
     import json
-    from pathlib import Path
 
     if settings_path is None:
         from config.settings import settings as cfg
 
-        settings_path = Path(cfg.agent_dir) / "settings.json"
+        settings_path_obj = Path(cfg.agent_dir) / "settings.json"
+    elif isinstance(settings_path, str):
+        settings_path_obj = Path(settings_path)
     else:
-        settings_path = Path(settings_path)
+        settings_path_obj = settings_path
 
-    if not settings_path.exists():
+    if not settings_path_obj.exists():
         return get_banner("default")
 
     try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings = json.loads(settings_path_obj.read_text(encoding="utf-8"))
         show_banner = settings.get("cli", {}).get("showBanner", True)
 
         if not show_banner:
@@ -80,7 +88,7 @@ def display_banner(banner_text: str, console: Console | None = None) -> None:
     if not banner_text:
         return
 
-    if not RICH_AVAILABLE:
+    if not RICH_AVAILABLE:  # type: ignore[name-defined]
         # Fallback without rich
         print(banner_text)
         return
@@ -100,7 +108,7 @@ def print_welcome(console: Console | None = None) -> None:
         console: Rich console instance
     """
     if console is None:
-        console = Console() if RICH_AVAILABLE else None
+        console = Console() if RICH_AVAILABLE else None  # type: ignore[name-defined]
 
     # Load and display banner
     banner_text = load_banner_from_config()
@@ -168,7 +176,7 @@ class StreamingDisplay:
             verbose: Show full thinking process if True
             show_spinner: Show spinner during processing if True
         """
-        if not RICH_AVAILABLE:
+        if not RICH_AVAILABLE:  # type: ignore[name-defined]
             raise ImportError("Rich library required for StreamingDisplay")
 
         # Create console with force_terminal and no_color for better streaming

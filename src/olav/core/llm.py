@@ -80,9 +80,11 @@ class LLMFactory:
         if provider == "openai":
             if not api_key:
                 logger.warning("No embedding API key set")
+            from pydantic import SecretStr
+
             return OpenAIEmbeddings(
                 model=model,
-                api_key=api_key,
+                api_key=SecretStr(api_key) if api_key else None,  # type: ignore[arg-type]
             )
 
         if provider == "ollama":
@@ -93,7 +95,7 @@ class LLMFactory:
                 raise ImportError(msg) from e
 
             base_url = settings.embedding_base_url or "http://localhost:11434"
-            return OllamaEmbeddings(model=model, base_url=base_url)
+            return OllamaEmbeddings(model=model, base_url=base_url)  # type: ignore[return-value]
 
         msg = f"Unsupported embedding provider: {provider}"
         raise ValueError(msg)

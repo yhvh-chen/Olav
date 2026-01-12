@@ -45,7 +45,7 @@ class KnowledgeEmbedder:
             separators=["\n## ", "\n### ", "\n#### ", "\n\n", "\n", " "],
         )
 
-    def _get_embeddings(self):
+    def _get_embeddings(self) -> object:  # noqa: ANN401
         """Initialize embeddings based on settings.
 
         Returns:
@@ -65,10 +65,12 @@ class KnowledgeEmbedder:
             )
         elif provider == "openai":
             from langchain_openai import OpenAIEmbeddings
+            from pydantic import SecretStr
 
+            api_key = settings.embedding_api_key
             return OpenAIEmbeddings(
                 model=settings.embedding_model,  # text-embedding-3-small
-                openai_api_key=settings.embedding_api_key,
+                api_key=SecretStr(api_key) if api_key else None,  # type: ignore[arg-type]
             )
         else:
             raise ValueError(
@@ -112,7 +114,7 @@ class KnowledgeEmbedder:
             return 0
 
         # Calculate file hash
-        file_hash = hashlib.md5(content.encode()).hexdigest()
+        file_hash = hashlib.md5(content.encode()).hexdigest()  # noqa: S324
 
         # Check if already indexed and unchanged
         conn = duckdb.connect(self.db_path)
@@ -145,7 +147,7 @@ class KnowledgeEmbedder:
 
                 # Generate embedding
                 try:
-                    embedding = self.embeddings.embed_query(chunk)
+                    embedding = self.embeddings.embed_query(chunk)  # type: ignore[attr-defined]
                 except Exception as e:
                     print(
                         f"Warning: Could not generate embedding for chunk {i} in {file_path}: {e}"
@@ -234,7 +236,7 @@ class KnowledgeEmbedder:
             >>> print(f"Embedding dimension: {dim}")
         """
         # Test with a simple query
-        test_vector = self.embeddings.embed_query("test")
+        test_vector = self.embeddings.embed_query("test")  # type: ignore[attr-defined]
         return len(test_vector)
 
     def test_connection(self) -> bool:
@@ -250,7 +252,7 @@ class KnowledgeEmbedder:
             ...     print("❌ Embeddings not available")
         """
         try:
-            _ = self.embeddings.embed_query("test")
+            _ = self.embeddings.embed_query("test")  # type: ignore[attr-defined]
             return True
         except Exception as e:
             print(f"Embedding connection test failed: {e}")

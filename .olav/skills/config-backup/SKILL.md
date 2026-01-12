@@ -48,7 +48,7 @@ User: backup group:test running config
 Process:
   1. list_devices() → Find devices in "test" group
   2. Execute show running-config on R1, R2, R3, R4, SW1, SW2
-  3. save_device_config saves each config to agent_dir/data/configs/
+  3. save_device_config saves each config to data/exports/
 ```
 
 ### Backup by Role

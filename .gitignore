@@ -20,6 +20,8 @@ pip-wheel-metadata/
 *.egg-info/
 .installed.cfg
 *.egg
+.claude/
+.github/
 MANIFEST
 
 # Virtual environments
@@ -51,6 +53,9 @@ htmlcov/
 dmypy.json
 .pyright_cache/
 .ruff_cache/
+tests/
+*/tests/
+test_*.py
 
 # OLAV Runtime & Data (Internal)
 .olav/data/
@@ -90,3 +95,4 @@ uv.lock
 
 # Archives & Legacy (Excluded from Release)
 archive/
+docs

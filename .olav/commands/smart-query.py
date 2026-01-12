@@ -17,6 +17,7 @@ Examples:
 
 Common intents: interface, bgp, ospf, route, vlan, mac, arp, version, config
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -34,8 +35,7 @@ load_dotenv()
 def main():
     """Execute a smart query on a device."""
     parser = argparse.ArgumentParser(
-        description="Query a network device with automatic command selection",
-        prog="/smart-query"
+        description="Query a network device with automatic command selection", prog="/smart-query"
     )
     parser.add_argument("device", help="Device name (e.g., 'R1', 'SW1')")
     parser.add_argument("intent", help="Query intent (e.g., 'interface', 'bgp', 'ospf')")
@@ -45,11 +45,14 @@ def main():
 
     try:
         from olav.tools.smart_query import smart_query
-        result = smart_query.invoke({
-            "device": args.device,
-            "intent": args.intent,
-            "command": args.command,
-        })
+
+        result = smart_query.invoke(
+            {
+                "device": args.device,
+                "intent": args.intent,
+                "command": args.command,
+            }
+        )
         print(result)
         return 0
     except Exception as e:
