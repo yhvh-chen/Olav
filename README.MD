@@ -13,21 +13,28 @@ OLAV (Operations Language-based Autonomous Vehicle) is an intelligent, **agentic
 ## 🌟 Why OLAV?
 
 ### 🧠 Agentic & Autonomous
-Built on the **DeepAgents** framework, OLAV isn't just a chatbot. It is a goal-oriented agent that can:
-- **Plan**: Break down complex requests ("Audit all BGP neighbors") into sub-tasks.
-- **Act**: Execute multi-step workflows autonomously, using tools and checking results.
-- **Reflect**: Verify its own outputs before reporting back to the user.
-- **Memory**: Retain context across a troubleshooting session.
+Built on the **DeepAgents** framework, OLAV isn't just a chatbot. It is a **goal-oriented autonomous agent** that can:
+- **Plan**: Break down complex requests ("Audit all BGP neighbors") into sub-tasks with reasoning chains.
+- **Act**: Execute multi-step workflows autonomously, using tools independently and validating results before proceeding.
+- **Reflect**: Verify outputs against expected schemas, retry on failures, and adapt strategies based on feedback.
+- **Memory**: Retain context across troubleshooting sessions, learning from past solutions and building institutional knowledge.
+- **Self-Correcting**: Detect execution errors, analyze root causes, and autonomously adjust tactics—all without human intervention.
 
 ### 🔄 Claude Code Compatible
 OLAV v0.8 adopts a 100% compatible file structure with **Claude Code** (`.claude/` ↔ `.olav/`).
 - **Seamless Migration**: To use with Claude Code, simply copy `.olav/` to `.claude/` and rename `OLAV.md` to `CLAUDE.md`.
 - **Standardized SOPs**: Use standard Markdown to define robust operational procedures that the Agent follows.
 
-### 📊 Schema-Aware & Structured
+### 📊 Structured Output Parsing
 Stop feeding raw text to LLMs.
-- **TextFSM Native**: OLAV automatically runs CLI outputs through TextFSM templates, converting unstructured text streams into **Structured JSON**.
-- **Token Efficient**: This schema-aware approach reduces context usage by 50%+ and improves analysis accuracy significantly by allowing the AI to query specific fields (`interface[0].status`) rather than parsing text.
+- **TextFSM Templates**: OLAV automatically parses network CLI outputs through TextFSM templates, converting unstructured text streams into **Structured JSON schemas**.
+- **Token Efficient**: This structured parsing approach enables the AI to reason about schema fields (`interface[0].status`, `bgp[0].state`) instead of parsing raw text, improving accuracy and reducing token usage significantly.
+
+### 🔐 Schema-Aware Commands & API
+Enforce type safety and parameter validation at execution boundaries.
+- **Command Parameters**: All network commands are validated against strict schemas before execution—platform-specific (Cisco, Juniper, etc.) with typed parameters and validation rules.
+- **API Validation**: RESTful APIs and tool calls enforce request/response schemas, preventing malformed commands and ensuring consistent output structure for downstream processing.
+- **Type Safety**: Strong typing catches intent mismatches early, reducing runtime errors and improving agent reliability in autonomous execution.
 
 ### 🛡️ Enterprise Grade
 - **3-Layer Knowledge Brain**: Decouples **Skills** (How), **Knowledge** (What), and **Capabilities** (Tools).
@@ -314,28 +321,15 @@ For frequent tasks, use Slash Commands to trigger **Schema-Aware Workflows**. Th
 
 ## 🛠️ Advanced Features
 
-### 1. Schema-Aware Parsing (TextFSM)
-To teaching OLAV how to parse a new command:
+### 1. Adding Skills (Claude Code Compatible)
+Create a Markdown file in `.olav/skills/` to teach a new Standard Operating Procedure (SOP). OLAV natively reads **Claude Code** skill formats.
+
+### 2. Configuring TextFSM Parsers
+To teach OLAV how to parse a new network command:
 1.  Drop the NTC-template file into `.olav/config/textfsm/`.
 2.  Update the index file at `.olav/config/textfsm/index`.
 
-OLAV will prioritize sending the `JSON` object to the LLM instead of the raw text block, enabling "Schema-Aware" reasoning.
-
-### 2. Adding Skills (Claude Code Compatible)
-Create a Markdown file in `.olav/skills/` to teach a new Standard Operating Procedure (SOP). OLAV natively reads **Claude Code** skill formats.
-
-**Example: `.olav/skills/daily-check.md`**
-```markdown
----
-name: daily-check
-description: Perform daily health checks on edge routers
-version: 1.0
----
-# Procedure
-1. Execute `/inspect` workflow on group "edge".
-2. Check for "High CPU" log patterns.
-3. Report anomalies.
-```
+OLAV will automatically use the template to convert command output to JSON, enabling the agent to reason about structured data instead of raw text.
 
 ### 3. Adding Workflows
 To expose a Skill as a Slash Command (Workflow):
