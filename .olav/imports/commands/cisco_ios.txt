@@ -37,6 +37,9 @@ show spanning-tree
 show spanning-tree*
 show lldp
 show lldp*
+show cdp
+show cdp*
+show cdp neighbors
 
 # === System Resources ===
 show processes cpu

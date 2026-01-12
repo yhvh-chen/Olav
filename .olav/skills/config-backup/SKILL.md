@@ -84,9 +84,9 @@ Process:
 
 ## Backup Storage
 
-All backups are saved to `agent_dir/data/configs/`:
+All backups are saved to `data/exports/`:
 ```
-agent_dir/data/configs/
+data/exports/
 ├── R1-running-config-20260108-120000.txt
 ├── R2-running-config-20260108-120000.txt
 ├── R1-startup-config-20260108-120000.txt
@@ -97,7 +97,7 @@ agent_dir/data/configs/
 
 ```bash
 # Initialize repository (one-time)
-cd agent_dir/data
+cd data
 git init
 git config user.name "OLAV Backup"
 

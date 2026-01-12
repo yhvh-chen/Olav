@@ -30,33 +30,52 @@ output:
 User questions contain: "health", "status", "resources", "cpu", "memory", "uptime", "check"
 
 ## Execution Strategy
-1. **List devices** using list_devices (default group or specified)
-2. **Execute essential health commands** on each device:
-   - System information (uptime, version)
-   - CPU and memory utilization
-   - Interface status
-   - Error counters
-3. **Generate health report** with device status summary
-4. **Highlight critical issues** if found
 
-## Health Check Commands
+**MANDATORY**: You MUST execute ALL of the following steps. Do not skip any metric category.
+
+1. **List devices** using `list_devices` (default group or specified)
+2. **For each device**:
+   a. Get platform from device metadata
+   b. Search for commands using `search_capabilities(query, platform)` for EACH category below
+   c. Execute the discovered commands via `nornir_execute` or `smart_query`
+
+3. **MANDATORY checks** (execute ALL, not just some):
+   - `search_capabilities("version", platform)` → Get device version/uptime
+   - `search_capabilities("cpu", platform)` → Get CPU utilization
+   - `search_capabilities("memory", platform)` → Get memory usage
+   - `search_capabilities("interface", platform)` → Get interface status
+   - `search_capabilities("environment", platform)` → Get environmental status (if available)
+
+4. **Generate comprehensive report** with ALL metrics in a table format
+5. **Save report** to `data/reports/health-check/health-check-<timestamp>.md`
+6. **Highlight critical issues** based on thresholds below
+
+## Health Metrics to Check
 
 ### System Information
-- `show version` - Device model, serial, IOS version, uptime
-- `show clock` - Current system time (verify NTP sync)
+- **Device identity**: Model, serial number, OS version
+- **Uptime**: System uptime (flag if <7 days - recent reload)
+- **Time sync**: Current system time (verify NTP sync)
 
 ### Resource Utilization
-- `show processes cpu sorted` - CPU usage by process
-- `show memory statistics` - Memory usage (Processor Pool, IOS Process)
+- **CPU usage**: Current and average CPU utilization by process
+  - Threshold: WARNING if >50%, CRITICAL if >80%
+- **Memory usage**: Memory utilization across all pools
+  - Threshold: WARNING if >75%, CRITICAL if >90%
 
-### Interface Status
-- `show interfaces summary` - Port status overview
-- `show interfaces status` - Quick interface state view
-- `show interfaces counters errors` - Interface error counts
+### Interface Health
+- **Port status**: Number of interfaces up/down
+- **Error counters**: CRC errors, input/output errors, drops
+- **Interface states**: Any ports in error-disabled or flapping
 
-### Health Indicators
-- `show system uptime` - System uptime information
-- `show environment all` - Temperature, power, fan status (if available)
+### Environmental Health (if available)
+- **Temperature**: Device temperature status
+- **Power supplies**: Power supply status (active/failed)
+- **Fans**: Fan operational status
+
+**How to get commands**: Use `search_capabilities(query, platform)` where:
+- `query`: Concept like "cpu", "memory", "interface status", "environment", "uptime"
+- `platform`: Device platform from `list_devices` (e.g., "cisco_ios", "huawei_vrp")
 
 ## Report Format
 

@@ -29,39 +29,72 @@ output:
 User questions contain: "inspect", "comprehensive", "full check", "all devices", "L1-L4"
 
 ## Execution Strategy
-1. **List all devices in 'test' group** using list_devices(group="test")
-2. **For each device, execute comprehensive inspection** covering L1 (Physical), L2 (Data Link), L3 (Network), L4 (Transport)
-3. **Generate consolidated report** with device-by-device status
-4. **Flag anomalies** across all layers
+1. **List all devices in target group** using `list_devices(group=<group>)`
+2. **For each device, determine platform** from device metadata
+3. **Search for platform-specific commands** using `search_capabilities(query, platform=device_platform)` for each inspection layer
+4. **Execute comprehensive inspection** covering L1-L4 layers systematically
+5. **Generate consolidated report** with device-by-device status
+6. **Flag anomalies** across all layers
 
-## Comprehensive Inspection Template (L1-L4)
+## Comprehensive Inspection Framework (L1-L4)
+
+Use `search_capabilities(query, platform)` to find appropriate commands for each layer.
 
 ### L1 - Physical Layer
-- [ ] `show version` (Device model, serial, uptime)
-- [ ] `show inventory` (Hardware modules, power supplies, fans)
-- [ ] `show environment all` (Temperature, power status, fan status)
-- [ ] `show interfaces` (Physical port states, media types)
+**What to check**:
+- Device model, serial number, uptime
+- Hardware modules inventory (power supplies, fans, transceivers)
+- Environmental status (temperature, power, fan status)
+- Physical interface states and media types
+
+**Search queries**: "version", "inventory", "environment", "interfaces physical"
+
+**Thresholds**:
+- Temperature: WARNING >60°C, CRITICAL >70°C
+- Power supplies: WARNING if any inactive, CRITICAL if single PSU mode
+- Fans: WARNING if any failed
 
 ### L2 - Data Link Layer
-- [ ] `show vlan brief` (VLAN configuration and status)
-- [ ] `show spanning-tree summary` (STP topology, root bridge)
-- [ ] `show spanning-tree detail` (Port states, costs)
-- [ ] `show cdp neighbors` (CDP neighbor discovery)
-- [ ] `show mac address-table` (MAC table status, count)
+**What to check**:
+- VLAN configuration and status
+- Spanning Tree Protocol topology and port states
+- CDP/LLDP neighbor discovery
+- MAC address table status and size
+
+**Search queries**: "vlan", "spanning-tree", "cdp neighbors", "lldp", "mac address-table"
+
+**Thresholds**:
+- STP: WARNING if not root but expected to be
+- MAC table: WARNING if >80% capacity
 
 ### L3 - Network Layer
-- [ ] `show ip route summary` (Route count and protocol summary)
-- [ ] `show ip ospf neighbor` (OSPF neighbor status)
-- [ ] `show ip ospf interface brief` (OSPF interface states)
-- [ ] `show ip bgp summary` (BGP neighbor status)
-- [ ] `show ip bgp vpnv4 all summary` (VPNv4 status if applicable)
+**What to check**:
+- Routing table size and protocol summary
+- OSPF neighbor status and states
+- BGP neighbor status and session states
+- VPN status (if applicable)
+
+**Search queries**: "route", "ospf neighbor", "bgp summary", "vpn"
+
+**Thresholds**:
+- OSPF: WARNING if any neighbor not FULL
+- BGP: WARNING if any session not ESTABLISHED
+- Routes: INFO baseline count for trending
 
 ### L4 - Transport Layer & Services
-- [ ] `show tcp brief` (TCP session count)
-- [ ] `show processes cpu` (CPU utilization and process breakdown)
-- [ ] `show memory statistics` (Memory usage across memory pools)
-- [ ] `show interfaces counters errors` (Error counters on all interfaces)
-- [ ] `show interfaces counters dropped` (Dropped packet counters)
+**What to check**:
+- TCP session counts
+- CPU utilization and process breakdown
+- Memory usage across pools
+- Interface error counters and drops
+- Packet drops and queue statistics
+
+**Search queries**: "tcp", "cpu", "memory", "interface errors", "interface drops"
+
+**Thresholds**:
+- CPU: WARNING >50%, CRITICAL >80%
+- Memory: WARNING >75%, CRITICAL >90%
+- Interface errors: WARNING if increasing, CRITICAL if >0.1%
 
 ## Report Format
 

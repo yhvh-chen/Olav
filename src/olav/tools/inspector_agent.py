@@ -1,11 +1,21 @@
 """InspectorAgent Subagent for OLAV v0.8.
 
-This module implements the InspectorAgent - a specialized subagent that:
-1. Loads inspection skills from .olav/skills/inspection/
-2. Validates user parameters via HITL
-3. Executes skills via Nornir on device groups
-4. Aggregates and formats results
-5. Auto-embeds reports to knowledge base (Phase A-1 integration)
+⚠️ DEPRECATED: This module is being phased out in favor of the new architecture where
+the main agent uses Skills (.olav/skills/*/SKILL.md) + search_capabilities() for
+platform-agnostic inspection.
+
+Old Architecture (DEPRECATED):
+1. InspectorAgent loads templates from .olav/skills/inspection/
+2. Templates contain hardcoded Cisco IOS commands
+3. Limited to platforms with template files
+
+New Architecture (CURRENT):
+1. Skills define WHAT to check (CPU, memory, BGP status, etc.)
+2. Agent calls search_capabilities(query, platform) to find commands
+3. Works with any platform in capabilities.db (.olav/imports/commands/)
+4. Executes via nornir_execute() directly
+
+This module is kept for backward compatibility only and may be removed in future versions.
 """
 
 import logging

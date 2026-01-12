@@ -152,7 +152,7 @@ When given an inspection task:
    - Highlight critical issues
 
 5. **Generate Report**: Use `generate_report()` with Jinja2 template
-   - Select appropriate template (health-check, bgp-audit, etc.)
+   - Select appropriate template (device-inspection, bgp-audit, etc.)
    - Include findings, recommendations, and metrics
 
 ## Scope Parsing Examples
@@ -185,9 +185,9 @@ results = nornir_bulk_execute(
 
 # Generate report
 report_path = generate_report(
-    template="health-check",
+    template="device-inspection",
     results=results,
-    output_path="reports/health-check-20250108.md"
+    output_path="reports/inspection-20250108.md"
 )
 ```
 

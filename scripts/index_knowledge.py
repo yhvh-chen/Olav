@@ -29,7 +29,7 @@ from olav.core.database import init_knowledge_db
 from olav.tools.knowledge_embedder import KnowledgeEmbedder
 
 
-def register_source(conn, source_name: str, source_path: Path, platform: str = None) -> int:
+def register_source(conn: object, source_name: str, source_path: Path, platform: str = None) -> int:
     """Register a knowledge source in the database.
 
     Args:

@@ -129,8 +129,8 @@ async def cmd_skills(args: str) -> str:
         /skills [name]
 
     Examples:
-        /skills           - List all skills
-        /skills health    - Show health-check skill details
+        /skills             - List all skills
+        /skills deep        - Show deep-analysis skill details
     """
     from olav.core.skill_loader import get_skill_loader
 

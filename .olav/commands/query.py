@@ -114,7 +114,7 @@ def resolve_device_alias(alias: str) -> str:
                         value = parts[1].strip()
                         if key == alias.lower():
                             return value
-    except Exception:
+    except Exception as e:  # noqa: S110, F841
         pass
 
     return alias

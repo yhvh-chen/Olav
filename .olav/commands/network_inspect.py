@@ -19,31 +19,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Inspection commands by layer
+# Inspection commands by layer - these are fallbacks
+# Prefer using search_capabilities() for dynamic discovery
+# Commands must match whitelist exactly
 INSPECTION_COMMANDS = {
     "L1": [
         "show version",
         "show inventory",
-        "show environment all",
-        "show interfaces status",
+        "show environment",
+        "show ip interface brief",
     ],
     "L2": [
-        "show vlan brief",
-        "show spanning-tree summary",
-        "show mac address-table count",
+        "show vlan",
+        "show spanning-tree",
+        "show lldp neighbors",
         "show cdp neighbors",
     ],
     "L3": [
-        "show ip route summary",
+        "show ip route",
         "show ip ospf neighbor",
         "show ip bgp summary",
-        "show ip interface brief",
+        "show arp",
     ],
     "L4": [
-        "show tcp brief",
-        "show processes cpu sorted | head 10",
+        "show processes cpu",
         "show memory statistics",
-        "show interfaces counters errors",
     ],
 }
 
@@ -126,7 +126,7 @@ def generate_report(all_results: dict, layers: list[str], output_path: Path) -> 
     warn_count = 0
     error_count = 0
 
-    for device, results in all_results.items():
+    for _device, results in all_results.items():
         errors = sum(1 for r in results if not r.get("success", False))
         if errors == 0:
             ok_count += 1
@@ -233,28 +233,25 @@ def main():
             status = "✅" if errors == 0 else "⚠️" if errors < len(commands) // 2 else "❌"
             print(f"    {status} {len(commands) - errors}/{len(commands)} commands OK")
 
-        # Generate report if requested
-        if args.report:
-            from config.settings import settings
+        # Always save report (previously only with --report flag)
+        report_path = (
+            Path("data")
+            / "reports"
+            / "inspection"
+            / f"inspection-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        )
+        generate_report(all_results, layers, report_path)
+        print(f"\n📄 Report saved: {report_path}")
 
-            report_path = (
-                Path(settings.agent_dir)
-                / "data"
-                / "reports"
-                / f"inspection-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
-            )
-            generate_report(all_results, layers, report_path)
-            print(f"\n📄 Report saved: {report_path}")
-        else:
-            # Print summary
-            print("\n" + "=" * 60)
-            print("INSPECTION SUMMARY")
-            print("=" * 60)
+        # Print summary
+        print("\n" + "=" * 60)
+        print("INSPECTION SUMMARY")
+        print("=" * 60)
 
-            for device, results in all_results.items():
-                errors = sum(1 for r in results if not r["success"])
-                status = "✅" if errors == 0 else "⚠️" if errors < len(results) // 2 else "❌"
-                print(f"  {status} {device}: {len(results) - errors}/{len(results)} OK")
+        for device, results in all_results.items():
+            errors = sum(1 for r in results if not r["success"])
+            status = "✅" if errors == 0 else "⚠️" if errors < len(results) // 2 else "❌"
+            print(f"  {status} {device}: {len(results) - errors}/{len(results)} OK")
 
         return 0
 

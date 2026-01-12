@@ -46,7 +46,7 @@ class InspectionResult(BaseModel):
 class InspectionReport(BaseModel):
     """Complete inspection report data."""
 
-    inspection_type: str = Field(description="Type of inspection (health-check, bgp-audit, etc.)")
+    inspection_type: str = Field(description="Type of inspection (device-inspection, bgp-audit, etc.)")
     timestamp: str = Field(description="Report timestamp")
     devices: list[str] = Field(description="Devices inspected")
     results: list[InspectionResult] = Field(description="All inspection results")

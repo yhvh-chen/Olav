@@ -1,8 +1,14 @@
 """Inspection Skills Loader for OLAV v0.8.
 
-This module implements skill discovery and loading for the InspectorAgent.
-Skills are Markdown files stored in .olav/skills/inspection/ that define
-batch inspection procedures (interface checks, BGP validation, device health, etc.).
+⚠️ DEPRECATED: This module is being phased out in favor of the new architecture where
+the main agent uses search_capabilities() to discover platform-specific commands dynamically.
+
+The old approach (inspection templates in .olav/skills/inspection/) has been replaced with:
+1. Cognitive Skills in .olav/skills/*/SKILL.md (define WHAT to check, not HOW)
+2. Capabilities DB (stores platform-specific commands loaded from .olav/imports/commands/)
+3. search_capabilities(query, platform) tool (agent discovers commands at runtime)
+
+This module is kept for backward compatibility only and may be removed in future versions.
 """
 
 import logging
