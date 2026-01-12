@@ -12,7 +12,7 @@
 **Status**: ✅ Production Ready
 **Framework**: DeepAgents Native
 
-OLAV (Operations Language-based Autonomous Vehicle) is an intelligent, **agentic** network assistant designed for production environments. It bridges the gap between **Generative AI** and **Deterministic Network Automation** (Nornir/Netmiko).
+OLAV is an intelligent, **agentic** network assistant designed for production environments. It bridges the gap between **Generative AI** and **Deterministic Network Automation** (Nornir/Netmiko).
 
 **[中文指南](README_ZH.md)** | **English Guide**
 
