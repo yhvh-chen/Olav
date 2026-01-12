@@ -16,6 +16,10 @@ display ip interface
 # === Routing ===
 display ip routing-table
 display ip routing-table*
+display fib
+display fib*
+display forwarding-table
+display forwarding-table*
 display ospf
 display ospf*
 display ospf peer

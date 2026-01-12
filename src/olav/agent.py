@@ -30,6 +30,14 @@ from olav.tools.storage_tools import (
     write_file,
 )
 from olav.tools.task_tools import delegate_task
+from olav.tools.topology_tools import (
+    discover_topology,
+    get_topology_age,
+    query_neighbors,
+    query_path,
+    show_topology,
+)
+from olav.tools.topology_viz import render_topology_html, visualize_path, visualize_site
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -87,30 +95,59 @@ def create_olav_agent(
 
 You are OLAV, an AI for network operations. Execute queries efficiently.
 
-## Primary Tools (USE THESE FIRST)
-- `smart_query(device, intent)` - Query a device. Auto-selects best command.
-  Examples: smart_query("R1", "interface"), smart_query("SW1", "mac")
-- `batch_query(devices, intent)` - Query multiple devices. Use "all" for all devices.
-  Examples: batch_query("R1,R2", "bgp"), batch_query("all", "version")
-- `list_devices()` - Show all available devices
+## Decision Tree: Choose the Right Tool/Skill
 
-## Secondary Tools (Only if needed)
-- `search_capabilities(query, platform)` - Find specific commands
-- `nornir_execute(device, command)` - Run a specific command
-- `api_call(system, method, endpoint)` - Call external APIs
+### Topology Questions?
+User asks about: "topology", "path between", "neighbors", "connections", "network map", "discovery"
+**Action**: Use Topology Skill with these tools:
+- `discover_topology(devices)` - Discover/refresh topology data
+- `query_path(source, destination)` - Find path between devices
+- `query_neighbors(device, layer)` - Get device neighbors
+- `show_topology()` - Show topology summary
+- `get_topology_age()` - Check data freshness
+- `render_topology_html()` - Visualize topology
+
+### Single Device Query?
+User asks about: interface, bgp, ospf, route, version, config on ONE device
+**Action**: Use smart_query() first
+- Example: smart_query("R1", "interface") → auto selects "show ip interface brief"
+
+### Multiple Device Query?
+User asks about: interface, bgp, ospf, route, version on MULTIPLE devices
+**Action**: Use batch_query()
+- Example: batch_query("R1,R2", "bgp") or batch_query("all", "version")
+
+### Device Discovery?
+User asks about: "list devices", "show all devices", "inventory"
+**Action**: Use list_devices()
+
+### Advanced Search?
+User asks about: specific command for platform, cross-platform query
+**Action**: Use search_capabilities(query, platform)
+- Example: search_capabilities("interface errors", "cisco_ios")
+
+### Network Execution?
+User asks about: run a specific command directly
+**Action**: Use nornir_execute(device, command)
+- Use only when specific command is given
+
+### External Integration?
+User asks about: call API, external system integration
+**Action**: Use api_call(system, method, endpoint)
 
 ## Quick Reference
-| Intent | Example Query | Auto Command |
-|--------|--------------|--------------|
-| interface | smart_query("R1", "interface") | show ip interface brief |
-| bgp | smart_query("R1", "bgp") | show ip bgp summary |
-| ospf | smart_query("R1", "ospf") | show ip ospf neighbor |
-| route | smart_query("R1", "route") | show ip route |
-| mac | smart_query("SW1", "mac") | show mac address-table |
-| vlan | smart_query("SW1", "vlan") | show vlan brief |
-| version | smart_query("R1", "version") | show version |
+| Intent | Tool | Example |
+|--------|------|---------|
+| interface | smart_query | smart_query("R1", "interface") |
+| bgp | smart_query/batch_query | batch_query("R1,R2", "bgp") |
+| ospf | smart_query/batch_query | smart_query("R1", "ospf") |
+| route | smart_query/batch_query | batch_query("all", "route") |
+| topology | discover_topology, query_path | "What's the path from R1 to R5?" |
+| neighbors | query_neighbors | "Who are R1's neighbors?" |
+| version | batch_query | batch_query("all", "version") |
 
 ## Rules
+- Topology data has timestamps - show age to user
 - All commands are pre-approved (whitelist). Execute directly.
 - Dangerous commands are blocked (blacklist).
 - For file writes, ask for approval.
@@ -161,6 +198,15 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
         list_saved_files,  # List saved files
         # Workflow commands support
         delegate_task,  # Subagent delegation for /analyze workflow
+        # Topology discovery and visualization tools
+        discover_topology,  # Discover network topology (L1/L3)
+        show_topology,  # Show topology summary
+        query_path,  # Query path between devices
+        query_neighbors,  # Query device neighbors
+        get_topology_age,  # Get topology data age
+        render_topology_html,  # Generate HTML visualization
+        visualize_path,  # Visualize path between devices
+        visualize_site,  # Visualize site topology
         # Note: Batch backup by group/role/site is skill-driven, not tool-driven
         # Agent uses list_devices + nornir_execute + save_device_config combo
     ]
@@ -183,6 +229,15 @@ You are OLAV, an AI for network operations. Execute queries efficiently.
             "save_device_config": True,  # Config backup requires approval
             "save_tech_support": True,  # Tech-support save requires approval
             "list_saved_files": False,  # Listing is read-only
+            # Topology tools - all read-only, no HITL required
+            "discover_topology": False,  # Read-only discovery
+            "show_topology": False,  # Read-only query
+            "query_path": False,  # Read-only query
+            "query_neighbors": False,  # Read-only query
+            "get_topology_age": False,  # Read-only query
+            "render_topology_html": False,  # Read-only visualization (writes to data/)
+            "visualize_path": False,  # Read-only visualization
+            "visualize_site": False,  # Read-only visualization
         }
     else:
         # HITL disabled - all operations proceed without approval (for testing)
@@ -361,7 +416,25 @@ def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
         Formatted skill descriptions for prompt
     """
     skill_lines = []
+    
+    # Group skills by intent for better organization
+    skills_by_intent = {}
     for skill_id, skill in skills.items():
-        skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {skill.description}")
-
-    return "When approaching tasks, consider these execution strategies:\n" + "\n".join(skill_lines)
+        intent = getattr(skill, "intent", "general")
+        if intent not in skills_by_intent:
+            skills_by_intent[intent] = []
+        skills_by_intent[intent].append((skill_id, skill))
+    
+    # Format each intent group
+    for intent, skill_list in sorted(skills_by_intent.items()):
+        skill_lines.append(f"\n### {intent.capitalize()} Tasks")
+        for skill_id, skill in skill_list:
+            description = skill.description
+            signals = getattr(skill, "identification_signals", "")
+            if signals:
+                skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {description}")
+                skill_lines.append(f"  Triggers: {signals}")
+            else:
+                skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {description}")
+    
+    return "## Available Execution Strategies\n\nWhen approaching tasks, use these Skill-based strategies:" + "\n".join(skill_lines)

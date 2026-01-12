@@ -18,6 +18,9 @@ show controllers
 # === Routing ===
 show ip route
 show ip route*
+show ip cef
+show ip cef*
+show ip cef exact-route*
 show ip ospf
 show ip ospf*
 show ip ospf neighbor

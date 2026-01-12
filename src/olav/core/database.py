@@ -552,3 +552,94 @@ def init_knowledge_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     """)
 
     return conn
+
+
+# =============================================================================
+# Topology Database (Phase: Network Topology Discovery)
+# =============================================================================
+
+
+def init_topology_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
+    """Initialize the topology database for network discovery.
+
+    This creates a separate database for storing network topology:
+    - Device inventory and metadata
+    - L1/L3 neighbor relationships (CDP/LLDP, OSPF/BGP)
+    - Topology discovery timestamps
+
+    Args:
+        db_path: Path to topology database file (default: .olav/data/topology.db)
+
+    Returns:
+        DuckDB connection object
+
+    Example:
+        >>> conn = init_topology_db()
+        >>> # Use connection for topology operations...
+        >>> conn.close()
+    """
+    from config.settings import settings
+
+    if db_path is None:
+        db_path = str(Path(settings.agent_dir) / "data" / "topology.db")
+
+    # Ensure directory exists
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Connect to DuckDB
+    conn = duckdb.connect(db_path)
+
+    # Create devices table
+    conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS topology_devices_id_seq START 1
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS topology_devices (
+            name VARCHAR PRIMARY KEY,
+            hostname VARCHAR,
+            platform VARCHAR,
+            mgmt_ip VARCHAR,
+            site VARCHAR,
+            role VARCHAR,
+            discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Create links table (L1/L3 neighbor relationships)
+    conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS topology_links_id_seq START 1
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS topology_links (
+            id INTEGER PRIMARY KEY DEFAULT nextval('topology_links_id_seq'),
+            local_device VARCHAR NOT NULL,
+            local_port VARCHAR,
+            remote_device VARCHAR NOT NULL,
+            remote_port VARCHAR,
+            layer VARCHAR CHECK (layer IN ('L1', 'L3')),
+            protocol VARCHAR,
+            metadata JSON,
+            discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(local_device, local_port, remote_device, remote_port, layer)
+        )
+    """)
+
+    # Create indexes for efficient queries
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_local_device
+        ON topology_links(local_device)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_remote_device
+        ON topology_links(remote_device)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_layer
+        ON topology_links(layer)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_protocol
+        ON topology_links(protocol)
+    """)
+
+    return conn
