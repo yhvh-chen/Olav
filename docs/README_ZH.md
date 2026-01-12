@@ -79,7 +79,7 @@ R1:  # <-- 聊天中使用的别名 (例如 "检查 R1")
 你 **必须** 运行此脚本来索引设备、加载命令白名单并构建向量数据库。
 
 ```bash
-uv run python scripts/init_capabilities.py
+uv run python scripts/init.py
 ```
 *输出示例: "Successfully loaded X commands, Y devices..."*
 

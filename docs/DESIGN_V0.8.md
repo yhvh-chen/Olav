@@ -3,7 +3,7 @@
 > **文档版本**: 0.8.1 (Production Ready)
 > **更新日期**: 2026-01-10  
 > **核心理念**: 参考 Claude Code Skills 模式，三层知识架构 (Skills / Knowledge / Tools)
-> **开发状态**: Phase 1-6 ✅ 已完成 | Phase 7 🔲 待开发 (Agentic Ingestion & Hybrid Search)
+> **开发状态**: Phase 1-6 ✅ 已完成 | Phase 7 🔲 待开发 (Agentic Ingestion) | Phase 8 🔲 规划中 (Topology Learning)
 
 ---
 
@@ -3081,7 +3081,61 @@ checks:
 
 ---
 
-### Phase 8: 生产加固与多系统集成 (无限期后移)
+### Phase 8: 拓扑自学习与图数据库 (Topology Learning)
+
+**目标**: 实现网络拓扑的自动发现、存储与查询，支持大规模网络的图遍历和影响分析。
+
+**状态**: 🔲 规划中
+
+#### 8.1 拓扑存储 Schema
+```sql
+-- 节点表 (设备)
+CREATE TABLE topology_nodes (
+    id VARCHAR PRIMARY KEY,        -- hostname
+    ip VARCHAR,
+    platform VARCHAR,
+    role VARCHAR,                  -- core, access, edge
+    site VARCHAR,
+    discovered_at TIMESTAMP
+);
+
+-- 边表 (连接关系)
+CREATE TABLE topology_edges (
+    source_id VARCHAR,
+    target_id VARCHAR,
+    source_port VARCHAR,           -- Gi0/0
+    target_port VARCHAR,           -- Gi0/1
+    link_type VARCHAR,             -- physical, logical, bgp_peer, ospf_neighbor
+    discovered_via VARCHAR,        -- cdp, lldp, ospf, bgp, manual
+    bandwidth INTEGER,
+    updated_at TIMESTAMP,
+    PRIMARY KEY (source_id, target_id, source_port)
+);
+```
+
+#### 8.2 拓扑发现来源
+- [ ] **CDP/LLDP**: 从 `show cdp neighbors` / `show lldp neighbors` 提取物理邻居
+- [ ] **OSPF**: 从 `show ip ospf neighbor` 提取 L3 邻接
+- [ ] **BGP**: 从 `show bgp summary` 提取 BGP Peering
+- [ ] **手动输入**: 用户描述连接关系时自动学习
+
+#### 8.3 拓扑查询能力
+- [ ] **邻居查询**: "R1 连接了哪些设备?"
+- [ ] **路径计算**: "R1 到 SW5 经过哪些设备?" (递归 CTE)
+- [ ] **影响分析**: "如果 R2 故障，影响哪些设备?"
+- [ ] **拓扑可视化**: 生成 Mermaid/D3.js 拓扑图
+
+#### 8.4 设计考量
+| 方面 | Markdown 文件 | DuckDB 图存储 |
+|------|--------------|--------------|
+| **规模** | ❌ 10-50 设备 | ✅ 1000+ 设备 |
+| **查询** | ❌ 全文件读取 | ✅ SQL + 递归 CTE |
+| **更新** | ❌ 重写文件 | ✅ INSERT/UPDATE |
+| **路径查找** | ❌ 不支持 | ✅ 图遍历 |
+
+---
+
+### Phase 9: 生产加固与多系统集成 (长期规划)
 
 **目标**: 对接企业级外部系统。
 

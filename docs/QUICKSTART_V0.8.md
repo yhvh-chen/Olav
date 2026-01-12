@@ -11,7 +11,7 @@
 
 ```bash
 # 1️⃣ 初始化能力库 (首次运行)
-uv run python scripts/init_capabilities.py
+uv run python scripts/init.py
 
 # 2️⃣ 查看所有设备
 uv run python -m olav devices
@@ -31,7 +31,7 @@ uv run python -m olav query "查看 R1 接口"
 
 ```bash
 # 加载命令白名单到 DuckDB
-uv run python scripts/init_capabilities.py
+uv run python scripts/init.py
 
 # 输出:
 # Loading blacklist commands from .olav\imports\commands\blacklist.txt...
@@ -124,7 +124,7 @@ cat .olav/config/nornir/hosts.yaml
 ### 问题: "No capabilities found"
 ```bash
 # 运行初始化脚本
-uv run python scripts/init_capabilities.py
+uv run python scripts/init.py
 
 # 检查文件存在
 ls -la .olav/imports/commands/

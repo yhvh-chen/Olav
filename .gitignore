@@ -49,31 +49,44 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-tests/
-*/tests/
-test_*.py
+.pyright_cache/
+.ruff_cache/
 
-# OLAV Runtime & Data
+# OLAV Runtime & Data (Internal)
 .olav/data/
 .olav/logs/
-.olav/reports/
 .olav/scratch/
-*.log
 *.sqlite
 *.db
-nornir.log
+
+# Exported Data (User-Facing, Version Controlled Optional)
+# Uncomment to ignore exported data:
+data/exports/*
+data/reports/*
+data/logs/*
+# Keep directory structure:
+!data/exports/.gitkeep
+!data/reports/.gitkeep
+!data/logs/.gitkeep
 
 # Sensitive Configuration (User-Specific)
+# NEVER commit these files - they contain API keys, passwords, and secrets
 .env
+.env.local
+.env.*.local
 .olav/settings.json
+.olav/.agent_memory.json
+.olav/.cli_history
+.olav/knowledge/aliases.md
 config/inventory.csv
 .olav/config/nornir/hosts.yaml
+config/nornir/hosts.yaml
+
+# User-specific knowledge (agent-generated)
+.olav/knowledge/solutions/
 
 # Build/Packaging
 uv.lock
 
 # Archives & Legacy (Excluded from Release)
 archive/
-docs/dev_archive/
-claude-code-migration/
-.olav/config/nornir/hosts.yaml
