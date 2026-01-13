@@ -56,9 +56,24 @@ User questions contain: "check", "see", "status", "is it normal", "show", "displ
 **Command**: `show processes cpu history`, `show memory statistics`
 **Extract**: Current usage, trends
 
+## Command Templates
+
+Some commands require parameters. When you see `!VARIABLE_NAME` in a template:
+- **Replace it** with the actual value from user context
+- **Never send `!VARIABLE_NAME` literally** to the device
+
+Examples:
+| Template | User Request | Actual Command |
+|----------|--------------|----------------|
+| `show interface !INTERFACE_NAME` | "Check Gi0/1" | `show interface GigabitEthernet0/1` |
+| `show ip bgp neighbors !NEIGHBOR_IP` | "BGP from 10.1.1.2" | `show ip bgp neighbors 10.1.1.2` |
+| `show mac address-table address $MAC_ADDRESS` | "Find aabb.cc00.1100" | `show mac address-table address aabb.cc00.1100` |
+
+See knowledge/command-templates.md for full variable reference.
+
 ## Workflow
 ```
-User query → Parse alias → search_capabilities → nornir_execute → Format output
+User query → Parse alias → search_capabilities → Replace !VARIABLES → nornir_execute → Format output
 ```
 
 ## Output Format

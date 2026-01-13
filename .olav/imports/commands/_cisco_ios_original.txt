@@ -1,0 +1,249 @@
+# Cisco IOS Command Whitelist - L1-L4 Comprehensive Inspection
+# 每行一条命令，支持通配符
+# # 开头行为注释
+# ! 开头行为需要HITL审批的写命令
+
+# === L1: Physical Layer (Interface Status, Cables, Speed) ===
+show interface*
+show interface status
+show interface counter*
+show interface error*
+show interface brief
+show interface description
+show ip interface brief
+show ip interface
+show ipv6 interface brief
+show ipv6 interface
+show controllers
+show cable-length
+show power inline
+show power inline police*
+
+# === L1-L2: Link & Device Discovery ===
+show version
+show inventory
+show cdp
+show cdp*
+show cdp neighbors
+show cdp neighbors detail
+show lldp
+show lldp*
+show lldp neighbors
+show lldp neighbors detail
+show platform
+show slot
+show stack
+
+# === L2: Data Link Layer (Switching, VLAN, STP) ===
+show running-config
+show startup-config
+show vlan
+show vlan*
+show vlan id*
+show vlan summary
+show mac address-table
+show mac address-table*
+show mac address-table dynamic
+show spanning-tree
+show spanning-tree*
+show spanning-tree summary
+show spanning-tree interface*
+show spanning-tree vlan*
+show port-security
+show port-security interface*
+show port-security dynamic
+show access-lists
+show access-lists*
+show access-list summary
+
+# === L3: Network Layer (Routing, IP, ARP) ===
+show ip route
+show ip route*
+show ip cef
+show ip cef*
+show ip cef exact-route*
+show ip route summary
+show ip route vrf*
+show ip route bgp*
+show ip route ospf*
+show arp
+show arp*
+show ip arp
+show ip arp summary
+show ipv6 route
+show ipv6 route*
+show ipv6 cef
+show ipv6 arp
+show ip prefix-list
+show ip prefix-list*
+show ip prefix-list summary
+
+# === L3-L4: Routing Protocols (OSPF, BGP, Redistribution) ===
+show ip ospf
+show ip ospf*
+show ip ospf neighbor
+show ip ospf neighbor detail
+show ip ospf database
+show ip ospf interface*
+show ip ospf summary-address
+show ip ospf statistics
+show ip bgp
+show ip bgp*
+show ip bgp summary
+show ip bgp neighbors
+show ip bgp route-map
+show ip bgp policy statistics
+show ip bgp instance*
+show bgp
+show bgp*
+show ip protocols
+show ip protocols summary
+
+# === L4: Transport Layer (TCP/UDP, QoS) ===
+show policy-map
+show policy-map*
+show policy-map interface*
+show class-map
+show class-map*
+show queue
+show queue interface*
+show service-policy
+show service-policy interface*
+show qos
+show qos*
+show qos interface*
+show netflow
+show netflow interface*
+show netflow cache
+
+# === L7: Application & System ===
+show running-config
+show processes cpu
+show processes cpu history
+show processes cpu sorted
+show memory statistics
+show memory summary
+show cpu
+show cpu utilization
+show scheduler
+show scheduler allocate
+show clock
+show calendar
+show ip dns
+show ip host
+show snmp
+show snmp community
+show snmp group
+show snmp user
+show snmp view
+
+# === Environment & Health (L1-L7) ===
+show environment
+show environment all
+show environment fan
+show environment power
+show environment temperature
+show environment alarm
+show power supply
+show power supply detail
+show power inline
+show module
+show diag
+show diag result*
+show error
+show error packet*
+show exception
+show tech-support
+show tech-support detail
+
+# === System Events & Logging (L1-L7) ===
+show logging
+show logging*
+show logging summary
+show log
+show syslog
+show syslog summary
+show exception log
+show debug
+show debug all
+
+# === Configuration Audit ===
+show running-config
+show running-config all
+show running-config | *
+show startup-config
+show configuration
+show config merge
+
+# === MPLS (L3) ===
+show mpls
+show mpls*
+show mpls interface
+show mpls ldp
+show mpls ldp neighbor*
+show mpls ldp discovery
+show mpls label*
+show mpls forwarding-table
+show mpls forwarding-table detail
+
+# === BGP Detailed (L3-L4) ===
+show ip bgp
+show ip bgp*
+show ip bgp summary
+show ip bgp neighbors
+show ip bgp neighbors advertised-routes*
+show ip bgp neighbors received-routes*
+show ip bgp route-map*
+show ip bgp policy*
+show ip bgp community*
+show ip bgp as-path*
+show ip bgp regular-expression*
+
+# === OSPF Detailed (L3-L4) ===
+show ip ospf
+show ip ospf*
+show ip ospf neighbor*
+show ip ospf database*
+show ip ospf interface*
+show ip ospf virtual-link*
+show ip ospf area*
+show ip ospf summary-address*
+show ip ospf external*
+show ip ospf sham-link*
+
+# === Utilities ===
+ping
+ping *
+traceroute
+traceroute *
+telnet
+show ip sla*
+show ip sla summary
+show ip sla responder*
+
+# === Nat/ACL/Policy ===
+show ip nat*
+show ip nat translation*
+show ip nat statistics
+show ip nat inside source*
+show ip nat outside source*
+show access-lists
+show access-lists*
+show access-list summary
+show route-map
+show route-map*
+
+# === Configuration Commands (Require HITL) ===
+!configure terminal
+!interface
+!router ospf
+!router bgp
+!ip route
+!vlan
+!access-list
+!route-map
+!class-map
+!policy-map
+!write memory
+!copy running-config startup-config
+!reload

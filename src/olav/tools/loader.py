@@ -111,6 +111,22 @@ class CapabilitiesLoader:
                 if not command:
                     continue
 
+                # Skip wildcard commands that are not directly executable
+                # These are documentation patterns, not real commands
+                if "*" in command:
+                    continue
+
+                # Skip template commands with !VARIABLE placeholders
+                # (! is comment in network CLI, so safe if accidentally sent)
+                # Pattern: !UPPERCASE_NAME (e.g., !INTERFACE_NAME, !VLAN_ID)
+                if "!INTERFACE" in command.upper() or "!VLAN" in command.upper():
+                    continue
+                # Generic check for any !UPPERCASE pattern in the middle of command
+                import re
+
+                if re.search(r"![A-Z_]+", command):
+                    continue
+
                 if not dry_run:
                     assert self.db is not None  # For type checker  # noqa: S101
                     self.db.insert_capability(

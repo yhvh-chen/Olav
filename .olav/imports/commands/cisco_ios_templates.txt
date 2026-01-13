@@ -1,0 +1,94 @@
+# Cisco IOS Command Templates - 需要参数的命令模板
+# 
+# 格式说明:
+#   !VARIABLE_NAME 表示需要替换的变量
+#   LLM/Agent遇到这些模板时，需要根据上下文填写具体值
+#
+# 常用变量名:
+#   !INTERFACE_NAME - 接口名 (GigabitEthernet0/1, Ethernet0/0)
+#   !VLAN_ID        - VLAN号 (10, 100, 200)
+#   !PREFIX         - IP前缀 (10.0.0.0/8, 192.168.1.0/24)
+#   !IP_ADDRESS     - IP地址 (10.1.1.1, 192.168.1.100)
+#   !MAC_ADDRESS    - MAC地址 (aabb.cc00.1100)
+#   !NEIGHBOR_IP    - 邻居IP (用于BGP/OSPF)
+#   !AS_NUMBER      - AS号 (65000, 65001)
+#   !PROTOCOL       - 协议名 (ospf, bgp, static)
+#   !VRF_NAME       - VRF名称 (management, customer-a)
+#   !ACL_NAME       - ACL名称 (inside-acl, outside-acl)
+#   !ROUTE_MAP_NAME - Route-map名称
+#   !TARGET         - ping/traceroute目标
+
+# === L1: Interface Templates ===
+show interface !INTERFACE_NAME
+show interface !INTERFACE_NAME counters
+show interface !INTERFACE_NAME counters errors
+show power inline !INTERFACE_NAME
+
+# === L2: VLAN/STP Templates ===
+show vlan id !VLAN_ID
+show mac address-table address !MAC_ADDRESS
+show mac address-table interface !INTERFACE_NAME
+show mac address-table vlan !VLAN_ID
+show spanning-tree interface !INTERFACE_NAME
+show spanning-tree vlan !VLAN_ID
+show port-security interface !INTERFACE_NAME
+
+# === L3: Routing Templates ===
+show ip route !PREFIX
+show ip route !PROTOCOL
+show ip route vrf !VRF_NAME
+show ip cef !PREFIX
+show ip cef exact-route !IP_ADDRESS !IP_ADDRESS
+show arp !IP_ADDRESS
+show ipv6 route !PREFIX
+show ip prefix-list !ACL_NAME
+
+# === L3-L4: OSPF Templates ===
+show ip ospf neighbor !NEIGHBOR_IP
+show ip ospf interface !INTERFACE_NAME
+show ip ospf database !DATABASE_TYPE
+show ip ospf virtual-link !AREA_ID
+show ip ospf area !AREA_ID
+
+# === L3-L4: BGP Templates ===
+show ip bgp !PREFIX
+show ip bgp neighbors !NEIGHBOR_IP
+show ip bgp neighbors !NEIGHBOR_IP advertised-routes
+show ip bgp neighbors !NEIGHBOR_IP received-routes
+show ip bgp route-map !ROUTE_MAP_NAME
+show ip bgp community !COMMUNITY
+show ip bgp regexp !AS_PATH_REGEX
+
+# === L4: QoS Templates ===
+show policy-map !POLICY_NAME
+show policy-map interface !INTERFACE_NAME
+show class-map !CLASS_NAME
+show queue interface !INTERFACE_NAME
+show service-policy interface !INTERFACE_NAME
+show qos interface !INTERFACE_NAME
+show netflow interface !INTERFACE_NAME
+
+# === MPLS Templates ===
+show mpls ldp neighbor !NEIGHBOR_IP
+show mpls label !LABEL_NUMBER
+show mpls forwarding-table !PREFIX
+
+# === Diagnostics Templates ===
+show diag result !MODULE
+show error packet !INTERFACE_NAME
+show ip sla !SLA_ID
+show ip sla responder !RESPONDER_ID
+
+# === NAT/ACL Templates ===
+show ip nat translation !IP_ADDRESS
+show ip nat inside source !IP_ADDRESS
+show access-list !ACL_NAME
+show route-map !ROUTE_MAP_NAME
+
+# === Utilities ===
+ping !TARGET
+traceroute !TARGET
+
+# === Logging Templates ===
+show logging | include !PATTERN
+show running-config | section !SECTION

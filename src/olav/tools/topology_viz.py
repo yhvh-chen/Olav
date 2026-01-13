@@ -4,11 +4,52 @@ This module provides functions for generating interactive HTML visualizations
 of network topology using pyvis.
 """
 
+import json
+import re
 from pathlib import Path
 
 from langchain_core.tools import tool
 
 from olav.tools.topology_graph import TopologyGraph
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def _shorten_interface(name: str) -> str:
+    """Shorten interface name to abbreviated form.
+
+    Examples:
+        GigabitEthernet0/2 -> Gi0/2
+        Ethernet0/0 -> Eth0/0
+        Gig 2 -> Gi2
+        FastEthernet0/1 -> Fa0/1
+    """
+    if not name:
+        return ""
+
+    # Common interface abbreviations
+    patterns = [
+        (r"GigabitEthernet\s*(\S+)", r"Gi\1"),
+        (r"Gig\s*(\S+)", r"Gi\1"),
+        (r"FastEthernet\s*(\S+)", r"Fa\1"),
+        (r"Ethernet\s*(\S+)", r"Eth\1"),
+        (r"Eth\s*(\S+)", r"Eth\1"),
+        (r"TenGigabitEthernet\s*(\S+)", r"Te\1"),
+        (r"FortyGigabitEthernet\s*(\S+)", r"Fo\1"),
+        (r"Loopback\s*(\S+)", r"Lo\1"),
+        (r"Vlan\s*(\S+)", r"Vl\1"),
+    ]
+
+    result = name.strip()
+    for pattern, replacement in patterns:
+        match = re.match(pattern, result, re.IGNORECASE)
+        if match:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+            break
+
+    return result
 
 
 @tool
@@ -16,6 +57,7 @@ def render_topology_html(
     devices: str | None = None,
     viz_type: str = "topology",
     description: str = "full",
+    protocols: str | None = None,
 ) -> str:
     """Generate interactive HTML topology visualization.
 
@@ -28,18 +70,19 @@ def render_topology_html(
         devices: Comma-separated device names to include, or None for all devices
         viz_type: Visualization type - "topology", "path", or "analysis"
         description: Protocol or description name (e.g., "bgp", "ospf", "cdp-lldp")
+        protocols: Comma-separated protocols to filter edges (e.g., "CDP,LLDP" or "OSPF")
 
     Returns:
         Path to the generated HTML file
 
     Examples:
-        >>> render_topology_html(description="bgp")
+        >>> render_topology_html(description="bgp", protocols="BGP")
         "data/visualizations/topology/bgp.html"
 
-        >>> render_topology_html(description="ospf")
+        >>> render_topology_html(description="ospf", protocols="OSPF")
         "data/visualizations/topology/ospf.html"
 
-        >>> render_topology_html(description="cdp-lldp")
+        >>> render_topology_html(description="cdp-lldp", protocols="CDP,LLDP")
         "data/visualizations/topology/cdp-lldp.html"
     """
     from pyvis.network import Network
@@ -64,13 +107,13 @@ def render_topology_html(
         if valid_devices:
             graph = graph.subgraph(valid_devices).copy()
 
-    # Create pyvis network
+    # Create pyvis network (undirected for cleaner visualization)
     net = Network(
         height="800px",
         width="100%",
         bgcolor="#1a1a2e",
         font_color="white",  # type: ignore
-        directed=True,
+        directed=False,  # Undirected = single link between nodes
     )
 
     # Configure physics engine for better layout
@@ -109,25 +152,123 @@ def render_topology_html(
 
         net.add_node(node, label=hostname, color=color, title=title)
 
-    # Add edges with protocol and interface labels
+    # Build protocol filter set
+    protocol_filter: set[str] | None = None
+    if protocols:
+        protocol_filter = {p.strip().upper() for p in protocols.split(",")}
+
+    # Add edges with interface labels (deduplicate bidirectional links)
+    seen_edges: set[tuple[str, str]] = set()
     for u, v, data in graph.edges(data=True):
-        # Build edge label: show local interface and protocol
-        label_parts = []
-        if data.get("local_port"):
-            label_parts.append(data["local_port"])
-        if data.get("protocol"):
-            label_parts.append(f"({data['protocol']})")
+        # Filter by protocol if specified
+        edge_protocol = data.get("protocol", "").upper()
+        if protocol_filter and edge_protocol not in protocol_filter:
+            continue  # Skip edge not matching protocol filter
 
-        label = " ".join(label_parts) if label_parts else data.get("protocol", "")
+        # Create canonical edge key (sorted to deduplicate A-B and B-A)
+        edge_key = tuple(sorted([u, v]))
+        if edge_key in seen_edges:
+            continue  # Skip duplicate reverse edge
+        seen_edges.add(edge_key)
 
-        # Build title with connection info
-        title = f"Link: {u} -> {v}\n"
-        title += f"Protocol: {data.get('protocol', 'N/A')}\n"
-        if data.get("local_port"):
-            title += f"Local Interface: {data['local_port']}\n"
-        if data.get("remote_port"):
-            title += f"Remote Interface: {data['remote_port']}\n"
-        title += f"Layer: {data.get('layer', 'N/A')}"
+        # Build edge label: show both ports with short names
+        local_port = data.get("local_port", "")
+        remote_port = data.get("remote_port", "")
+
+        # Shorten interface names for display
+        local_short = _shorten_interface(local_port)
+        remote_short = _shorten_interface(remote_port)
+
+        # Build protocol-specific label
+        protocol = data.get("protocol", "")
+
+        # Parse metadata for IPs and AS info
+        metadata_raw = data.get("metadata", "{}")
+        if isinstance(metadata_raw, str):
+            try:
+                metadata = json.loads(metadata_raw) if metadata_raw else {}
+            except json.JSONDecodeError:
+                metadata = {}
+        else:
+            metadata = metadata_raw or {}
+        local_ip = metadata.get("local_ip", "")
+        remote_ip = metadata.get("remote_ip", "")
+        local_as = metadata.get("local_as", "")
+        remote_as = metadata.get("remote_as", "")
+
+        # Determine BGP type (iBGP/eBGP) for label and title
+        bgp_type = ""
+        if protocol == "BGP" and local_as and remote_as:
+            bgp_type = "iBGP" if local_as == remote_as else "eBGP"
+
+        # Build edge label based on protocol
+        if protocol == "BGP":
+            # BGP: show iBGP or eBGP as label
+            label = bgp_type if bgp_type else "BGP"
+        elif protocol == "OSPF":
+            # OSPF: show G1↔G2 style (both local and remote interface)
+            if local_short and remote_short:
+                label = f"{local_short}↔{remote_short}"
+            elif local_short:
+                label = local_short
+            else:
+                label = protocol
+        elif local_short and remote_short:
+            # CDP/LLDP: show both interfaces
+            label = f"{local_short}↔{remote_short}"
+        elif local_short:
+            label = local_short
+        else:
+            label = protocol
+
+        # Build detailed title for hover
+        title = f"🔗 Link: {u} ↔ {v}\n"
+        title += "━━━━━━━━━━━━━━━━━━━━━\n"
+
+        # Protocol-specific info in title
+        if protocol == "BGP" and bgp_type:
+            title += f"Protocol: {bgp_type}\n"
+            title += f"AS: {local_as} ↔ {remote_as}\n"
+        else:
+            title += f"Protocol: {protocol}\n"
+
+        title += f"Layer: {data.get('layer', 'N/A')}\n"
+        title += "━━━━━━━━━━━━━━━━━━━━━\n"
+
+        # Show connection info for each side
+        # Format: Device: Interface (IP) - but only show non-empty parts
+        if protocol == "BGP":
+            # BGP: show router IDs (IPs) without N/A
+            if local_ip:
+                title += f"{u}: {local_ip}\n"
+            if remote_ip:
+                title += f"{v}: {remote_ip}\n"
+        elif protocol in ("CDP", "LLDP"):
+            # CDP/LLDP: show interfaces, add IPs if available
+            if local_port:
+                title += f"{u}: {local_port}"
+                if local_ip:
+                    title += f" ({local_ip})"
+                title += "\n"
+            if remote_port:
+                title += f"{v}: {remote_port}"
+                if remote_ip:
+                    title += f" ({remote_ip})"
+                title += "\n"
+        else:
+            # OSPF: show both interfaces and IPs (enriched from cross-reference)
+            if local_port:
+                title += f"{u}: {_shorten_interface(local_port)}"
+                if local_ip:
+                    title += f" ({local_ip})"
+                title += "\n"
+            if remote_port:
+                title += f"{v}: {_shorten_interface(remote_port)}"
+                if remote_ip:
+                    title += f" ({remote_ip})"
+                title += "\n"
+            elif remote_ip:
+                title += f"{v}: {remote_ip}\n"
 
         net.add_edge(u, v, label=label, title=title)
 
@@ -269,24 +410,32 @@ def visualize_by_protocol(protocol: str) -> str:
 
     devices_str = ",".join(sorted(devices))
 
+    # Build protocol filter string
+    if protocol_upper in ("CDP", "LLDP"):
+        protocols_filter = "CDP,LLDP"
+    else:
+        protocols_filter = protocol_upper
+
     return render_topology_html.invoke(
         {
             "devices": devices_str,
             "viz_type": "topology",
             "description": output_description,
+            "protocols": protocols_filter,
         }
     )
 
 
 @tool
 def visualize_full_topology() -> dict:
-    """Generate essential topology visualizations.
+    """Generate protocol-specific topology visualizations.
 
-    This function generates visualization files for critical protocols only:
-    - Full topology (all devices and links)
-    - CDP-LLDP Discovery (L1 adjacency, consolidated)
+    This function generates visualization files for discovery protocols:
+    - CDP-LLDP Discovery (L1/L2 adjacency, consolidated)
     - OSPF Routing (L3 routing)
     - BGP Routing (L3 routing)
+
+    Note: 'full' topology is deprecated - use protocol-specific views.
 
     Returns:
         Dictionary with paths to generated visualization files
@@ -294,7 +443,6 @@ def visualize_full_topology() -> dict:
     Examples:
         >>> visualize_full_topology()
         {
-            "full": "data/visualizations/topology/full.html",
             "cdp-lldp": "data/visualizations/topology/cdp-lldp.html",
             "ospf": "data/visualizations/topology/ospf.html",
             "bgp": "data/visualizations/topology/bgp.html"
@@ -302,11 +450,9 @@ def visualize_full_topology() -> dict:
     """
     results = {}
 
-    # Generate full topology
-    full_path = render_topology_html.invoke({"viz_type": "topology", "description": "full"})
-    results["full"] = full_path
+    # NOTE: 'full' topology deprecated - generate protocol-specific views only
 
-    # Generate consolidated CDP-LLDP (L1 adjacency) - single file for both
+    # Generate consolidated CDP-LLDP (L1/L2 adjacency) - single file for both
     topo = TopologyGraph()
     graph = topo.get_graph()
 
@@ -328,6 +474,7 @@ def visualize_full_topology() -> dict:
                 "devices": devices_str,
                 "viz_type": "topology",
                 "description": "cdp-lldp",
+                "protocols": "CDP,LLDP",
             }
         )
         results["cdp-lldp"] = cdp_lldp_path
