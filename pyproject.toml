@@ -7,7 +7,7 @@ packages = ["src/olav", "config"]
 
 [project]
 name = "olav"
-version = "0.8.0"
+version = "0.8.1"
 description = "OLAV - Network Operations AI Assistant with DeepAgents"
 readme = "README.MD"
 requires-python = ">=3.11"
@@ -104,6 +104,12 @@ ignore = ["E402", "E501"]  # E402: dotenv loading, E501: line length in docstrin
 "tests/unit/test_topology*.py" = ["S101", "ANN"]  # Test files
 "tests/integration/test_topology*.py" = ["S101", "ANN"]  # Integration tests
 "tests/e2e/test_topology*.py" = ["S101", "ANN"]  # E2E tests
+# New Map-Reduce modules
+"src/olav/tools/sync_tools.py" = ["E501", "E402", "S603", "S607"]
+"src/olav/tools/event_tools.py" = ["E501"]
+"src/olav/tools/map_tools.py" = ["E501"]
+"src/olav/core/llm_interface.py" = ["E501"]
+"src/olav/core/map_scheduler.py" = ["E501", "E741"]
 
 [tool.mypy]
 strict = true
