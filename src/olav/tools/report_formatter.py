@@ -111,18 +111,24 @@ def format_inspection_report(
 def _resolve_language(language: str) -> str:
     """Resolve 'auto' language to actual language code.
 
-    For simplicity, defaults to 'en-US'. In production, this would
-    analyze the user's input language.
+    Language is controlled by Skill YAML frontmatter:
+    ```yaml
+    output:
+      language: auto  # or 'en-US', 'zh-CN'
+    ```
+    
+    The 'auto' setting lets the LLM detect and adapt to user's language.
+    This function provides a fallback default only.
 
     Args:
-        language: Language code from config ("auto", "en-US", "zh-CN")
+        language: Language code from Skill config ("auto", "en-US", "zh-CN")
 
     Returns:
         Resolved language code ("en-US" or "zh-CN")
     """
     if language == "auto":
-        # TODO: Implement actual language detection from user input
-        # For now, default to English
+        # Default to English when auto-detection is requested
+        # LLM will adapt based on user's input language in Skill execution
         return "en-US"
     return language
 
