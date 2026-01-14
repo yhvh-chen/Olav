@@ -74,6 +74,14 @@ data/logs/*
 !data/reports/.gitkeep
 !data/logs/.gitkeep
 
+# Test & Development Data (Never Commit)
+data/sync/
+data/visualizations/
+data/e2e_test_backups/
+nornir.log
+run_*.py
+run_*.sh
+
 # Sensitive Configuration (User-Specific)
 # NEVER commit these files - they contain API keys, passwords, and secrets
 .env
