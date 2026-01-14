@@ -641,7 +641,7 @@ def _generate_sync_summary(
         ],
         "raw_data_path": str(sync_dir / "raw"),
         "parsed_data_path": str(sync_dir / "parsed"),
-        "database_path": str(Path(sync_dir).parents[2] / ".olav" / "db" / "network_warehouse.duckdb"),
+        "database_path": str(Path(settings.agent_dir) / "db" / "network_warehouse.duckdb"),
     }
 
     summary_file = sync_dir / "reports" / "sync_summary.json"
