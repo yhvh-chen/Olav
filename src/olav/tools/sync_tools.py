@@ -31,11 +31,11 @@ def get_sync_base_dir() -> Path:
     """Get the base directory for sync data.
 
     Returns:
-        Path to data/sync/ directory (in project root, not .olav/)
+        Path to exports/snapshots/sync/ directory (in project root, not .olav/)
     """
     from config.settings import PROJECT_ROOT
 
-    return PROJECT_ROOT / "data" / "sync"
+    return PROJECT_ROOT / "exports" / "snapshots" / "sync"
 
 
 def get_sync_dir(date: str | None = None) -> Path:
@@ -45,7 +45,7 @@ def get_sync_dir(date: str | None = None) -> Path:
         date: Date string in YYYY-MM-DD format (default: today)
 
     Returns:
-        Path to data/sync/YYYY-MM-DD/ directory
+        Path to exports/snapshots/sync/YYYY-MM-DD/ directory
     """
     base_dir = get_sync_base_dir()
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -457,7 +457,7 @@ def _process_sync_stage2(sync_dir: Path, device_names: list[str]) -> None:
         from olav.tools.topology_viz import visualize_full_topology
 
         # Initialize topology database and load devices
-        db_path = str(Path(settings.agent_dir) / "data" / "topology.db")
+        db_path = str(Path(settings.agent_dir) / "db" / "network_warehouse.duckdb")
         conn = init_topology_db(db_path)
 
         # Load devices from Nornir inventory
@@ -523,7 +523,7 @@ def _get_command_category(command: str) -> str:
 
 
 def _init_sync_db(sync_dir: Path) -> duckdb.DuckDBPyConnection:
-    """Initialize the sync database (unified location: .olav/data/topology.db).
+    """Initialize the sync database (unified location: .olav/db/network_warehouse.duckdb).
 
     Args:
         sync_dir: Path to sync directory (used only for reference)
@@ -531,7 +531,7 @@ def _init_sync_db(sync_dir: Path) -> duckdb.DuckDBPyConnection:
     Returns:
         DuckDB connection
     """
-    db_path = Path(settings.agent_dir) / "data" / "topology.db"
+    db_path = Path(settings.agent_dir) / "db" / "network_warehouse.duckdb"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = duckdb.connect(str(db_path))
@@ -574,7 +574,7 @@ def _store_sync_metadata(
     success_count: int,
     error_count: int,
 ) -> None:
-    """Store sync metadata in database (unified location: .olav/data/topology.db).
+    """Store sync metadata in database (unified location: .olav/db/network_warehouse.duckdb).
 
     Args:
         sync_dir: Path to sync directory
@@ -584,7 +584,7 @@ def _store_sync_metadata(
         success_count: Successful commands
         error_count: Failed commands
     """
-    db_path = Path(settings.agent_dir) / "data" / "topology.db"
+    db_path = Path(settings.agent_dir) / "db" / "network_warehouse.duckdb"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Ensure tables exist before inserting
@@ -641,7 +641,7 @@ def _generate_sync_summary(
         ],
         "raw_data_path": str(sync_dir / "raw"),
         "parsed_data_path": str(sync_dir / "parsed"),
-        "database_path": str(Path(sync_dir).parents[2] / ".olav" / "data" / "topology.db"),
+        "database_path": str(Path(sync_dir).parents[2] / ".olav" / "db" / "network_warehouse.duckdb"),
     }
 
     summary_file = sync_dir / "reports" / "sync_summary.json"

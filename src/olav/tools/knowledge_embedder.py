@@ -37,7 +37,7 @@ class KnowledgeEmbedder:
         Args:
             db_path: Optional path to knowledge database (uses default if not provided)
         """
-        self.db_path = db_path or str(Path(settings.agent_dir) / "data" / "knowledge.db")
+        self.db_path = db_path or str(Path(settings.agent_dir) / "db" / "knowledge.duckdb")
         self.embeddings = self._get_embeddings()
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,

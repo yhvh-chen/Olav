@@ -92,7 +92,7 @@ class TopologyLink(BaseModel):
 # ============================================================================
 
 
-def _get_known_devices(db_path: str = ".olav/data/topology.db") -> set[str]:
+def _get_known_devices(db_path: str = ".olav/db/network_warehouse.duckdb") -> set[str]:
     """从数据库读取已知设备列表"""
     try:
         db = duckdb.connect(db_path)
@@ -123,7 +123,7 @@ class TopologyImporter:
     策略2: Raw数据 + LLM → Pydantic验证 (灵活, 智能)
     """
 
-    def __init__(self, db_path: str = ".olav/data/topology.db") -> None:
+    def __init__(self, db_path: str = ".olav/db/network_warehouse.duckdb") -> None:
         self.db_path = db_path
         self.db = duckdb.connect(db_path)
         self.known_devices = self._load_known_devices()

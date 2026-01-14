@@ -83,12 +83,12 @@ def render_topology_html(
         "data/visualizations/topology/ospf.html"
 
         >>> render_topology_html(description="cdp-lldp", protocols="CDP,LLDP")
-        "data/visualizations/topology/cdp-lldp.html"
+        "exports/visualizations/topology/cdp-lldp.html"
     """
     from pyvis.network import Network
 
-    # Create output directory (data/visualizations, not .olav/data/visualizations)
-    output_dir = Path("data/visualizations") / viz_type
+    # Create output directory (exports/visualizations, not .olav/db/)
+    output_dir = Path("exports/visualizations") / viz_type
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Use description as filename without timestamp (forces update each run)

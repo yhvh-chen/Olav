@@ -58,29 +58,31 @@ tests/
 test_*.py
 
 # OLAV Runtime & Data (Internal)
-.olav/data/
+.olav/db/*.duckdb
 .olav/logs/
 .olav/scratch/
 *.sqlite
-*.db
 
 # Exported Data (User-Facing, Version Controlled Optional)
 # Uncomment to ignore exported data:
-data/exports/*
-data/reports/*
-data/logs/*
+exports/snapshots/*
+exports/reports/*
+exports/visualizations/*
 # Keep directory structure:
-!data/exports/.gitkeep
-!data/reports/.gitkeep
-!data/logs/.gitkeep
+!exports/.gitkeep
+!exports/snapshots/.gitkeep
+!exports/reports/.gitkeep
+!exports/reports/analysis/.gitkeep
+!exports/reports/snapshots/.gitkeep
+!exports/visualizations/.gitkeep
 
-# Test & Development Data (Never Commit)
+# Legacy data directories (deprecated after v0.8.2 restructure)
 data/sync/
 data/visualizations/
 data/e2e_test_backups/
-nornir.log
-run_*.py
-run_*.sh
+data/exports/*
+data/reports/*
+data/logs/*
 
 # Sensitive Configuration (User-Specific)
 # NEVER commit these files - they contain API keys, passwords, and secrets

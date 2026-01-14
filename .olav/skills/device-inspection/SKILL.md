@@ -28,11 +28,21 @@ output:
 ## Identification Signals
 User questions contain: "inspect", "comprehensive", "full check", "all devices", "L1-L4"
 
-## Execution Strategy
-1. **List all devices in target group** using `list_devices(group=<group>)`
-2. **For each device, determine platform** from device metadata
-3. **Search for platform-specific commands** using `search_capabilities(query, platform=device_platform)` for each inspection layer
-4. **Execute comprehensive inspection** covering L1-L4 layers systematically
+## Execution Strategy (Two-Stage Pipeline)
+
+**Stage 1 - Data Collection (Fast):**
+1. Call `sync_all(devices="all", group="<target_group>", categories="...")` 
+2. Data automatically saved to disk (parallel via Nornir)
+3. Returns immediately with collection summary
+
+**Stage 2 - Analysis (Async):**
+4. Data parsing + LLM analysis runs in background (non-blocking)
+5. Reports generated to `data/sync/YYYY-MM-DD/reports/`
+
+### Implementation Details
+- Use `sync_all(group="test")` for test devices (default)
+- Use `sync_all(group="core")` for production inspection
+- Nornir handles parallel execution (6 devices → ~10 seconds)
 5. **Generate consolidated report** with device-by-device status
 6. **Flag anomalies** across all layers
 

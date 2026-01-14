@@ -104,7 +104,7 @@ def search_knowledge(
     Returns:
         Formatted search results with content snippets
     """
-    db_path = Path(settings.agent_dir) / "data" / "knowledge.db"
+    db_path = Path(settings.agent_dir) / "db" / "knowledge.duckdb"
 
     if not db_path.exists():
         return ""  # Knowledge base not initialized

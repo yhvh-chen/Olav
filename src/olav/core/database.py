@@ -23,12 +23,12 @@ class OlavDatabase:
         """Initialize database connection.
 
         Args:
-            db_path: Path to DuckDB database file (defaults to agent_dir/data/capabilities.db)
+            db_path: Path to DuckDB database file (defaults to agent_dir/db/registry.duckdb)
         """
         if db_path is None:
             from config.settings import settings
 
-            db_path = Path(settings.agent_dir) / "data" / "capabilities.db"
+            db_path = Path(settings.agent_dir) / "db" / "registry.duckdb"
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -426,7 +426,7 @@ def init_knowledge_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     - Learned solutions from HITL interactions
 
     Args:
-        db_path: Path to knowledge database file (default: .olav/data/knowledge.db)
+        db_path: Path to knowledge database file (default: .olav/db/knowledge.duckdb)
 
     Returns:
         DuckDB connection object
@@ -439,7 +439,7 @@ def init_knowledge_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     from config.settings import settings
 
     if db_path is None:
-        db_path = str(Path(settings.agent_dir) / "data" / "knowledge.db")
+        db_path = str(Path(settings.agent_dir) / "db" / "knowledge.duckdb")
 
     # Ensure directory exists
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -568,7 +568,7 @@ def init_topology_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     - Topology discovery timestamps
 
     Args:
-        db_path: Path to topology database file (default: .olav/data/topology.db)
+        db_path: Path to topology database file (default: .olav/db/network_warehouse.duckdb)
 
     Returns:
         DuckDB connection object
@@ -581,7 +581,7 @@ def init_topology_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     from config.settings import settings
 
     if db_path is None:
-        db_path = str(Path(settings.agent_dir) / "data" / "topology.db")
+        db_path = str(Path(settings.agent_dir) / "db" / "network_warehouse.duckdb")
 
     # Ensure directory exists
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -640,6 +640,64 @@ def init_topology_db(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_links_protocol
         ON topology_links(protocol)
+    """)
+
+    # Map-Reduce: inspect_results table
+    conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS inspect_results_id_seq START 1
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS inspect_results (
+            id INTEGER PRIMARY KEY DEFAULT nextval('inspect_results_id_seq'),
+            sync_date DATE,
+            device VARCHAR NOT NULL,
+            check_type VARCHAR NOT NULL,
+            interface VARCHAR,
+            command VARCHAR,
+            status VARCHAR NOT NULL,
+            value VARCHAR,
+            threshold VARCHAR,
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Map-Reduce: log_analysis table
+    conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS log_analysis_id_seq START 1
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS log_analysis (
+            id INTEGER PRIMARY KEY DEFAULT nextval('log_analysis_id_seq'),
+            sync_date DATE,
+            device VARCHAR NOT NULL,
+            status VARCHAR NOT NULL,
+            event_count INTEGER,
+            events_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Indexes for Map-Reduce tables
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inspect_device
+        ON inspect_results(device)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inspect_status
+        ON inspect_results(status)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inspect_date
+        ON inspect_results(sync_date)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_log_device
+        ON log_analysis(device)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_log_status
+        ON log_analysis(status)
     """)
 
     return conn

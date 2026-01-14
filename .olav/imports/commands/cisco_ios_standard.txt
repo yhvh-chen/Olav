@@ -1,0 +1,86 @@
+# Cisco IOS Command Whitelist - Standard Read-Only Commands Only
+# 仅包含可以直接执行且可被解析的标准命令
+# 基于ntc-templates官方模板支持的命令
+# 每行一条命令，不包含通配符
+# # 开头行为注释
+# ! 开头行为需要HITL审批的写命令（本文件中已全部移除）
+
+# === L1: Physical Layer (Interface Status, Cables, Speed) ===
+show interface status
+show interface description
+show ip interface brief
+show ip interface
+show ipv6 interface brief
+show ipv6 interface
+show version
+show inventory
+
+# === L1-L2: Link & Device Discovery ===
+show cdp neighbors
+show cdp neighbors detail
+show lldp neighbors
+show lldp neighbors detail
+show platform
+show slot
+
+# === L2: Data Link Layer (Switching, VLAN, STP) ===
+show vlan
+show vlan summary
+show mac address-table
+show mac address-table dynamic
+show spanning-tree summary
+show spanning-tree vlan 1
+show port-security
+show access-lists
+
+# === L3: Network Layer (Routing, IP, ARP) ===
+show ip route
+show ip route summary
+show ip cef
+show arp
+show ip arp
+show ipv6 route
+show ipv6 arp
+show ip prefix-list
+show ip prefix-list summary
+
+# === L3-L4: Routing Protocols (OSPF, BGP) ===
+show ip ospf
+show ip ospf neighbor
+show ip ospf neighbor detail
+show ip ospf database
+show ip ospf interface brief
+show ip ospf summary-address
+show ip ospf statistics
+show ip bgp
+show ip bgp summary
+show ip bgp neighbors
+show ip bgp neighbors detail
+show ip protocols
+show ip protocols summary
+
+# === System Health & Monitoring ===
+show processes cpu sorted
+show memory statistics
+show environment
+show environment alarm
+show environment power
+show environment temperature
+show environment cooling-fan
+show environment all
+show logging
+show clock
+show uptime
+
+# === Configuration ===
+show running-config
+show startup-config
+
+# === Additional Detailed Commands (for comprehensive inspection) ===
+show interfaces counters
+show interfaces counters errors
+show ip interface statistics
+show bgp summary
+show bgp neighbors
+show bgp process
+show ospf interface brief

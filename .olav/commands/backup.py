@@ -61,7 +61,8 @@ def main():
     try:
         # Import directly to avoid olav/__init__.py which loads deepagents
         from olav.tools.network import list_devices, nornir_execute
-        from olav.tools.storage_tools import save_device_config
+        from olav.tools.sync_tools import get_sync_dir, update_latest_link
+        from datetime import datetime
 
         # Parse filter
         filter_params = parse_filter(args.filter)
@@ -85,11 +86,17 @@ def main():
         else:
             commands = [f"show {args.type}-config"]
 
-        # Execute backup
+        # Execute backup to sync directory
+        sync_date = datetime.now().strftime("%Y-%m-%d")
+        sync_dir = get_sync_dir(sync_date)
         success_count = 0
         errors = []
 
         for device in device_list:
+            # Create device-specific raw directory
+            device_raw_dir = sync_dir / "raw" / device
+            device_raw_dir.mkdir(parents=True, exist_ok=True)
+
             for cmd in commands:
                 result = nornir_execute.invoke({"device": device, "command": cmd})
 
@@ -97,26 +104,32 @@ def main():
                     errors.append((device, cmd, result))
                     continue
 
-                # Determine config type
+                # Determine config type and filename
                 if "running-config" in cmd:
                     config_type = "running"
+                    filename = "show-running-config.txt"
                 elif "startup-config" in cmd:
                     config_type = "startup"
+                    filename = "show-startup-config.txt"
                 else:
                     config_type = "custom"
+                    # Normalize command name to filename
+                    cmd_safe = cmd.lower().replace(" ", "-").replace("/", "-")
+                    filename = f"{cmd_safe}.txt"
 
-                # Save config
-                save_result = save_device_config.invoke(
-                    {"device": device, "config_type": config_type, "content": result}
-                )
-
-                if "Error:" in save_result:
-                    errors.append((device, cmd, save_result))
-                else:
+                # Save raw config to data/sync/latest/raw/{device}/
+                output_file = device_raw_dir / filename
+                try:
+                    output_file.write_text(result, encoding="utf-8")
                     success_count += 1
+                except Exception as e:
+                    errors.append((device, cmd, f"Failed to save: {str(e)}"))
+
+        # Update latest link
+        update_latest_link(sync_dir)
 
         # Summary
-        print(f"\n✅ Backup Complete: {success_count} configs saved")
+        print(f"\n✅ Backup Complete: {success_count} configs saved to data/sync/{sync_date}/raw/")
         if errors:
             print(f"\n❌ Errors: {len(errors)}")
             for device, cmd, error in errors:

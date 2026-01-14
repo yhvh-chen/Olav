@@ -125,7 +125,7 @@ def discover_topology(devices: str | None = None) -> str:
 def _discover_l1_neighbors(
     conn: duckdb.DuckDBPyConnection,
     executor: NetworkExecutor,
-    db: CapabilityDatabase,
+    db: Any,
     device: str,
     platform: str,
 ) -> int:
@@ -202,7 +202,7 @@ def _discover_l1_neighbors(
 def _discover_l3_neighbors(
     conn: duckdb.DuckDBPyConnection,
     executor: NetworkExecutor,
-    db: CapabilityDatabase,
+    db: Any,
     device: str,
     platform: str,
 ) -> int:

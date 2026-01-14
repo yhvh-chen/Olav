@@ -193,31 +193,41 @@ class InspectorAgent:
         Returns:
             List of commands to execute
         """
+        from olav.core.database import get_database
+
+        # Extract commands from capabilities database based on skill intent
+        db = get_database()
         commands = []
 
-        # Extract commands from skill execution steps
-        # This is a simplified implementation - actual commands come from skill steps
-        if "interface" in skill.filename.lower():
-            commands = [
-                "show interfaces brief",
-                "show interfaces counters errors",
-            ]
-            if "Eth" in params.get("interface_filter", "*"):
-                commands[0] += f" | include {params['interface_filter']}"
+        # Search for commands based on skill type
+        skill_name = skill.filename.lower()
 
-        elif "bgp" in skill.filename.lower():
-            commands = [
-                "show ip bgp summary",
-                "show ip bgp neighbors",
-            ]
+        if "interface" in skill_name:
+            # Search for interface-related commands
+            intents = ["interface status", "interface counters", "interface statistics"]
+            for intent in intents:
+                results = db.search_capabilities(query=intent, cap_type="command", limit=5)
+                for result in results:
+                    if result["name"] not in [c for c in commands]:
+                        commands.append(result["name"])
 
-        elif "health" in skill.filename.lower():
-            commands = [
-                "show processes cpu sorted",
-                "show memory",
-                "show flash:",
-                "show environment",
-            ]
+        elif "bgp" in skill_name:
+            # Search for BGP-related commands
+            intents = ["bgp summary", "bgp neighbors", "bgp routes"]
+            for intent in intents:
+                results = db.search_capabilities(query=intent, cap_type="command", limit=5)
+                for result in results:
+                    if result["name"] not in [c for c in commands]:
+                        commands.append(result["name"])
+
+        elif "health" in skill_name:
+            # Search for health/system-related commands
+            intents = ["cpu usage", "memory usage", "flash storage", "environment status"]
+            for intent in intents:
+                results = db.search_capabilities(query=intent, cap_type="command", limit=5)
+                for result in results:
+                    if result["name"] not in [c for c in commands]:
+                        commands.append(result["name"])
 
         return commands
 

@@ -20,6 +20,7 @@ from olav.tools.knowledge_search import rrf_fusion, search_knowledge
 # Make exports available at module level
 __all__ = [
     "search_capabilities",
+    "search_capabilities_impl",
     "api_call",
     "search",
     "rrf_fusion",
@@ -27,16 +28,17 @@ __all__ = [
 ]
 
 
-@tool
-def search_capabilities(
+def search_capabilities_impl(
     query: str,
     type: Literal["command", "api", "all"] = "all",
     platform: str | None = None,
     limit: int = 20,
 ) -> str:
-    """Search available CLI commands or API endpoints.
+    """Implementation of search_capabilities (not decorated).
 
-    This tool searches the capability database for matching CLI commands or API endpoints.
+    Search available CLI commands or API endpoints.
+
+    This function searches the capability database for matching CLI commands or API endpoints.
     Use this to discover what commands are available before executing them.
 
     Args:
@@ -50,18 +52,6 @@ def search_capabilities(
 
     Returns:
         List of matching capabilities with names, descriptions, and write status
-
-    Examples:
-        >>> search_capabilities("interface", type="command", platform="cisco_ios")
-        "Found 3 capabilities:
-        1. show interface* (cisco_ios) - Read-only
-        2. show ip interface brief (cisco_ios) - Read-only
-        3. configure terminal (cisco_ios) - **REQUIRES APPROVAL**"
-
-        >>> search_capabilities("device", type="api", platform="netbox")
-        "Found 2 capabilities:
-        1. GET /dcim/devices/ (netbox) - Query device list
-        2. PATCH /dcim/devices/{id}/ (netbox) - **REQUIRES APPROVAL**"
     """
     db = get_database()
 
@@ -103,6 +93,45 @@ def search_capabilities(
         output.append(line)
 
     return "\n".join(output)
+
+
+@tool
+def search_capabilities(
+    query: str,
+    type: Literal["command", "api", "all"] = "all",
+    platform: str | None = None,
+    limit: int = 20,
+) -> str:
+    """Search available CLI commands or API endpoints.
+
+    This tool searches the capability database for matching CLI commands or API endpoints.
+    Use this to discover what commands are available before executing them.
+
+    Args:
+        query: Search keyword (e.g., "interface", "bgp", "device", "route")
+        type: Capability type to search
+            - "command": Only CLI commands
+            - "api": Only API endpoints
+            - "all": Search both (default)
+        platform: Filter by platform (e.g., "cisco_ios", "huawei_vrp", "netbox", "zabbix")
+        limit: Maximum number of results to return (default: 20)
+
+    Returns:
+        List of matching capabilities with names, descriptions, and write status
+
+    Examples:
+        >>> search_capabilities("interface", type="command", platform="cisco_ios")
+        "Found 3 capabilities:
+        1. show interface* (cisco_ios) - Read-only
+        2. show ip interface brief (cisco_ios) - Read-only
+        3. configure terminal (cisco_ios) - **REQUIRES APPROVAL**"
+
+        >>> search_capabilities("device", type="api", platform="netbox")
+        "Found 2 capabilities:
+        1. GET /dcim/devices/ (netbox) - Query device list
+        2. PATCH /dcim/devices/{id}/ (netbox) - **REQUIRES APPROVAL**"
+    """
+    return search_capabilities_impl(query=query, type=type, platform=platform, limit=limit)
 
 
 @tool

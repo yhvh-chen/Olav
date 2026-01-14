@@ -18,9 +18,12 @@ class TopologyGraph:
     This class loads topology data from DuckDB and provides NetworkX-based
     graph operations for path analysis and neighbor queries.
 
+    Uses MultiDiGraph to support multiple edges between the same node pair
+    (e.g., CDP link and OSPF link between R1-R2).
+
     Attributes:
         db_path: Path to topology database file
-        _graph: Cached NetworkX DiGraph instance
+        _graph: Cached NetworkX MultiDiGraph instance
         _loaded_at: Timestamp when graph was last loaded
     """
 
@@ -28,38 +31,38 @@ class TopologyGraph:
         """Initialize topology graph manager.
 
         Args:
-            db_path: Path to topology database (default: .olav/data/topology.db)
+            db_path: Path to topology database (default: .olav/db/network_warehouse.duckdb)
         """
         if db_path is None:
             from config.settings import settings
 
-            db_path = Path(settings.agent_dir) / "data" / "topology.db"
+            db_path = Path(settings.agent_dir) / "db" / "network_warehouse.duckdb"
 
         self.db_path = Path(db_path)
-        self._graph: nx.DiGraph | None = None
+        self._graph: nx.MultiDiGraph | None = None
         self._loaded_at: datetime | None = None
 
-    def get_graph(self, refresh: bool = False) -> nx.DiGraph:
+    def get_graph(self, refresh: bool = False) -> nx.MultiDiGraph:
         """Get the topology graph, loading if necessary.
 
         Args:
             refresh: Force reload from database
 
         Returns:
-            NetworkX DiGraph with topology data
+            NetworkX MultiDiGraph with topology data
         """
         if self._graph is None or refresh:
             self._graph = self._load_from_db()
             self._loaded_at = datetime.now()
         return self._graph
 
-    def _load_from_db(self) -> nx.DiGraph:
+    def _load_from_db(self) -> nx.MultiDiGraph:
         """Load topology from DuckDB into NetworkX graph.
 
         Returns:
-            NetworkX DiGraph with devices as nodes and links as edges
+            NetworkX MultiDiGraph with devices as nodes and links as edges
         """
-        graph = nx.DiGraph()
+        graph = nx.MultiDiGraph()
 
         # Ensure database exists
         if not self.db_path.exists():

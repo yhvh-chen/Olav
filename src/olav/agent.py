@@ -416,7 +416,7 @@ def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
         Formatted skill descriptions for prompt
     """
     skill_lines = []
-    
+
     # Group skills by intent for better organization
     skills_by_intent = {}
     for skill_id, skill in skills.items():
@@ -424,7 +424,7 @@ def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
         if intent not in skills_by_intent:
             skills_by_intent[intent] = []
         skills_by_intent[intent].append((skill_id, skill))
-    
+
     # Format each intent group
     for intent, skill_list in sorted(skills_by_intent.items()):
         skill_lines.append(f"\n### {intent.capitalize()} Tasks")
@@ -436,5 +436,5 @@ def _format_skills_for_prompt(skills: dict[str, Any]) -> str:
                 skill_lines.append(f"  Triggers: {signals}")
             else:
                 skill_lines.append(f"- **{skill_id}** ({skill.complexity}): {description}")
-    
+
     return "## Available Execution Strategies\n\nWhen approaching tasks, use these Skill-based strategies:" + "\n".join(skill_lines)
